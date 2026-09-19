@@ -129,9 +129,14 @@ export class MandateRegistry {
   private readonly consumed = new Map<string, number>();
   private readonly children = new Map<string, string[]>();
   private readonly options: RegistryOptions;
+  private pendingSpend: (hash: string) => number = () => 0;
 
   constructor(options: RegistryOptions) {
     this.options = options;
+  }
+
+  attachMeter(pendingSpend: (hash: string) => number): void {
+    this.pendingSpend = pendingSpend;
   }
 
   get(hash: string): VerifiedMandate | undefined {
@@ -141,7 +146,15 @@ export class MandateRegistry {
   remaining(hash: string): number {
     const m = this.mandates.get(hash);
     if (!m) throw new Error(`unknown mandate ${hash}`);
-    return m.mandate.limit_usd - (this.allocated.get(hash) ?? 0) - (this.consumed.get(hash) ?? 0);
+    return m.mandate.limit_usd - this.allocatedTo(hash) - this.settled(hash) - this.pendingSpend(hash);
+  }
+
+  allocatedTo(hash: string): number {
+    return this.allocated.get(hash) ?? 0;
+  }
+
+  settled(hash: string): number {
+    return this.consumed.get(hash) ?? 0;
   }
 
   childrenOf(hash: string): string[] {
