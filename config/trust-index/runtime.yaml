@@ -1,0 +1,20 @@
+listen:
+  addr: ":8090"
+
+db:
+  path: "/tmp/burn402-trust-index.db"
+
+admin:
+  requireKey: false
+
+log:
+  level: info
+
+signals:
+  path: score-signals.yaml
+
+classify:
+  untrustedThreshold: 20
+  transactionalThreshold: 50
+  fiduciaryThreshold: 80
+  identityFiduciaryThreshold: 90

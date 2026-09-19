@@ -9,8 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "register-agents": "tsx scripts/register-agents.ts",
-    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts",
-    "vultr:sweep": "tsx scripts/vultr-sweep.ts"
+    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 BURN402_LIVE_TRUST=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts lib/trust/live.test.ts",
+    "vultr:sweep": "tsx scripts/vultr-sweep.ts",
+    "trust-index": "agent-trust-discovery/bin/agent-trust-discovery -config config/trust-index/runtime.yaml"
   },
   "dependencies": {
     "@ardrive/turbo-upload": "^0.3.0",

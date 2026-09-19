@@ -1,0 +1,4 @@
+signals:
+  - id: burn402.behavior.score
+    dimension: behavior
+    threshold: 70
