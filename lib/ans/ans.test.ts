@@ -8,6 +8,7 @@ import { kidFor, MandateError, signMandate, verifyMandate } from "../mandate";
 import {
   AnsError,
   didKeyToJwk,
+  jwkToDidKey,
   parseRootKeys,
   rfc9162RootFromProof,
   sigStructure,
@@ -165,15 +166,20 @@ describe("did:key", () => {
 
   it("round-trips a freshly generated Ed25519 key", async () => {
     const { publicKey } = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
-    const x = Buffer.from((await exportJWK(publicKey)).x!, "base64url");
-    const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let n = BigInt(`0x${Buffer.concat([Buffer.from([0xed, 0x01]), x]).toString("hex")}`);
-    let s = "";
-    while (n > BigInt(0)) {
-      s = A[Number(n % BigInt(58))] + s;
-      n /= BigInt(58);
-    }
-    expect(didKeyToJwk(`did:key:z${s}`).x).toBe(x.toString("base64url"));
+    const jwk = await exportJWK(publicKey);
+    const did = jwkToDidKey(jwk);
+    expect(did).toMatch(/^did:key:z6Mk/);
+    expect(didKeyToJwk(did).x).toBe(jwk.x);
+  });
+
+  it("re-encodes the sealed TL did:key byte for byte", () => {
+    const did = identityBadge.payload?.producer?.event?.value ?? identityBadge.value;
+    expect(jwkToDidKey(didKeyToJwk(did))).toBe(did);
+  });
+
+  it("refuses to encode non-Ed25519 keys", () => {
+    expect(() => jwkToDidKey({ kty: "EC", crv: "P-256", x: "AA", y: "AA" })).toThrow(AnsError);
+    expect(() => jwkToDidKey({ kty: "OKP", crv: "Ed25519", x: "AAAA" })).toThrow(AnsError);
   });
 
   it("rejects non-Ed25519 and non-did:key values", () => {

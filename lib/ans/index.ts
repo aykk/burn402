@@ -11,7 +11,7 @@ export {
   type RootKeys,
   type StatusToken,
 } from "./cose";
-export { didKeyToJwk } from "./didkey";
+export { didKeyToJwk, jwkToDidKey } from "./didkey";
 export {
   HttpTlSource,
   TransparencyLogDirectory,
