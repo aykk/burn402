@@ -12,13 +12,21 @@ export type Lease = {
 };
 
 export type ProvisionRefusal = {
-  code: RefusalCode;
+  code: RefusalCode | "PROVIDER_ERROR";
   detail: string;
 };
 
 export type ReapReason = "BUDGET_EXHAUSTED" | "MANDATE_EXPIRED";
 
 export type BurnEvent =
+  | {
+      type: "PROVISION_FAILED";
+      at: number;
+      mandate: string;
+      plan: string;
+      code: "PROVIDER_ERROR";
+      detail: string;
+    }
   | {
       type: "PROVISION_REFUSED";
       at: number;
@@ -157,7 +165,12 @@ export class Broker {
       return this.refuse(hash, spec, "WINDOW_EXPIRED", `now ${now} at or after effective_exp ${this.effectiveExp(hash)}`);
     }
 
-    const hourly = await this.resource.quote(spec);
+    let hourly: number;
+    try {
+      hourly = await this.resource.quote(spec);
+    } catch (error) {
+      return this.providerFailure(hash, spec, error);
+    }
     if (hourly > m.rate_usd_hr + EPSILON) {
       return this.refuse(hash, spec, "RATE_CEILING_EXCEEDED", `plan ${hourly.toFixed(2)}/hr > mandate rate ${m.rate_usd_hr.toFixed(2)}/hr`);
     }
@@ -175,7 +188,12 @@ export class Broker {
       return this.refuse(hash, spec, "BUDGET_EXCEEDED", `remaining ${remaining.toFixed(2)} <= 0`);
     }
 
-    const handle = await this.resource.provision(spec);
+    let handle: string;
+    try {
+      handle = await this.resource.provision(spec);
+    } catch (error) {
+      return this.providerFailure(hash, spec, error);
+    }
     const lease: Lease = { handle, mandate: hash, spec, hourlyUsd: hourly, startedAt: now };
     this.leases.set(handle, lease);
     this.emit({
@@ -270,6 +288,12 @@ export class Broker {
   private refuse(hash: string, spec: Spec, code: RefusalCode, detail: string): ProvisionResult {
     this.emit({ type: "PROVISION_REFUSED", at: this.now(), mandate: hash, plan: spec.plan, code, detail });
     return { ok: false, refusal: { code, detail } };
+  }
+
+  private providerFailure(hash: string, spec: Spec, error: unknown): ProvisionResult {
+    if (!(error instanceof Error)) throw error;
+    this.emit({ type: "PROVISION_FAILED", at: this.now(), mandate: hash, plan: spec.plan, code: "PROVIDER_ERROR", detail: error.message });
+    return { ok: false, refusal: { code: "PROVIDER_ERROR", detail: error.message } };
   }
 
   private emit(event: BurnEvent): void {

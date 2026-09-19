@@ -10,3 +10,12 @@ export {
   type ProvisionResult,
   type ReapReason,
 } from "./broker";
+export {
+  BURN402_TAG,
+  UBUNTU_24_04,
+  VultrError,
+  VultrResource,
+  type InstanceState,
+  type VultrErrorCode,
+  type VultrOptions,
+} from "./vultr";
