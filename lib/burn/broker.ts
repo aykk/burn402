@@ -62,6 +62,8 @@ export type BurnEvent =
 
 export type ProvisionResult = { ok: true; lease: Lease } | { ok: false; refusal: ProvisionRefusal };
 
+export type PrecheckResult = { ok: true; hourlyUsd: number } | { ok: false; refusal: ProvisionRefusal };
+
 export type MandateStatus = {
   mandate: string;
   jti: string;
@@ -151,7 +153,7 @@ export class Broker {
     };
   }
 
-  async provision(hash: string, spec: Spec): Promise<ProvisionResult> {
+  async precheck(hash: string, spec: Spec): Promise<PrecheckResult> {
     const now = this.now();
     const verified = this.registry.get(hash);
     if (!verified) return this.refuse(hash, spec, "CHAIN_BROKEN", `mandate ${hash} is not admitted`);
@@ -187,6 +189,14 @@ export class Broker {
     if (remaining <= EPSILON) {
       return this.refuse(hash, spec, "BUDGET_EXCEEDED", `remaining ${remaining.toFixed(2)} <= 0`);
     }
+    return { ok: true, hourlyUsd: hourly };
+  }
+
+  async provision(hash: string, spec: Spec): Promise<ProvisionResult> {
+    const checked = await this.precheck(hash, spec);
+    if (!checked.ok) return checked;
+    const hourly = checked.hourlyUsd;
+    const now = this.now();
 
     let handle: string;
     try {
@@ -285,12 +295,12 @@ export class Broker {
     return verified.mandate;
   }
 
-  private refuse(hash: string, spec: Spec, code: RefusalCode, detail: string): ProvisionResult {
+  private refuse(hash: string, spec: Spec, code: RefusalCode, detail: string): { ok: false; refusal: ProvisionRefusal } {
     this.emit({ type: "PROVISION_REFUSED", at: this.now(), mandate: hash, plan: spec.plan, code, detail });
     return { ok: false, refusal: { code, detail } };
   }
 
-  private providerFailure(hash: string, spec: Spec, error: unknown): ProvisionResult {
+  private providerFailure(hash: string, spec: Spec, error: unknown): { ok: false; refusal: ProvisionRefusal } {
     if (!(error instanceof Error)) throw error;
     this.emit({ type: "PROVISION_FAILED", at: this.now(), mandate: hash, plan: spec.plan, code: "PROVIDER_ERROR", detail: error.message });
     return { ok: false, refusal: { code: "PROVIDER_ERROR", detail: error.message } };

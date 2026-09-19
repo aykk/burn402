@@ -6,6 +6,7 @@ export {
   type BurnEvent,
   type Lease,
   type MandateStatus,
+  type PrecheckResult,
   type ProvisionRefusal,
   type ProvisionResult,
   type ReapReason,

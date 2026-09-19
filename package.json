@@ -9,11 +9,15 @@
     "lint": "eslint",
     "test": "vitest run",
     "register-agents": "tsx scripts/register-agents.ts",
-    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts",
+    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts",
     "vultr:sweep": "tsx scripts/vultr-sweep.ts"
   },
   "dependencies": {
     "@ardrive/turbo-upload": "^0.3.0",
+    "@x402/core": "^2.26.0",
+    "@x402/fetch": "^2.26.0",
+    "@x402/next": "^2.26.0",
+    "@x402/svm": "^2.26.0",
     "cbor-x": "^1.6.6",
     "jose": "^6.2.12",
     "next": "16.3.5",
