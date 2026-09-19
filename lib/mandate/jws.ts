@@ -40,13 +40,22 @@ export function kidFor(publicJwk: JWK): Promise<string> {
   return calculateJwkThumbprint({ kty: publicJwk.kty, crv: publicJwk.crv, x: publicJwk.x } as JWK);
 }
 
-export async function signMandate(mandate: Mandate, key: SigningKey): Promise<SignedMandate> {
-  const checked = parseMandate(mandate);
-  const payload = new TextEncoder().encode(JSON.stringify(checked));
-  const jws = await new FlattenedSign(payload)
-    .setProtectedHeader({ alg: ALG, kid: key.kid, typ: MANDATE_TYP })
-    .sign(key.privateKey);
+export type VerifiedJws = {
+  payload: unknown;
+  iss: string;
+  kid: string;
+  hash: string;
+  compact: string;
+};
+
+export async function signJws(value: unknown, key: SigningKey, typ: string): Promise<SignedMandate> {
+  const payload = new TextEncoder().encode(JSON.stringify(value));
+  const jws = await new FlattenedSign(payload).setProtectedHeader({ alg: ALG, kid: key.kid, typ }).sign(key.privateKey);
   return { protected: jws.protected!, payload: jws.payload, signature: jws.signature };
+}
+
+export async function signMandate(mandate: Mandate, key: SigningKey): Promise<SignedMandate> {
+  return signJws(parseMandate(mandate), key, MANDATE_TYP);
 }
 
 export function toCompact(jws: SignedMandate): string {
@@ -87,7 +96,7 @@ function decodeJson(segment: string, what: string): unknown {
   }
 }
 
-function readHeader(segment: string): { alg: string; kid: string } {
+function readHeader(segment: string, typ: string): { alg: string; kid: string } {
   const header = decodeJson(segment, "protected header");
   if (typeof header !== "object" || header === null || Array.isArray(header)) {
     throw new MandateError("MALFORMED_JWS", "protected header must be an object");
@@ -96,7 +105,7 @@ function readHeader(segment: string): { alg: string; kid: string } {
   const forbidden = Object.keys(h).filter((k) => !ALLOWED_HEADER.has(k));
   if (forbidden.length > 0) throw new MandateError("FORBIDDEN_HEADER", `header members not allowed: ${forbidden.join(", ")}`);
   if (h.alg !== ALG) throw new MandateError("UNSUPPORTED_ALG", `alg must be ${ALG}, got ${String(h.alg)}`);
-  if (h.typ !== MANDATE_TYP) throw new MandateError("MALFORMED_JWS", `typ must be ${MANDATE_TYP}`);
+  if (h.typ !== typ) throw new MandateError("MALFORMED_JWS", `typ must be ${typ}`);
   if (typeof h.kid !== "string" || h.kid.length === 0) throw new MandateError("MALFORMED_JWS", "kid is required");
   return { alg: h.alg, kid: h.kid };
 }
@@ -111,9 +120,9 @@ async function selectKey(keys: JWK[], kid: string, iss: string): Promise<JWK> {
   throw new MandateError("UNKNOWN_KEY", `no Ed25519 key with kid ${kid} published for ${iss}`);
 }
 
-export async function verifyMandate(input: unknown, resolveKeys: KeyResolver): Promise<VerifiedMandate> {
+export async function verifyJws(input: unknown, resolveKeys: KeyResolver, typ: string): Promise<VerifiedJws> {
   const jws = assertShape(input);
-  const { kid } = readHeader(jws.protected);
+  const { kid } = readHeader(jws.protected, typ);
 
   const claimed = decodeJson(jws.payload, "payload") as Record<string, unknown> | null;
   const iss = claimed?.iss;
@@ -130,7 +139,12 @@ export async function verifyMandate(input: unknown, resolveKeys: KeyResolver): P
     throw new MandateError("SIGNATURE_INVALID", `signature does not verify under ${iss} kid ${kid}`);
   }
 
-  const mandate = parseMandate(JSON.parse(new TextDecoder().decode(verifiedPayload)));
+  const payload: unknown = JSON.parse(new TextDecoder().decode(verifiedPayload));
   const compact = toCompact(jws);
-  return { mandate, kid, hash: mandateHash(compact), compact };
+  return { payload, iss, kid, hash: mandateHash(compact), compact };
+}
+
+export async function verifyMandate(input: unknown, resolveKeys: KeyResolver): Promise<VerifiedMandate> {
+  const verified = await verifyJws(input, resolveKeys, MANDATE_TYP);
+  return { mandate: parseMandate(verified.payload), kid: verified.kid, hash: verified.hash, compact: verified.compact };
 }

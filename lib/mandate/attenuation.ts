@@ -58,50 +58,47 @@ function usd(n: number): string {
   return n.toFixed(2);
 }
 
-export function checkAttenuation(parent: VerifiedMandate, child: VerifiedMandate, parentRemainingUsd: number): Refusal | null {
+export function attenuationFindings(parent: VerifiedMandate, child: VerifiedMandate, parentRemainingUsd: number): Refusal[] {
   const P = parent.mandate;
   const C = child.mandate;
+  const findings: Refusal[] = [];
 
   const escalated = C.scope.filter((s) => !P.scope.includes(s));
   if (escalated.length > 0) {
-    return { rule: 1, code: "SCOPE_ESCALATION", detail: `scope ${escalated.join(", ")} not held by parent` };
+    findings.push({ rule: 1, code: "SCOPE_ESCALATION", detail: `scope ${escalated.join(", ")} not held by parent` });
   }
   if (C.limit_usd > parentRemainingUsd + CENT) {
-    return {
-      rule: 2,
-      code: "BUDGET_EXCEEDED",
-      detail: `limit ${usd(C.limit_usd)} > parent remaining ${usd(parentRemainingUsd)}`,
-    };
+    findings.push({ rule: 2, code: "BUDGET_EXCEEDED", detail: `limit ${usd(C.limit_usd)} > parent remaining ${usd(parentRemainingUsd)}` });
   }
   if (C.rate_usd_hr > P.rate_usd_hr + CENT) {
-    return {
-      rule: 3,
-      code: "RATE_CEILING_EXCEEDED",
-      detail: `rate ${usd(C.rate_usd_hr)}/hr > parent rate ${usd(P.rate_usd_hr)}/hr`,
-    };
+    findings.push({ rule: 3, code: "RATE_CEILING_EXCEEDED", detail: `rate ${usd(C.rate_usd_hr)}/hr > parent rate ${usd(P.rate_usd_hr)}/hr` });
   }
   if (C.exp > P.exp) {
-    return { rule: 4, code: "WINDOW_EXPIRED", detail: `exp ${C.exp} after parent exp ${P.exp}` };
+    findings.push({ rule: 4, code: "WINDOW_EXPIRED", detail: `exp ${C.exp} after parent exp ${P.exp}` });
   }
   if (C.nbf < P.nbf) {
-    return { rule: 5, code: "WINDOW_EXPIRED", detail: `nbf ${C.nbf} before parent nbf ${P.nbf}` };
+    findings.push({ rule: 5, code: "WINDOW_EXPIRED", detail: `nbf ${C.nbf} before parent nbf ${P.nbf}` });
   }
   if (C.depth !== P.depth + 1) {
-    return { rule: 6, code: "CHAIN_BROKEN", detail: `depth ${C.depth} != parent depth ${P.depth} + 1` };
+    findings.push({ rule: 6, code: "CHAIN_BROKEN", detail: `depth ${C.depth} != parent depth ${P.depth} + 1` });
   }
   if (C.depth >= P.max_depth) {
-    return { rule: 7, code: "DEPTH_EXCEEDED", detail: `depth ${C.depth} >= parent max_depth ${P.max_depth}` };
+    findings.push({ rule: 7, code: "DEPTH_EXCEEDED", detail: `depth ${C.depth} >= parent max_depth ${P.max_depth}` });
   }
   if (C.max_depth > P.max_depth) {
-    return { rule: 8, code: "DEPTH_EXCEEDED", detail: `max_depth ${C.max_depth} > parent max_depth ${P.max_depth}` };
+    findings.push({ rule: 8, code: "DEPTH_EXCEEDED", detail: `max_depth ${C.max_depth} > parent max_depth ${P.max_depth}` });
   }
   if (C.iss !== P.sub) {
-    return { rule: 9, code: "CHAIN_BROKEN", detail: `iss ${C.iss} != parent sub ${P.sub}` };
+    findings.push({ rule: 9, code: "CHAIN_BROKEN", detail: `iss ${C.iss} != parent sub ${P.sub}` });
   }
   if (C.parent !== parent.hash) {
-    return { rule: 10, code: "CHAIN_BROKEN", detail: `parent ${C.parent} != sha256(parent) ${parent.hash}` };
+    findings.push({ rule: 10, code: "CHAIN_BROKEN", detail: `parent ${C.parent} != sha256(parent) ${parent.hash}` });
   }
-  return null;
+  return findings;
+}
+
+export function checkAttenuation(parent: VerifiedMandate, child: VerifiedMandate, parentRemainingUsd: number): Refusal | null {
+  return attenuationFindings(parent, child, parentRemainingUsd)[0] ?? null;
 }
 
 const SIGNATURE_ERRORS = new Set(["SIGNATURE_INVALID", "UNKNOWN_KEY", "UNSUPPORTED_ALG", "FORBIDDEN_HEADER"]);

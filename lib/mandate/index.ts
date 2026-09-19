@@ -3,6 +3,8 @@ export { parseMandate, HASH_PATTERN, type Mandate } from "./mandate";
 export {
   signMandate,
   verifyMandate,
+  signJws,
+  verifyJws,
   toCompact,
   fromCompact,
   mandateHash,
@@ -12,8 +14,10 @@ export {
   type SigningKey,
   type KeyResolver,
   type VerifiedMandate,
+  type VerifiedJws,
 } from "./jws";
 export {
+  attenuationFindings,
   checkAttenuation,
   MandateRegistry,
   type AdmitResult,
