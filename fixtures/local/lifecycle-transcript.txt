@@ -1,0 +1,847 @@
+
+━━━ Demo target ━━━
+  ansName   ans://v1.0.0.demo-ce6eda48.example.com
+  host      demo-ce6eda48.example.com
+  version   1.0.0
+
+━━━ 0. Generate identity CSR ━━━
+✔ CSR for ans://v1.0.0.demo-ce6eda48.example.com written to /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/csr/csr.pem
+
+━━━ 1. POST /v2/ans/agents ━━━
+→ POST http://localhost:18080/v2/ans/agents
+{
+  "agentDisplayName": "demo-agent",
+  "agentDescription": "A demo agent",
+  "version": "1.0.0",
+  "agentHost": "demo-ce6eda48.example.com",
+  "endpoints": [
+    {
+      "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+      "metaDataUrl": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "protocol": "MCP",
+      "transports": [
+        "SSE"
+      ]
+    }
+  ],
+  "identityCsrPEM": "-----BEGIN CERTIFICATE REQUEST-----\nMIIBMDCB1wIBADAxMS8wLQYDVQQDDCZhbnM6Ly92MS4wLjAuZGVtby1jZTZlZGE0\nOC5leGFtcGxlLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKIktxUn4lia\nBm6mc353DqhGrJCNZ7BTH623z74eglSzlr3em29QX54hvdgJLMGEn76oxkV7OY8H\nkTCIyghZV+GgRDBCBgkqhkiG9w0BCQ4xNTAzMDEGA1UdEQQqMCiGJmFuczovL3Yx\nLjAuMC5kZW1vLWNlNmVkYTQ4LmV4YW1wbGUuY29tMAoGCCqGSM49BAMCA0gAMEUC\nIQDa6ykN02y2aKJeAa4qur8f5Jbt2V8JyRlkyXCmoTDjHgIgKOXruJVw0Q5t5McG\nve3CFWp1oywJjNkNpk7W/KtzMu4=\n-----END CERTIFICATE REQUEST-----",
+  "serverCsrPEM": "-----BEGIN CERTIFICATE REQUEST-----\nMIIBFzCBvQIBADAkMSIwIAYDVQQDDBlkZW1vLWNlNmVkYTQ4LmV4YW1wbGUuY29t\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5emiqYp2MxmakNhdygfUx9a+5QVX\nqLJ+dXbZS3pJbGhLZ6MLGc8eZeE/yGN+y5jGpVeluSdJN01Penym++k6yaA3MDUG\nCSqGSIb3DQEJDjEoMCYwJAYDVR0RBB0wG4IZZGVtby1jZTZlZGE0OC5leGFtcGxl\nLmNvbTAKBggqhkjOPQQDAgNJADBGAiEA4ANTAlfNrm1lDp1rBjfVVUUhao9PY8gs\njv4hu71fqOUCIQDU+bpw3VhteVDMZXIuq1nqH4cgmTBSALxazwNpmqZjMg==\n-----END CERTIFICATE REQUEST-----"
+}
+← 202
+{
+  "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+  "status": "PENDING_VALIDATION",
+  "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+  "challenges": [
+    {
+      "type": "DNS_01",
+      "token": "2OUpEMzEvkxr-SHkw-G8H7rFrx9VIEqyDFusIlcEcCM",
+      "dnsRecord": {
+        "name": "_acme-challenge.demo-ce6eda48.example.com",
+        "type": "TXT",
+        "value": "2OUpEMzEvkxr-SHkw-G8H7rFrx9VIEqyDFusIlcEcCM"
+      },
+      "expiresAt": "2026-09-20T10:42:00Z"
+    },
+    {
+      "type": "HTTP_01",
+      "token": "13e7HgigXBKJ2EkvkyWS28gqEapUKJWDLVzOOLEi9P0",
+      "httpPath": "/.well-known/acme-challenge/13e7HgigXBKJ2EkvkyWS28gqEapUKJWDLVzOOLEi9P0",
+      "expiresAt": "2026-09-20T10:42:00Z"
+    }
+  ],
+  "dnsRecords": [],
+  "nextSteps": [
+    {
+      "action": "CONFIGURE_DNS",
+      "description": "Publish one challenge artifact from challenges[]: the DNS-01 TXT record, or the HTTP-01 resource at its httpPath",
+      "endpoint": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme"
+    },
+    {
+      "action": "VALIDATE_DOMAIN",
+      "description": "Call POST /v2/ans/agents/{agentId}/verify-acme once the challenge artifact is live",
+      "endpoint": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme"
+    }
+  ],
+  "expiresAt": "2026-09-20T10:42:00Z",
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+    }
+  ]
+}
+✔ agentId=e234e6a6-86c7-45bc-9bba-a085635f53b7
+
+━━━ 2. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7  (expect PENDING_VALIDATION) ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7
+← 200
+{
+  "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+  "agentDisplayName": "demo-agent",
+  "agentDescription": "A demo agent",
+  "version": "1.0.0",
+  "agentHost": "demo-ce6eda48.example.com",
+  "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+  "agentStatus": "PENDING_VALIDATION",
+  "endpoints": [
+    {
+      "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+      "metaDataUrl": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "protocol": "MCP",
+      "transports": [
+        "SSE"
+      ]
+    }
+  ],
+  "registrationTimestamp": "2026-09-19T10:42:00Z",
+  "registrationPending": {
+    "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+    "status": "PENDING_VALIDATION",
+    "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+    "challenges": [
+      {
+        "type": "DNS_01",
+        "token": "2OUpEMzEvkxr-SHkw-G8H7rFrx9VIEqyDFusIlcEcCM",
+        "dnsRecord": {
+          "name": "_acme-challenge.demo-ce6eda48.example.com",
+          "type": "TXT",
+          "value": "2OUpEMzEvkxr-SHkw-G8H7rFrx9VIEqyDFusIlcEcCM"
+        },
+        "expiresAt": "2026-09-20T10:42:00Z"
+      },
+      {
+        "type": "HTTP_01",
+        "token": "13e7HgigXBKJ2EkvkyWS28gqEapUKJWDLVzOOLEi9P0",
+        "httpPath": "/.well-known/acme-challenge/13e7HgigXBKJ2EkvkyWS28gqEapUKJWDLVzOOLEi9P0",
+        "expiresAt": "2026-09-20T10:42:00Z"
+      }
+    ],
+    "dnsRecords": null,
+    "nextSteps": [
+      {
+        "action": "CONFIGURE_DNS",
+        "description": "Publish one challenge artifact from challenges[]: the DNS-01 TXT record, or the HTTP-01 resource at its httpPath",
+        "endpoint": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme"
+      },
+      {
+        "action": "VALIDATE_DOMAIN",
+        "description": "Call POST /v2/ans/agents/{agentId}/verify-acme once the challenge artifact is live",
+        "endpoint": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme"
+      }
+    ],
+    "expiresAt": "2026-09-20T10:42:00Z",
+    "links": [
+      {
+        "rel": "self",
+        "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+      }
+    ]
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+    }
+  ]
+}
+
+━━━ 3. POST /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme  (→ PENDING_DNS, issues identity + server certs) ━━━
+→ POST http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-acme
+← 202
+{
+  "status": "PENDING_DNS",
+  "phase": "DNS_PROVISIONING",
+  "completedSteps": [
+    "DOMAIN_VALIDATION",
+    "CERTIFICATE_ISSUANCE"
+  ],
+  "pendingSteps": [
+    "DNS_PROVISIONING"
+  ],
+  "createdAt": "2026-09-19T10:42:00Z",
+  "updatedAt": "2026-09-19T06:42:00-04:00",
+  "expiresAt": "2026-09-20T10:42:00Z"
+}
+
+━━━ 4. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7  (PENDING_DNS — production dnsRecords now materialized) ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7
+← 200
+{
+  "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+  "agentDisplayName": "demo-agent",
+  "agentDescription": "A demo agent",
+  "version": "1.0.0",
+  "agentHost": "demo-ce6eda48.example.com",
+  "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+  "agentStatus": "PENDING_DNS",
+  "endpoints": [
+    {
+      "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+      "metaDataUrl": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "protocol": "MCP",
+      "transports": [
+        "SSE"
+      ]
+    }
+  ],
+  "registrationTimestamp": "2026-09-19T10:42:00Z",
+  "registrationPending": {
+    "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+    "status": "PENDING_DNS",
+    "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+    "dnsRecords": [
+      {
+        "name": "demo-ce6eda48.example.com",
+        "type": "SVCB",
+        "value": "1 . alpn=mcp port=443 key65400=https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json key65402=mcp",
+        "purpose": "DISCOVERY",
+        "required": true,
+        "ttl": 3600
+      },
+      {
+        "name": "_ans-badge.demo-ce6eda48.example.com",
+        "type": "TXT",
+        "value": "v=ans-badge1; version=v1.0.0; url=https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7",
+        "purpose": "BADGE",
+        "required": true,
+        "ttl": 3600
+      },
+      {
+        "name": "_443._tcp.demo-ce6eda48.example.com",
+        "type": "TLSA",
+        "value": "3 0 1 2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+        "purpose": "CERTIFICATE_BINDING",
+        "required": false,
+        "ttl": 3600
+      }
+    ],
+    "nextSteps": [
+      {
+        "action": "VERIFY_DNS",
+        "description": "Verify that all required DNS records are configured",
+        "endpoint": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-dns"
+      }
+    ],
+    "expiresAt": "2026-09-20T10:42:00Z",
+    "links": [
+      {
+        "rel": "self",
+        "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+      }
+    ]
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+    }
+  ]
+}
+
+━━━ 5. POST /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-dns  (→ ACTIVE) ━━━
+noop DNS verifier accepts any operator DNS state; production plugs in a real verifier
+→ POST http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/verify-dns
+← 202
+{
+  "status": "ACTIVE",
+  "phase": "COMPLETED",
+  "completedSteps": [
+    "DOMAIN_VALIDATION",
+    "CERTIFICATE_ISSUANCE",
+    "DNS_PROVISIONING"
+  ],
+  "createdAt": "2026-09-19T10:42:00Z",
+  "updatedAt": "2026-09-19T06:42:00-04:00",
+  "expiresAt": "2026-09-20T10:42:00Z"
+}
+
+━━━ 6. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7  (now ACTIVE) ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7
+← 200
+{
+  "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+  "agentDisplayName": "demo-agent",
+  "agentDescription": "A demo agent",
+  "version": "1.0.0",
+  "agentHost": "demo-ce6eda48.example.com",
+  "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+  "agentStatus": "ACTIVE",
+  "endpoints": [
+    {
+      "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+      "metaDataUrl": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "protocol": "MCP",
+      "transports": [
+        "SSE"
+      ]
+    }
+  ],
+  "registrationTimestamp": "2026-09-19T10:42:00Z",
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+    }
+  ]
+}
+
+━━━ 7. GET /v2/ans/agents?status=ALL  (list mine) ━━━
+→ GET http://localhost:18080/v2/ans/agents?status=ALL
+← 200
+{
+  "items": [
+    {
+      "agentId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+      "agentDisplayName": "demo-agent",
+      "agentDescription": "A demo agent",
+      "version": "1.0.0",
+      "agentHost": "demo-ce6eda48.example.com",
+      "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+      "status": "ACTIVE",
+      "ttl": 300,
+      "registrationTimestamp": "2026-09-19T10:42:00Z",
+      "endpoints": [
+        {
+          "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+          "metaDataUrl": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+          "protocol": "MCP",
+          "transports": [
+            "SSE"
+          ]
+        }
+      ],
+      "links": [
+        {
+          "rel": "self",
+          "href": "/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+        }
+      ]
+    }
+  ],
+  "returnedCount": 1,
+  "limit": 20,
+  "nextCursor": null,
+  "hasMore": false
+}
+
+━━━ 8. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/certificates/identity ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/certificates/identity
+← 200
+[
+  {
+    "csrId": "ce2d84ed-ea8b-4e76-87bf-9e33aea34298",
+    "certificateSubject": "CN=ans://v1.0.0.demo-ce6eda48.example.com",
+    "certificateIssuer": "CN=ANS Demo CA Identity CA,O=ANS Demo CA",
+    "certificateSerialNumber": "342cead3df093ea5c377be6e2f88ffc3",
+    "certificateValidFrom": "2026-09-19T10:41:00Z",
+    "certificateValidTo": "2026-12-18T10:42:00Z",
+    "certificatePEM": "-----BEGIN CERTIFICATE-----\nMIIB8jCCAZigAwIBAgIQNCzq098JPqXDd75uL4j/wzAKBggqhkjOPQQDAjA4MRQw\nEgYDVQQKEwtBTlMgRGVtbyBDQTEgMB4GA1UEAxMXQU5TIERlbW8gQ0EgSWRlbnRp\ndHkgQ0EwHhcNMjYwOTE5MTA0MTAwWhcNMjYxMjE4MTA0MjAwWjAxMS8wLQYDVQQD\nEyZhbnM6Ly92MS4wLjAuZGVtby1jZTZlZGE0OC5leGFtcGxlLmNvbTBZMBMGByqG\nSM49AgEGCCqGSM49AwEHA0IABKIktxUn4liaBm6mc353DqhGrJCNZ7BTH623z74e\nglSzlr3em29QX54hvdgJLMGEn76oxkV7OY8HkTCIyghZV+GjgYowgYcwDgYDVR0P\nAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHwYD\nVR0jBBgwFoAUAt55wvn+AytPNzIzEY/QxocRWHAwMQYDVR0RBCowKIYmYW5zOi8v\ndjEuMC4wLmRlbW8tY2U2ZWRhNDguZXhhbXBsZS5jb20wCgYIKoZIzj0EAwIDSAAw\nRQIhAP/krp7Yf7r1c6LHRXF79R8E3pfgnyEniAFaXf4k4CKtAiBkSUbtjAQ14rJ3\n6ps8BJXVa+XkqIJiQ7427lXc1XVTMw==\n-----END CERTIFICATE-----\n",
+    "chainPEM": "-----BEGIN CERTIFICATE-----\nMIIBsDCCAVagAwIBAgIQcJr8OepHg8WTJpFUq7OMDTAKBggqhkjOPQQDAjA4MRQw\nEgYDVQQKEwtBTlMgRGVtbyBDQTEgMB4GA1UEAxMXQU5TIERlbW8gQ0EgSWRlbnRp\ndHkgQ0EwHhcNMjYwOTE5MTA0MDQ3WhcNMjcwOTE5MTA0MTQ3WjA4MRQwEgYDVQQK\nEwtBTlMgRGVtbyBDQTEgMB4GA1UEAxMXQU5TIERlbW8gQ0EgSWRlbnRpdHkgQ0Ew\nWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASVMZrrbOl5qW6feTSHfjIJa7rLek0p\naBjNOpcrBMW0pBmzEn9KjtApuMbPCbPiID2VH2D+LYcCRZKqMQdfKfgho0IwQDAO\nBgNVHQ8BAf8EBAMCAoQwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUAt55wvn+\nAytPNzIzEY/QxocRWHAwCgYIKoZIzj0EAwIDSAAwRQIhANGUUtN/8iyqjaqmB1K+\nvMGIoRxGWtI7V/vnQXAUr7FkAiB/sB9V9zc6dhUy1wn5IXKid23ECCR5RlPZMs6J\n0Sl2yw==\n-----END CERTIFICATE-----\n",
+    "certificatePublicKeyAlgorithm": "ECDSA",
+    "certificateSignatureAlgorithm": "ECDSA-SHA256"
+  }
+]
+
+━━━ 9. Confirm the inline-sealed AGENT_REGISTERED leaf is durable in the TL ━━━
+✔ TL has the AGENT_REGISTERED leaf (sealed inline at activation)
+
+━━━ 10. TL: GET /v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/audit ━━━
+→ GET http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/audit
+← 200
+{
+  "records": [
+    {
+      "merkleProof": {
+        "leafHash": "5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6",
+        "leafIndex": 0,
+        "rootHash": "XuD+HSqIlKoxdLKDhQS/0yU02+7PHSUayCptBSTIQqY=",
+        "treeSize": 1,
+        "treeVersion": 1
+      },
+      "payload": {
+        "logId": "01a0b942-3bea-76a3-ac9a-f8fb7036ab17",
+        "producer": {
+          "event": {
+            "agent": {
+              "host": "demo-ce6eda48.example.com",
+              "name": "demo-agent",
+              "version": "1.0.0"
+            },
+            "ansId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+            "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+            "attestations": {
+              "dnsRecordsProvisioned": [
+                {
+                  "data": "1 . alpn=mcp port=443 key65400=https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json key65402=mcp",
+                  "name": "demo-ce6eda48.example.com",
+                  "type": "SVCB"
+                },
+                {
+                  "data": "v=ans-badge1; version=v1.0.0; url=https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7",
+                  "name": "_ans-badge.demo-ce6eda48.example.com",
+                  "type": "TXT"
+                },
+                {
+                  "data": "3 0 1 2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+                  "name": "_443._tcp.demo-ce6eda48.example.com",
+                  "type": "TLSA"
+                }
+              ],
+              "domainValidation": "ACME-DNS-01",
+              "identityCerts": [
+                {
+                  "fingerprint": "SHA256:643f738f8018d042b7ec036147c52faa36cd531c77c21f843db07923bc94144f",
+                  "notAfter": "2026-12-18T10:42:00Z",
+                  "type": "X509-OV-CLIENT"
+                }
+              ],
+              "serverCerts": [
+                {
+                  "fingerprint": "SHA256:2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+                  "notAfter": "2026-12-18T10:42:00Z",
+                  "type": "X509-DV-SERVER"
+                }
+              ]
+            },
+            "eventType": "AGENT_REGISTERED",
+            "expiresAt": "2026-12-18T10:42:00Z",
+            "issuedAt": "2026-09-19T10:42:00Z",
+            "raId": "ans-ra-local",
+            "timestamp": "2026-09-19T10:42:00Z"
+          },
+          "keyId": "ans-ra-signer",
+          "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy1yYS1zaWduZXIiLCJ0eXAiOiJKV1QiLCJ0aW1lc3RhbXAiOjE3ODk4MTQ1MjAsInJhaWQiOiJhbnMtcmEtbG9jYWwifQ..qyeCWWxn9u0CeqY-m0I7NArjfwu8wLnwR_rlJKCmWqZciHwtaNrS7aQuP6I0MUBJRLzcI8BfJ69-9Ne0rG1Hiw"
+        }
+      },
+      "schemaVersion": "V2",
+      "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy10bC1hdHRlc3RhdGlvbiIsInR5cCI6IkpXVCIsInRpbWVzdGFtcCI6MTc4OTgxNDUyMCwicmFpZCI6ImFucy1kZW1vIn0..kbZXOPZb88tw9eSKCpkVyaqEPY0MSKMat7V1Mh5doKQF8TQkKfKIFtYmGR7JPWXQfrhedgz1WAWsK5e6mykkPA",
+      "status": "ACTIVE"
+    }
+  ]
+}
+
+━━━ 11. TL: GET /v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7 (badge) ━━━
+→ GET http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7
+← 200
+{
+  "merkleProof": {
+    "leafHash": "5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6",
+    "leafIndex": 0,
+    "rootHash": "XuD+HSqIlKoxdLKDhQS/0yU02+7PHSUayCptBSTIQqY=",
+    "treeSize": 1,
+    "treeVersion": 1
+  },
+  "payload": {
+    "logId": "01a0b942-3bea-76a3-ac9a-f8fb7036ab17",
+    "producer": {
+      "event": {
+        "agent": {
+          "host": "demo-ce6eda48.example.com",
+          "name": "demo-agent",
+          "version": "1.0.0"
+        },
+        "ansId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+        "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+        "attestations": {
+          "dnsRecordsProvisioned": [
+            {
+              "data": "1 . alpn=mcp port=443 key65400=https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json key65402=mcp",
+              "name": "demo-ce6eda48.example.com",
+              "type": "SVCB"
+            },
+            {
+              "data": "v=ans-badge1; version=v1.0.0; url=https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7",
+              "name": "_ans-badge.demo-ce6eda48.example.com",
+              "type": "TXT"
+            },
+            {
+              "data": "3 0 1 2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+              "name": "_443._tcp.demo-ce6eda48.example.com",
+              "type": "TLSA"
+            }
+          ],
+          "domainValidation": "ACME-DNS-01",
+          "identityCerts": [
+            {
+              "fingerprint": "SHA256:643f738f8018d042b7ec036147c52faa36cd531c77c21f843db07923bc94144f",
+              "notAfter": "2026-12-18T10:42:00Z",
+              "type": "X509-OV-CLIENT"
+            }
+          ],
+          "serverCerts": [
+            {
+              "fingerprint": "SHA256:2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+              "notAfter": "2026-12-18T10:42:00Z",
+              "type": "X509-DV-SERVER"
+            }
+          ]
+        },
+        "eventType": "AGENT_REGISTERED",
+        "expiresAt": "2026-12-18T10:42:00Z",
+        "issuedAt": "2026-09-19T10:42:00Z",
+        "raId": "ans-ra-local",
+        "timestamp": "2026-09-19T10:42:00Z"
+      },
+      "keyId": "ans-ra-signer",
+      "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy1yYS1zaWduZXIiLCJ0eXAiOiJKV1QiLCJ0aW1lc3RhbXAiOjE3ODk4MTQ1MjAsInJhaWQiOiJhbnMtcmEtbG9jYWwifQ..qyeCWWxn9u0CeqY-m0I7NArjfwu8wLnwR_rlJKCmWqZciHwtaNrS7aQuP6I0MUBJRLzcI8BfJ69-9Ne0rG1Hiw"
+    }
+  },
+  "schemaVersion": "V2",
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy10bC1hdHRlc3RhdGlvbiIsInR5cCI6IkpXVCIsInRpbWVzdGFtcCI6MTc4OTgxNDUyMCwicmFpZCI6ImFucy1kZW1vIn0..kbZXOPZb88tw9eSKCpkVyaqEPY0MSKMat7V1Mh5doKQF8TQkKfKIFtYmGR7JPWXQfrhedgz1WAWsK5e6mykkPA",
+  "status": "ACTIVE"
+}
+
+━━━ 12. TL: GET /root-keys  (verifier keys, sumdb-note format) ━━━
+→ GET http://localhost:18081/root-keys
+← 200
+ans-demo+382a5111+AjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABBD52UpVTH4Lxm2rNoGpstTaHvL0gGLoyFOkV9cSjry61/dzV0q3CN79lbjKphzJgdVaxlRLevUIW12zbUJzNZA=
+✔ root-keys saved to /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/root-keys.txt (1 verification line(s))
+
+━━━ 13. TL: GET /v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt  (SCITT COSE_Sign1) ━━━
+→ GET http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt
+← 200
+Content-Type: application/scitt-receipt+cose
+✔ receipt saved to /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/receipt.cbor (1968 bytes, first byte=0xd2, want 0xd2 for COSE_Sign1 tag 18)
+
+━━━ 14. Offline verify (bin/ans-verify) ━━━
+=== ANS SCITT Receipt Verifier ===
+TL Base URL: http://localhost:18081
+Agent ID:    e234e6a6-86c7-45bc-9bba-a085635f53b7
+
+── Step 1: Load verification keys ──
+  ✓ Fetched 1 verification key(s) from http://localhost:18081/root-keys
+
+── Step 2: Fetch SCITT receipt ──
+  ✓ 1968 bytes (Content-Type: application/scitt-receipt+cose)
+
+── Step 3: Decode COSE_Sign1 + inclusion proof ──
+  ✓ event payload: 1818 bytes
+    ansName:   ans://v1.0.0.demo-ce6eda48.example.com
+    eventType: AGENT_REGISTERED
+    host:      demo-ce6eda48.example.com
+    schema:    V2
+
+── Step 4: Cryptographic verification ──
+  ✓ VERIFIED (kid 382a5111 matched key directly)
+
+── Step 5: Status token ──
+  ✓ 406 bytes (Content-Type: application/ans-status-token+cbor)
+  ✓ VERIFIED (kid 382a5111 matched key directly)
+    agentId:   e234e6a6-86c7-45bc-9bba-a085635f53b7
+    status:    ACTIVE
+    ansName:   ans://v1.0.0.demo-ce6eda48.example.com
+    iat:       2026-09-19T10:42:02Z
+    exp:       2026-09-19T11:42:02Z (valid for another 1h0m0s)
+    identityCerts: 1
+      - SHA256:643f738f8018d042b7ec036147c52faa36cd531c77c21f843db07923bc94144f (X509-OV-CLIENT)
+    serverCerts:   1
+
+── Step 6: Cross-check against badge ──
+  ✓ badge status:    ACTIVE
+    leafIndex:       0
+    treeSize:        1
+    leafHash:        5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6
+    rootHash (hex):  5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6
+  ✓ receipt leafHash: 5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6 (derived from attached event bytes)
+
+── Step 7: Attested metadata hashes ──
+  ✓ leaf attests no metadata hash — nothing to check
+✔ ans-verify passed
+
+━━━ 15. Discover via ans-finder (POST /v1/search) ━━━
+{
+  "results": [
+    {
+      "identifier": "urn:air:demo-ce6eda48.example.com:agents:demo-agent",
+      "displayName": "demo-agent",
+      "type": "application/mcp-server-card+json",
+      "url": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "description": "A demo agent",
+      "version": "1.0.0",
+      "updatedAt": "2026-09-19T10:42:00Z",
+      "metadata": {
+        "agentUrl": "https://demo-ce6eda48.example.com/mcp",
+        "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+        "logId": "01a0b942-3bea-76a3-ac9a-f8fb7036ab17"
+      },
+      "trustManifest": {
+        "identity": "https://demo-ce6eda48.example.com",
+        "identityType": "https",
+        "attestations": [
+          {
+            "type": "ANS-Registration",
+            "uri": "http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt",
+            "mediaType": "application/scitt-receipt+cose"
+          }
+        ]
+      },
+      "score": 100,
+      "source": "http://127.0.0.1:18082/v1/"
+    }
+  ]
+}
+✔ discovered urn:air:demo-ce6eda48.example.com:agents:demo-agent
+✔ ANS-Registration receipt: http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt
+
+━━━ 16. TL: GET /internal/v1/producer-keys/ra/ans-ra-local  (admin) ━━━
+→ GET http://localhost:18081/internal/v1/producer-keys/ra/ans-ra-local
+← 200
+{
+  "keys": [
+    {
+      "key_id": "ans-ra-signer",
+      "status": "active",
+      "fingerprint": "SHA256:7ad84914317404a13700a0506155378ee865a3ee0b3f4b1c902e31c843a6be24",
+      "created_at": "2026-09-19T06:41:48.983-04:00",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaBuXhdMW3ee4OrU3Fo2Zt3Vy/B09\nvW14t9WTQgxByj3Q5QbdFD+K/Rl7LYFPkoPVuQ1AS7aIDUqauyp7wtIqVg==\n-----END PUBLIC KEY-----\n",
+      "algorithm": "ES256",
+      "ra_id": "ans-ra-local",
+      "valid_from": "2026-09-19T05:41:48.983-04:00",
+      "expires_at": "2036-09-16T06:41:48.983-04:00"
+    }
+  ],
+  "total_count": 1
+}
+
+━━━ 17. POST /v2/ans/identities  (register the WHO — did:web) ━━━
+→ POST http://localhost:18080/v2/ans/identities
+{
+  "value": "did:web:who-f85425f2.example.com"
+}
+← 202
+{
+  "identityId": "01a0b942-5c7f-793f-bdf6-e77ad9765e42",
+  "kind": "did:web",
+  "value": "did:web:who-f85425f2.example.com",
+  "status": "PENDING_CONTROL",
+  "nonce": "Qc49S9rxL55HvLNTDxfN1fCcbSYP9u06xdQ5OAD7LVQ",
+  "expiresAt": "2026-09-19T11:42:09Z",
+  "challenges": [
+    {
+      "signingInput": "eyJpZGVudGlmaWVyIjoiZGlkOndlYjp3aG8tZjg1NDI1ZjIuZXhhbXBsZS5jb20iLCJpZGVudGl0eUlkIjoiMDFhMGI5NDItNWM3Zi03OTNmLWJkZjYtZTc3YWQ5NzY1ZTQyIiwibm9uY2UiOiJRYzQ5UzlyeEw1NUh2TE5URHhmTjFmQ2NiU1lQOXUwNnhkUTVPQUQ3TFZRIiwicHVycG9zZSI6ImFuczppZGVudGl0eS1wcm9vZjp2MSIsInJhSWQiOiJhbnMtcmEtbG9jYWwiLCJzY2hlbWUiOiJkaWQ6d2ViIn0"
+    }
+  ]
+}
+✔ identityId=01a0b942-5c7f-793f-bdf6-e77ad9765e42 (PENDING_CONTROL — challenge issued)
+
+━━━ 18. POST /v2/ans/identities/01a0b942-5c7f-793f-bdf6-e77ad9765e42/verify-control  (→ VERIFIED) ━━━
+→ POST http://localhost:18080/v2/ans/identities/01a0b942-5c7f-793f-bdf6-e77ad9765e42/verify-control
+{
+  "signedProofs": [
+    "eyJhbGciOiJFUzI1NiIsImp3ayI6eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6ImNNOXBsbU5oZnJrR3lBX3BXa3RmLTVtVGFwSTVhcGNRTkFaNzlUdGU4TW8iLCJ5IjoiOVZTY2dDRmJtRVVoYkwtUkNTN0EtWHR4ZXJEeEpSRmtHd1RyaVlSX3ZSbyJ9LCJraWQiOiJkaWQ6d2ViOndoby1mODU0MjVmMi5leGFtcGxlLmNvbSNrZXktMSJ9.eyJpZGVudGlmaWVyIjoiZGlkOndlYjp3aG8tZjg1NDI1ZjIuZXhhbXBsZS5jb20iLCJpZGVudGl0eUlkIjoiMDFhMGI5NDItNWM3Zi03OTNmLWJkZjYtZTc3YWQ5NzY1ZTQyIiwibm9uY2UiOiJRYzQ5UzlyeEw1NUh2TE5URHhmTjFmQ2NiU1lQOXUwNnhkUTVPQUQ3TFZRIiwicHVycG9zZSI6ImFuczppZGVudGl0eS1wcm9vZjp2MSIsInJhSWQiOiJhbnMtcmEtbG9jYWwiLCJzY2hlbWUiOiJkaWQ6d2ViIn0.FohcgMpGfl3spJQeO4S9wbmM60TbJ2eicOB4N2Rv5yNfQTDlgZew0e9wXETlXgdMltXoZFJ0yxYKpUaXCDJJbw"
+  ]
+}
+← 200
+{
+  "identityId": "01a0b942-5c7f-793f-bdf6-e77ad9765e42",
+  "kind": "did:web",
+  "value": "did:web:who-f85425f2.example.com",
+  "status": "VERIFIED",
+  "proofMethod": "did-web-sig",
+  "verifiedAt": "2026-09-19T10:42:09Z",
+  "createdAt": "2026-09-19T10:42:09Z"
+}
+✔ control proven — IDENTITY_VERIFIED seals on the identity's own TL stream
+
+━━━ 19. POST /v2/ans/identities/01a0b942-5c7f-793f-bdf6-e77ad9765e42/links  (link this agent — one call, one sealed event) ━━━
+→ POST http://localhost:18080/v2/ans/identities/01a0b942-5c7f-793f-bdf6-e77ad9765e42/links
+{
+  "agentIds": [
+    "e234e6a6-86c7-45bc-9bba-a085635f53b7"
+  ]
+}
+← 200
+{
+  "linked": 1
+}
+
+━━━ 20. TL: GET /v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7  (badge — computed identities[] join) ━━━
+→ GET http://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7
+← 200
+{
+  "merkleProof": {
+    "leafHash": "5ee0fe1d2a8894aa3174b2838504bfd32534dbeecf1d251ac82a6d0524c842a6",
+    "leafIndex": 0,
+    "path": [
+      "wV558MXikLOEcx2mi0KmcEbRqqfm1auLnn5QbHC1xWc=",
+      "AsXWE8uqDEpZn0B3yWgNUoXbH3oqSBTlLqlKUX/iARk="
+    ],
+    "rootHash": "x06mJ1KMcp2Ga2BsKtuIJjnXfirSDEZpj+heTdgSeYE=",
+    "treeSize": 3,
+    "treeVersion": 1
+  },
+  "payload": {
+    "logId": "01a0b942-3bea-76a3-ac9a-f8fb7036ab17",
+    "producer": {
+      "event": {
+        "agent": {
+          "host": "demo-ce6eda48.example.com",
+          "name": "demo-agent",
+          "version": "1.0.0"
+        },
+        "ansId": "e234e6a6-86c7-45bc-9bba-a085635f53b7",
+        "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+        "attestations": {
+          "dnsRecordsProvisioned": [
+            {
+              "data": "1 . alpn=mcp port=443 key65400=https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json key65402=mcp",
+              "name": "demo-ce6eda48.example.com",
+              "type": "SVCB"
+            },
+            {
+              "data": "v=ans-badge1; version=v1.0.0; url=https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7",
+              "name": "_ans-badge.demo-ce6eda48.example.com",
+              "type": "TXT"
+            },
+            {
+              "data": "3 0 1 2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+              "name": "_443._tcp.demo-ce6eda48.example.com",
+              "type": "TLSA"
+            }
+          ],
+          "domainValidation": "ACME-DNS-01",
+          "identityCerts": [
+            {
+              "fingerprint": "SHA256:643f738f8018d042b7ec036147c52faa36cd531c77c21f843db07923bc94144f",
+              "notAfter": "2026-12-18T10:42:00Z",
+              "type": "X509-OV-CLIENT"
+            }
+          ],
+          "serverCerts": [
+            {
+              "fingerprint": "SHA256:2ef5a48f297a268441751d5559992012a84cf76571dd5cfd4852b31e40929742",
+              "notAfter": "2026-12-18T10:42:00Z",
+              "type": "X509-DV-SERVER"
+            }
+          ]
+        },
+        "eventType": "AGENT_REGISTERED",
+        "expiresAt": "2026-12-18T10:42:00Z",
+        "issuedAt": "2026-09-19T10:42:00Z",
+        "raId": "ans-ra-local",
+        "timestamp": "2026-09-19T10:42:00Z"
+      },
+      "keyId": "ans-ra-signer",
+      "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy1yYS1zaWduZXIiLCJ0eXAiOiJKV1QiLCJ0aW1lc3RhbXAiOjE3ODk4MTQ1MjAsInJhaWQiOiJhbnMtcmEtbG9jYWwifQ..qyeCWWxn9u0CeqY-m0I7NArjfwu8wLnwR_rlJKCmWqZciHwtaNrS7aQuP6I0MUBJRLzcI8BfJ69-9Ne0rG1Hiw"
+    }
+  },
+  "schemaVersion": "V2",
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImFucy10bC1hdHRlc3RhdGlvbiIsInR5cCI6IkpXVCIsInRpbWVzdGFtcCI6MTc4OTgxNDUyMCwicmFpZCI6ImFucy1kZW1vIn0..kbZXOPZb88tw9eSKCpkVyaqEPY0MSKMat7V1Mh5doKQF8TQkKfKIFtYmGR7JPWXQfrhedgz1WAWsK5e6mykkPA",
+  "status": "ACTIVE",
+  "identities": [
+    {
+      "identityId": "01a0b942-5c7f-793f-bdf6-e77ad9765e42",
+      "kind": "did:web",
+      "value": "did:web:who-f85425f2.example.com",
+      "identityStatus": "VERIFIED",
+      "keys": [
+        {
+          "controller": "did:web:who-f85425f2.example.com",
+          "id": "did:web:who-f85425f2.example.com#key-1",
+          "publicKeyJwk": {
+            "crv": "P-256",
+            "kty": "EC",
+            "x": "cM9plmNhfrkGyA_pWktf-5mTapI5apcQNAZ79Tte8Mo",
+            "y": "9VScgCFbmEUhbL-RCS7A-XtxerDxJRFkGwTriYR_vRo"
+          },
+          "type": "JsonWebKey2020"
+        }
+      ],
+      "keysLogId": "01a0b942-5e94-7795-8deb-10b8abaef1fe",
+      "linkedAt": "2026-09-19T10:42:10Z",
+      "linkLogId": "01a0b942-62ef-77b0-bf46-3287a560b20f"
+    }
+  ],
+  "identitiesTotal": 1
+}
+✔ one hop answers "who is behind this agent": did:web:who-f85425f2.example.com (VERIFIED)
+
+━━━ 20. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/catalog-entry  (AI Catalog record) ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/catalog-entry
+← 200
+{
+  "identifier": "urn:air:demo-ce6eda48.example.com:agents:demo-agent",
+  "displayName": "demo-agent",
+  "description": "A demo agent",
+  "version": "1.0.0",
+  "mediaType": "application/mcp-server-card+json",
+  "url": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+  "updatedAt": "2026-09-19T10:42:00Z",
+  "publisher": {
+    "identifier": "demo-ce6eda48.example.com",
+    "displayName": "demo-ce6eda48.example.com",
+    "identityType": "dns"
+  },
+  "metadata": {
+    "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+    "agentHost": "demo-ce6eda48.example.com",
+    "badgeUrl": "https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+  },
+  "trustManifest": {
+    "identity": "urn:air:demo-ce6eda48.example.com:agents:demo-agent",
+    "attestations": [
+      {
+        "type": "ANS-Registration",
+        "uri": "https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt",
+        "mediaType": "application/scitt-receipt+cose"
+      }
+    ]
+  }
+}
+✔ catalog entry well-formed; attestation URI = https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt
+✔ that receipt path is live on the TL (step 13 retrieved its COSE bytes → /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/receipt.cbor)
+
+━━━ 21. GET /v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/ai-catalog  (host-complete AI Catalog document) ━━━
+→ GET http://localhost:18080/v2/ans/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/ai-catalog
+{
+  "specVersion": "1.0",
+  "host": {
+    "identifier": "demo-ce6eda48.example.com",
+    "displayName": "demo-ce6eda48.example.com"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:demo-ce6eda48.example.com:agents:demo-agent",
+      "displayName": "demo-agent",
+      "description": "A demo agent",
+      "version": "1.0.0",
+      "mediaType": "application/mcp-server-card+json",
+      "url": "https://demo-ce6eda48.example.com/.well-known/mcp/server-card.json",
+      "updatedAt": "2026-09-19T10:42:00Z",
+      "publisher": {
+        "identifier": "demo-ce6eda48.example.com",
+        "displayName": "demo-ce6eda48.example.com",
+        "identityType": "dns"
+      },
+      "metadata": {
+        "ansName": "ans://v1.0.0.demo-ce6eda48.example.com",
+        "agentHost": "demo-ce6eda48.example.com",
+        "badgeUrl": "https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7"
+      },
+      "trustManifest": {
+        "identity": "urn:air:demo-ce6eda48.example.com:agents:demo-agent",
+        "attestations": [
+          {
+            "type": "ANS-Registration",
+            "uri": "https://localhost:18081/v1/agents/e234e6a6-86c7-45bc-9bba-a085635f53b7/receipt",
+            "mediaType": "application/scitt-receipt+cose"
+          }
+        ]
+      }
+    }
+  ]
+}
+✔ host-complete document lists this ACTIVE agent (ETag "1d5453b3745c59ed9df11f7b8e85481f2b6158b0174ea64176dea772ebe17065")
+✔ conditional GET (If-None-Match) returned 304 Not Modified
+
+━━━ Lifecycle complete (both sides) ━━━
+  agentId     e234e6a6-86c7-45bc-9bba-a085635f53b7
+  ansName     ans://v1.0.0.demo-ce6eda48.example.com
+  identityId  01a0b942-5c7f-793f-bdf6-e77ad9765e42  (did:web:who-f85425f2.example.com)
+  saved to    /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/last-agent-id
+  root-keys   /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/root-keys.txt
+  receipt     /Users/jungmin/Documents/GitHub/burn402/ans/data/demo/receipt.cbor
+
+  revoke:     scripts/demo/revoke.sh
+  identities: scripts/demo/identity-lifecycle.sh (every identity operation)

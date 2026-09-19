@@ -1,0 +1,112 @@
+Building demo binaries into ./bin...
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/go-chi/chi/v5 v5.3.0
+go: downloading modernc.org/sqlite v1.51.0
+go: downloading modernc.org/libc v1.72.3
+go: downloading golang.org/x/sys v0.44.0
+go: downloading modernc.org/memory v1.11.0
+go: downloading github.com/mattn/go-isatty v0.0.20
+▶ booting agent-trust-discovery on :8080 (config/demo.runtime.yaml, no auth)…
+  (server logs -> /tmp/agent-trust-discovery-demo.log)
+▶ running agent-hydrator-stub (mock) against agent-trust-discovery…
+{"time":"2026-09-19T06:43:04.472949-04:00","level":"INFO","msg":"hydration complete","mock":true,"agentsImported":10,"observationsImported":70}
+▶ running the walkthrough…
+
+──────────────────────────────────────────────────────────────
+  STOP 1 — List all registered agents
+
+──────────────────────────────────────────────────────────────
+total indexed: 10
+  agent-001    ACTIVE      Booking Concierge
+  agent-009    WARNING     Chat Helper
+  agent-010    EXPIRED     Data Broker
+  agent-006    ACTIVE      Drifting Agent
+  agent-007    ACTIVE      Finance Bot
+  agent-002    DEPRECATED  Legacy Mail Relay
+  agent-005    ACTIVE      Midtier Shopping
+  agent-003    ACTIVE      Newstartup Assistant
+  agent-004    REVOKED     Revoked Actor
+  agent-008    ACTIVE      Weather API
+
+──────────────────────────────────────────────────────────────
+  STOP 2 — Search: query=booking, statuses=ACTIVE
+
+──────────────────────────────────────────────────────────────
+  agent-001 → Booking Concierge
+
+──────────────────────────────────────────────────────────────
+  STOP 3 — Detail for agent-001 (Trust Evaluation breakdown)
+
+──────────────────────────────────────────────────────────────
+  Signals are grouped by pillar (dimension); each pillar score = weighted average of its raw scores.
+  trustVector: {'integrity': 90, 'identity': 40, 'solvency': 0, 'behavior': 0, 'safety': 0}
+  recommendedProfile: READ_ONLY
+  verificationTier: None
+  riskFactors: ['IDENTITY_CERT_DV_ONLY']
+  scoringProfile: default
+  signals by pillar:
+    integrity (score 90)
+      dnssecurity                raw=100 w=1 unattested   dnssec + caa present
+      agentage                   raw=100 w=1 unattested   249 days old; ramp to 100 at 180
+      versionstability           raw= 33 w=1 unattested   2 version changes in 30d
+      certfingerprint.server     raw=100 w=1 tl_attested  serverCert fingerprint matches sealed value
+      certfingerprint.identity   raw=100 w=1 tl_attested  identityCert fingerprint matches sealed value
+      dnsrecord.ans              raw=100 w=1 tl_attested  _ans TXT matches sealed value
+      dnsrecord.ans-badge        raw=100 w=1 tl_attested  _ans-badge TXT matches sealed value
+    identity (score 40)
+      certtype                   raw= 40 w=1 unattested   DV certificate; raw 40
+    solvency (score 0) — no signals in v1
+    behavior (score 0) — no signals in v1
+    safety (score 0) — no signals in v1
+
+──────────────────────────────────────────────────────────────
+  STOP 4 — Promote agent-001's certtype DV → EV, then re-score
+
+──────────────────────────────────────────────────────────────
+  POSTed certtype=EV; re-fetching detail…
+  identity: 100 (was 40 for DV)
+  recommendedProfile: FIDUCIARY
+  riskFactors: [] (IDENTITY_CERT_DV_ONLY should be gone)
+
+──────────────────────────────────────────────────────────────
+  STOP 5 — Server-cert fingerprint drift on agent-001
+
+──────────────────────────────────────────────────────────────
+  POSTed a mismatched server-cert verdict; re-fetching detail…
+  riskFactors: ['INTEGRITY_SERVER_CERT_FINGERPRINT_DRIFT']
+    certfingerprint.server → serverCert fingerprint drift: sealed=SHA256:1010101010101010101010101010101010101010101010101010101010101010 observed=SHA256:DEADBEEF10101010101010101010101010101010101010101010101010101010
+    certfingerprint.identity → identityCert fingerprint matches sealed value
+
+──────────────────────────────────────────────────────────────
+  STOP 6 — DNS _ans drift on agent-006 (pre-rigged fixture)
+
+──────────────────────────────────────────────────────────────
+  riskFactors: ['INTEGRITY_DNS_ANS_DRIFT']
+    dnsrecord.ans → _ans TXT drift: sealed=v=ans1; version=v1.0.0; url=https://drift.example.com observed=v=ans1; version=v1.0.0; url=https://malicious-site.com
+    dnsrecord.ans-badge → _ans-badge TXT matches sealed value
+
+──────────────────────────────────────────────────────────────
+  STOP 7 — Same agent, two profiles: default vs identity-strict
+
+──────────────────────────────────────────────────────────────
+  default          trustVector={'integrity': 76, 'identity': 100, 'solvency': 0, 'behavior': 0, 'safety': 0} recommendedProfile=TRANSACTIONAL
+  identity-strict  trustVector={'integrity': 100, 'identity': 100, 'solvency': 0, 'behavior': 0, 'safety': 0} recommendedProfile=FIDUCIARY
+
+──────────────────────────────────────────────────────────────
+  STOP 8 — Summary table — one row per agent
+
+──────────────────────────────────────────────────────────────
+  agentId      status       int  idn  slv  beh  saf  recommended    risks
+  agent-001    ACTIVE        76  100    0    0    0  TRANSACTIONAL  1
+  agent-009    WARNING       75   40    0    0    0  READ_ONLY      2
+  agent-010    EXPIRED       79    0    0    0    0  UNTRUSTED      1
+  agent-006    ACTIVE        86  100    0    0    0  FIDUCIARY      1
+  agent-007    ACTIVE       100  100    0    0    0  FIDUCIARY      0
+  agent-002    DEPRECATED    86   40    0    0    0  READ_ONLY      2
+  agent-005    ACTIVE        86   70    0    0    0  TRANSACTIONAL  1
+  agent-003    ACTIVE        73   40    0    0    0  READ_ONLY      2
+  agent-004    REVOKED       76    0    0    0    0  UNTRUSTED      1
+  agent-008    ACTIVE        87   70    0    0    0  TRANSACTIONAL  0
+
+──────────────────────────────────────────────────────────────
+  Walkthrough complete.
