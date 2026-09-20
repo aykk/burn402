@@ -2,38 +2,51 @@
 
 Give an agent a budget instead of your API key. It rents a real server, trains your model, hands it back, and the box shuts itself off when the money runs out.
 
-## The problem
+## What it does
 
-Letting an agent rent compute today means giving it a provider API key. That key has no spend limit, no clock, and no way to claw it back once the agent hands work to another agent. Everyone in the chain effectively holds your whole account.
+An agent with an ANS identity is given limits and demands for a custom model from the user. It talks to a Vultr agent (also with an ANS identity), and they negotiate over which CPU plan suits the model. Once both agents sign, the agent pays over x402 to rent the CPU instance, and uses it to train the model the user requested. The entire interaction, pass or fail, is uploaded to Arweave to ensure the record is untouchable, public, and permanent.
 
-## What replaces the key
+**A clean agent sits at a trust score of 100, and every anchored violation halves it:** one failure drops it to 50, two to 25. We chose to halve rather than drop incrementally because a single fail means it sucks at its job, and fails can lead to massive consequences when handling company (larger-scale) demands. The score is computed from the verdicts anchored on Arweave and attributed to the agent's ANS identity, so it can't be tampered with.
 
-A mandate: a signed permission slip carrying a budget, a maximum hourly rate, a scope and an expiry. It can only shrink as it is passed down. A delegated mandate can never raise a limit its parent set, and the broker rejects one that tries.
+In depth: your agent gets registered an ANS identity of its own, so that all records and transactions (and failures) can be attributed to it. You then give the agent training data, as well as what you require from a custom model, and set three limits: a **total budget**, an **hourly spend rate**, and a **timeframe**.
 
-The agent pays the broker per request over x402 on Solana devnet, so only the broker ever holds the Vultr key. While the server runs, the budget depletes against the real hourly price, and at zero a reaper destroys the instance with no human in the loop. Every agent resolves through ANS with its keys sealed in a transparency log, so a signature that does not match a logged key is refused. Payments and breach verdicts are anchored on Arweave under the agent's domain, which means a version bump cannot shake a record loose.
+Your agent then opens an A2A conversation with a second agent that sells Vultr compute (named `Vultr desk`). Both sides sign every message and verify the other against keys tied to its ANS identity, sealed in a transparency log. The desk quotes real plans at real prices for CPU instances with timings for that exact job, and recommends plans. For example, in one of our runs our agent pushed for a cheaper four core box and the desk refused, pointing out that the job splits into sixteen parallel pieces and four cores would run them in four serial batches, AKA it would make the work take four times longer, which went against the original wishes of the user.
 
-## The demo
+Once they agree, the agent pays the broker per request over x402 in USDC on Solana (Devnet for demo), and the broker provisions the instance. **Only the broker holds the Vultr key**, so no agent in the chain ever touches it. The box boots, trains, serves its own progress, and hands back a model as plain JSON that runs in your browser. Then the box is released, destroys itself, and the model keeps working without it.
 
-1. Name your agent. It gets its own ANS identity, registered while you wait, and every message it signs and every record about it carries that name.
-2. Add data. Drop in as many files as you like, or paste links. CSV, TSV, JSONL or plain text. burn402 reads the start of each one and works out the columns, the labels and the job: labelled rows train a classifier, plain text trains a character language model, and passages with links train a search index over your documents.
-3. Say what you want it to do, and set three limits: total budget, hourly cap, and how long it has.
-4. Your agent, running on your own model and key, opens an A2A conversation with the Vultr desk agent. Both sides sign every message and check the other's signature against its ANS keys. The desk quotes real plans at real prices with timings for this exact job, then argues its corner. Your agent can take the recommendation or overrule it.
-5. It pays over x402 and the broker provisions the instance. The Solscan link and the Arweave receipt appear as they land.
-6. The box trains and serves its own progress. The page shows predicted time against actual.
-7. The model comes back as plain JSON and runs in your browser. Type at a classifier and it answers as you type. Prompt a language model and it writes. Ask a document index a question and it finds the passage, then hands it to the model you picked to write an answer with a link to the page it came from.
-8. The server is released, and the model keeps working without it.
+## Web3 stuff
 
-Nothing about the model is written into the page. The trainer reports its own metrics, their labels and how to format them, plus the input and output shape it expects, so a new kind of model shows up correctly without anyone touching the UI.
+You don't request burn402 for a CPU instance, your agent actually buys one, which is made possible with x402. The broker answers the agent's request with `HTTP 402` and a price, the agent pays that price in USDC on Solana devnet through an x402 facilitator, and **the machine only boots once the payment settles**. Using Solana and Arweave is what allows us to create a receipt for the auditor to check later (along with Solscan).
+
+The payments are **SPL token transfers**, and there is one per request instead of a single settlement at the end. A job costs between `0.0006` and `0.0165` USDC depending on which plan the two agents agree on, so a session is a handful of tiny machine-to-machine payments. Every one of them returns a transaction signature you can open on Solscan, and the broker signs a receipt containing that signature, the mandate it was paid against, and who paid. That receipt is what we anchor on Arweave, so the payment and the reason for it stay attached to each other.
+
+The dashboard reads both wallets from the chain with `getTokenAccountsByOwner`, so you can watch the agent's USDC balance drop and the broker's climb while the job runs. Here is a real one from our GoDaddy documentation run: `0.011 USDC` for a `vhp-8c-16gb-amd` instance, on devnet.
+
+```
+5MwMc15SMDKLZS88ACd83Fv4ACfdvZ1KNEYAR29B6pQMZd2QEtwMWbqaFYqbX7v1VDLdMSTS46bY2HA5vj485eXK
+```
+
+## How we built it
+
+`Next.js` for web platform, `Arweave` for storage, `x402` for payment gateway, `Ed25519` and `JWS` for signatures.
+
+**The mandate is the core:** a signed permission slip with a budget, an hourly ceiling, a scope and an expiry, plus eight attenuation rules that the broker checks before anything is provisioned. The x402 gate answers `402`, verifies the payment, provisions, settles and signs a receipt. A reaper watches the burn rate and destroys the instance once reaching zero.
+
+The trainer on the box uses only the Python standard library: a hashed tf-idf classifier trained by gradient descent, a character n-gram language model, and a tf-idf passage index. All three start from scratch on your data. **Nothing is pretrained** (check it yourself!)
+
+The auditor takes public evidence, runs the same eight checks, and signs a verdict that carries the evidence it was made from, so anyone can reproduce it. Verdicts feed the Trust Index as a behaviour score, and anchored records live on Arweave attributed to the agent's domain (ANS identity).
+
+**Timings are measured.** We rented one box per Vultr CPU family and timed the same job on each, then fitted a cost model to the shape of the data. The page shows predicted time against actual, so you can see whether the estimate was realized.
 
 ## Check it yourself
 
-Every record on Arweave is re-verified from public data: the signature, who uploaded it, the evidence it carries, and a full rerun of the audit.
+Every transaction, approval, every refusal and every broken rule is signed and written to Arweave (Testnet or Mainnet). Anyone can re-run the audit from the public record with one command:
 
 ```bash
 npm run burn402 -- verify <arweave-txid>
 ```
 
-`/records` does the same in the browser for every record burn402 has written. `/audit` lets you pick an agent that has run a job and set a second agent loose on its budget.
+It downloads the record, checks the auditor's signature against the key sealed in the transparency log, checks the evidence hash, and runs every check again. `/records` does the same in the browser for every record burn402 has written. `/audit` lets you pick an agent that has run a job and set a second agent loose on its budget.
 
 ## Supports:
 
@@ -42,8 +55,6 @@ npm run burn402 -- verify <arweave-txid>
 - ANS identities registered against the reference registration authority and transparency log.
 - Arweave mainnet records, uploaded with the auditor's and broker's own keys.
 - Timings from measurement: single-core runs on each Vultr CPU family, fitted to the shape of your data.
-
-Training starts from scratch on the rented box, using only the Python standard library. No pretrained weights, nothing downloaded, no pip install that can fail at boot. What comes back is a file you can run anywhere.
 
 ## Running it
 
