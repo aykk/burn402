@@ -150,7 +150,7 @@ export default function AuditPage() {
                   .map((a, i) => (
                     <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
                       <div>
-                        {a.mark !== null && <span className="text-muted">[{a.mark}] </span>}
+                        {typeof a.mark === "number" && <span className="text-muted">[{a.mark}] </span>}
                         {a.what}
                       </div>
                       <div style={{ color: toneOf(a) }}>{a.result}</div>
@@ -174,7 +174,7 @@ export default function AuditPage() {
                   {[...snap.transactions].reverse().map((t, i) => (
                     <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.outcome === "accepted" ? "var(--ok)" : "var(--bad)" }}>
                       <div>
-                        {t.mark !== null && <span className="text-muted">[{t.mark}] </span>}
+                        {typeof t.mark === "number" && <span className="text-muted">[{t.mark}] </span>}
                         <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "allowed" : t.outcome}</span> ·{" "}
                         {shortName(t.subject)} · {t.plan}
                         {t.usd !== null && t.outcome === "accepted" ? ` · ${t.usd.toFixed(6)} USDC` : ""}
