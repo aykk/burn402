@@ -46,10 +46,18 @@ npm run burn402 -- verify <arweave-txid>
 
 ## Running it
 
+burn402 talks to three services you run alongside it: the ANS registration authority and
+transparency log from [agentnameservice/ans](https://github.com/agentnameservice/ans), cloned
+next to this README as `ans/` and started with its `scripts/demo/start.sh`, and the Trust Index
+(`npm run trust-index`).
+
 ```bash
+git clone https://github.com/agentnameservice/ans.git
+ans/scripts/demo/start.sh          # registration authority on :18080, transparency log on :18081
 npm install
 cp env.example .env.local          # Vultr key, Solana keypairs, a model API key
-npm run register-agents            # needs the ANS registration authority and transparency log running
+npm run register-agents            # mints the broker, auditor and stress tester identities
+npm run trust-index                # behaviour scores, on :8090
 npm run dev
 ```
 
