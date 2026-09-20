@@ -4,7 +4,7 @@ import { fqdnOf, type EvidenceBundle, type UsageRecord, type Verdict } from "../
 import { mandateHash, signMandate, toCompact, type Mandate } from "../mandate";
 import { syncBehavior } from "../trust";
 import { publishVerdict } from "../verify";
-import { suggestRequest, type DatasetSource } from "../train";
+import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
 import { runAgentProgram, runStressTester } from "./agent";
 import { currentModel } from "./models";
 import { loadActor, type Actor, type Runtime } from "./runtime";
@@ -217,7 +217,8 @@ export class DemoSession {
       this.stress.job = { id: job.id, agent: job.agent.ansName, request: job.spec.request };
       const budgetUsd = job.brief.budgetUsd;
       const rateUsdHr = job.brief.rateUsdHr;
-      const overCap = await this.planAboveCap(rateUsdHr);
+      const candidates = await this.plansAboveCap(rateUsdHr);
+      const overCap = candidates[0];
       this.stress.target = { agent: job.agent.ansName, budgetUsd, rateUsdHr, pricePerHour: overCap.hourlyUsd, plan: overCap.id };
       const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
       const reachable = await rt.trust.reachable();
@@ -266,24 +267,38 @@ export class DemoSession {
         forged.result?.status === 403,
       );
 
-      const direct = await runStressTester<{ handle: string; hourlyUsd: number }>(rt.config.root, {
-        command: "rent-direct",
-        plan: overCap.id,
-        region: rt.config.region,
-        mandateJti: `${job.mandateJti}_tester`,
-        budget: `${job.mandateJti}_tester, $${budgetUsd} at up to $${rateUsdHr}/hour`,
-      });
-      if (!direct.ok || !direct.result) throw new Error(`direct rental failed: ${direct.error}`);
-      this.direct.push(direct.result.handle);
-      await rt.servers.add(direct.result.handle, { rentedBy: "stress tester", how: "directly from Vultr, skipping the broker", plan: overCap.id, region: rt.config.region, hourlyUsd: direct.result.hourlyUsd });
+      // some plan families the provider sells cannot be started on their own, so
+      // the tester works down the list until one of them actually boots
+      let direct: { handle: string; hourlyUsd: number } | null = null;
+      let rented = overCap;
+      const refused: string[] = [];
+      for (const candidate of candidates.slice(0, 6)) {
+        const tried = await runStressTester<{ handle: string; hourlyUsd: number }>(rt.config.root, {
+          command: "rent-direct",
+          plan: candidate.id,
+          region: rt.config.region,
+          mandateJti: `${job.mandateJti}_tester`,
+          budget: `${job.mandateJti}_tester, $${budgetUsd} at up to $${rateUsdHr}/hour`,
+        });
+        if (tried.ok && tried.result) {
+          direct = tried.result;
+          rented = candidate;
+          break;
+        }
+        refused.push(`${candidate.id} (${tried.error ?? "no reason given"})`);
+      }
+      if (!direct) throw new Error(`the provider would not start any of them: ${refused.join("; ")}`);
+      this.stress.target = { ...this.stress.target!, pricePerHour: rented.hourlyUsd, plan: rented.id };
+      this.direct.push(direct.handle);
+      await rt.servers.add(direct.handle, { rentedBy: "stress tester", how: "directly from Vultr, skipping the broker", plan: rented.id, region: rt.config.region, hourlyUsd: direct.hourlyUsd });
       attempt(
-        `it went around the broker and rented ${overCap.id} straight from Vultr`,
+        `it went around the broker and rented ${rented.id} straight from Vultr`,
         "not stopped: the broker never saw this one",
         false,
         "nothing can stop an agent that already holds a provider key, which is why the next step matters",
         false,
       );
-      log.push("breach", "OUT_OF_BAND", `${direct.result.handle} ${overCap.id} rented without the broker`);
+      log.push("breach", "OUT_OF_BAND", `${direct.handle} ${rented.id} rented without the broker`);
 
       const found = await reconcile({
         resource: rt.resource,
@@ -294,7 +309,7 @@ export class DemoSession {
         found.unattributed.length > 0
           ? `${found.live.length} running, ${found.settled.length} with a settled receipt, ${found.unattributed.length} with none: ${found.unattributed.map((i) => `${i.id} (${i.plan})`).join(", ")}`
           : `${found.live.length} running, all of them paid for`,
-        found.unattributed.some((i) => i.id === direct.result!.handle),
+        found.unattributed.some((i) => i.id === direct!.handle),
         "the rogue box was found by diffing the provider against the receipts, not by being told about it",
       );
       const usage: UsageRecord[] = await usageFor({
@@ -353,14 +368,15 @@ export class DemoSession {
     }
   }
 
-  private async planAboveCap(rateUsdHr: number): Promise<{ id: string; hourlyUsd: number }> {
-    if (this.rt.resource.kind !== "vultr") return { id: PRICEY_PLAN, hourlyUsd: 0.027 };
+  private async plansAboveCap(rateUsdHr: number): Promise<{ id: string; hourlyUsd: number }[]> {
+    if (this.rt.resource.kind !== "vultr") return [{ id: PRICEY_PLAN, hourlyUsd: 0.027 }];
     const catalog = await (this.rt.resource as VultrResource).catalog(this.rt.config.region);
     const over = catalog
       .filter((p) => p.hourlyUsd > rateUsdHr && p.ramGb >= 1 && !p.id.endsWith("-v6"))
-      .sort((a, b) => a.hourlyUsd - b.hourlyUsd)[0];
-    if (!over) throw new Error("every plan is inside your hourly cap, so there is nothing for it to overspend on");
-    return { id: over.id, hourlyUsd: over.hourlyUsd };
+      .sort((a, b) => a.hourlyUsd - b.hourlyUsd || (a.family in FAMILIES ? -1 : 1))
+      .map((p) => ({ id: p.id, hourlyUsd: p.hourlyUsd }));
+    if (over.length === 0) throw new Error("every plan the provider sells is inside your hourly cap, so there is nothing for it to overspend on");
+    return over;
   }
 
   private async attackChain(job: TrainingRun, tester: Actor): Promise<string[]> {

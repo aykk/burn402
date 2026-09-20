@@ -115,7 +115,7 @@ export default function AuditPage() {
                   ))}
                 </select>
                 <button className="border border-charcoal bg-charcoal px-3.5 py-1.5 text-background hover:opacity-85 disabled:opacity-40" disabled={running} onClick={start}>
-                  {stress?.status === "running" ? "Running…" : "Try to break its budget"}
+                  {stress?.status === "running" ? "Running…" : "Limit test"}
                 </button>
               </div>
               {target && (

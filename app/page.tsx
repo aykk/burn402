@@ -408,7 +408,6 @@ export default function Page() {
                       }}
                     />
                   </div>
-                  <div className="text-muted">faucet cap is $20</div>
                 </label>
                 <label className="space-y-1">
                   <div className="text-muted">Hourly cap</div>
@@ -426,7 +425,6 @@ export default function Page() {
                     />
                     <span className="shrink-0 text-muted">per hour</span>
                   </div>
-                  <div className="text-muted">the broker refuses dearer servers</div>
                 </label>
                 <label className="space-y-1">
                   <div className="text-muted">Time limit</div>
@@ -443,7 +441,6 @@ export default function Page() {
                     />
                     <span className="shrink-0 text-muted">minutes</span>
                   </div>
-                  <div className="text-muted">the mandate expires, the server dies</div>
                 </label>
               </div>
 
@@ -592,7 +589,7 @@ function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string
           disabled={stress?.status === "running" || snap?.busy}
           onClick={() => post("/api/demo/stress")}
         >
-          {stress?.status === "running" ? "Trying…" : stress?.status === "done" ? "Start test" : "Send a second agent to break them"}
+          {stress?.status === "running" ? "Trying…" : "Start"}
         </button>
       </div>
       <div className="text-muted">
