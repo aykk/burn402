@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0 Safari/537.36";
@@ -376,11 +376,50 @@ async function buildSource(source: Source): Promise<Page[]> {
   return rows;
 }
 
+function describe(corpus: Corpus, dir: string, written: { file: string; passages: number }[]): void {
+  writeFileSync(join(dir, "request.txt"), `${corpus.request}\n`);
+  writeFileSync(
+    join(dir, "README.txt"),
+    [
+      corpus.name,
+      "",
+      ...corpus.about,
+      "",
+      "Drag every .jsonl file in this folder in at once, then paste request.txt into",
+      "the box asking what the model should learn to do.",
+      "",
+      "Files:",
+      ...written.map((w) => `  ${w.file.padEnd(30)} ${w.passages} passages`),
+      "",
+      `${written.reduce((sum, w) => sum + w.passages, 0)} passages in total.`,
+      "",
+    ].join("\n"),
+  );
+}
+
+function onDisk(corpus: Corpus, dir: string): { file: string; passages: number }[] {
+  const out: { file: string; passages: number }[] = [];
+  for (const source of corpus.sources) {
+    const file = `${source.id}.jsonl`;
+    const path = join(dir, file);
+    if (!existsSync(path)) continue;
+    out.push({ file, passages: readFileSync(path, "utf8").split("\n").filter((l) => l.trim().length > 0).length });
+  }
+  return out;
+}
+
 async function build(corpus: Corpus, out: string): Promise<void> {
   process.stdout.write(`\n${corpus.name}\n`);
   const dir = join(out, corpus.dir);
   mkdirSync(dir, { recursive: true });
   const written: { file: string; passages: number }[] = [];
+
+  if (process.env.DOCS_DESCRIBE_ONLY) {
+    const found = onDisk(corpus, dir);
+    describe(corpus, dir, found);
+    process.stdout.write(`  described ${found.length} file(s), ${found.reduce((sum, w) => sum + w.passages, 0)} passages\n`);
+    return;
+  }
 
   const only = (process.env.DOCS_ONLY ?? "").split(",").filter(Boolean);
   for (const source of corpus.sources.filter((src) => only.length === 0 || only.includes(src.id))) {
@@ -395,25 +434,7 @@ async function build(corpus: Corpus, out: string): Promise<void> {
     process.stdout.write(`  wrote ${rows.length} passages to ${corpus.dir}/${file}\n`);
   }
 
-  if (only.length > 0) return;
-  writeFileSync(join(dir, "request.txt"), `${corpus.request}\n`);
-  writeFileSync(
-    join(dir, "README.txt"),
-    [
-      corpus.name,
-      "",
-      ...corpus.about,
-      "",
-      "Drag every .jsonl file in this folder in at once, then paste request.txt into",
-      "the box asking what the model should learn to do.",
-      "",
-      "Files:",
-      ...written.map((w) => `  ${w.file}  ${w.passages} passages`),
-      "",
-      `${written.reduce((sum, w) => sum + w.passages, 0)} passages in total.`,
-      "",
-    ].join("\n"),
-  );
+  describe(corpus, dir, only.length > 0 ? onDisk(corpus, dir) : written);
   process.stdout.write(`  ${corpus.dir}/: ${written.reduce((sum, w) => sum + w.passages, 0)} passages across ${written.length} files\n`);
 }
 
