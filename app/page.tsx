@@ -609,7 +609,9 @@ function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string
       {stress?.error && <div className="text-bad">{stress.error}</div>}
       {stress && stress.attempts.length > 0 && (
         <div className="space-y-2">
-          {stress.attempts.map((a, i) => (
+          {stress.attempts
+            .filter((a) => !a.quiet)
+            .map((a, i) => (
             <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
               <div>{a.what}</div>
               <div style={{ color: toneOf(a) }}>{a.result}</div>

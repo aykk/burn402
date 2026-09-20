@@ -104,6 +104,7 @@ export type Runtime = {
 };
 
 export type StoredTransaction = TransactionRecord & {
+  mark: number | null;
   arweaveId: string | null;
   arweaveUrl: string | null;
   network: Network;
@@ -188,6 +189,7 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
     const network: Network = rtNow?.network ?? defaultNetwork();
     const entry: StoredTransaction = {
       ...record,
+      mark: null,
       arweaveId: null,
       arweaveUrl: null,
       network,

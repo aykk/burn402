@@ -29,6 +29,11 @@ function plainReason(reason: string): string {
   return reason.replace(/^[A-Z_]+: /, "");
 }
 
+function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
+  if (a.blocked === null) return a.ok ? "var(--ok)" : "var(--bad)";
+  return a.blocked ? "var(--bad)" : "var(--ok)";
+}
+
 const BUILT_IN: Record<string, string> = {
   stresstester: "built in, limit tester",
   helper: "built in, limit tester",
@@ -137,16 +142,21 @@ export default function AuditPage() {
 
             {stress && stress.attempts.length > 0 && (
               <div className="space-y-3">
-                <div className="text-muted">
-                  {stress.job ? `What a second agent tried against ${shortName(stress.job.agent)}` : "What a second agent tried"}
-                </div>
-                {stress.attempts.map((a, i) => (
-                  <div key={i} className="border-l-2 pl-3" style={{ borderColor: a.ok ? "var(--ok)" : "var(--bad)" }}>
-                    <div>it {a.what}</div>
-                    <div style={{ color: a.ok ? "var(--ok)" : "var(--bad)" }}>{a.result}</div>
-                    <div className="text-muted">{a.proves}</div>
-                  </div>
-                ))}
+                <h2 className="font-bold">
+                  Limit test for: <span className="break-all font-normal">{stress.job ? stress.job.agent : "this agent"}</span>
+                </h2>
+                {stress.attempts
+                  .filter((a) => !a.quiet)
+                  .map((a, i) => (
+                    <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
+                      <div>
+                        {a.mark !== null && <span className="text-muted">[{a.mark}] </span>}
+                        {a.what}
+                      </div>
+                      <div style={{ color: toneOf(a) }}>{a.result}</div>
+                      <div className="text-muted">{a.proves}</div>
+                    </div>
+                  ))}
                 {stress.verdictUrl && (
                   <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
                     the verdict against it, permanently on Arweave
@@ -164,6 +174,7 @@ export default function AuditPage() {
                   {[...snap.transactions].reverse().map((t, i) => (
                     <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.outcome === "accepted" ? "var(--ok)" : "var(--bad)" }}>
                       <div>
+                        {t.mark !== null && <span className="text-muted">[{t.mark}] </span>}
                         <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "allowed" : t.outcome}</span> ·{" "}
                         {shortName(t.subject)} · {t.plan}
                         {t.usd !== null && t.outcome === "accepted" ? ` · ${t.usd.toFixed(6)} USDC` : ""}
