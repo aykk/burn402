@@ -29,6 +29,15 @@ function plainReason(reason: string): string {
   return reason.replace(/^[A-Z_]+: /, "");
 }
 
+const BUILT_IN: Record<string, string> = {
+  stresstester: "built in, limit tester",
+  helper: "built in, limit tester",
+  broker: "built in, holds the provider key",
+  auditor: "built in, signs the verdicts",
+  vultr: "built in, the Vultr desk",
+  ops: "built in, sample agent",
+};
+
 export default function AuditPage() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -189,11 +198,15 @@ export default function AuditPage() {
               <h2 className="font-bold">Registered agents</h2>
               <div className="mb-2 text-muted">Each name resolves to keys sealed in the transparency log. A signature that does not match is refused.</div>
               <div className="space-y-0.5">
-                {(snap?.agents ?? []).map((name) => (
-                  <div key={name} className="break-all">
-                    {name}
-                  </div>
-                ))}
+                {(snap?.agents ?? []).map((name) => {
+                  const role = BUILT_IN[/^ans:\/\/v[\d.]+\.([^.]+)\./.exec(name)?.[1] ?? ""];
+                  return (
+                    <div key={name} className="break-all">
+                      {name}
+                      {role && <span className="text-muted"> · {role}</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
