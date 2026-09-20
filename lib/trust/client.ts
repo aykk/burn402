@@ -45,6 +45,15 @@ export class TrustIndexClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
+  async reachable(): Promise<boolean> {
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   importAgents(agents: TrustAgent[]): Promise<unknown> {
     return this.call("POST", "/v1/internal/agents/import", { agents });
   }

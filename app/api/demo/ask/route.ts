@@ -1,4 +1,4 @@
-import { currentModel } from "@/lib/demo/models";
+import { currentModel, isProvider, modelFor } from "@/lib/demo/models";
 import { lastText, runLlm } from "@/lib/demo/llm";
 
 export const dynamic = "force-dynamic";
@@ -6,13 +6,13 @@ export const dynamic = "force-dynamic";
 type Passage = { title: string; url: string; text: string; score: number };
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as { question?: string; passages?: Passage[] };
+  const body = (await request.json()) as { question?: string; passages?: Passage[]; provider?: string };
   const question = String(body.question ?? "").trim();
   const passages = (body.passages ?? []).slice(0, 6);
   if (!question) return Response.json({ error: "ask a question first" }, { status: 400 });
   if (passages.length === 0) return Response.json({ error: "the index found nothing to answer from" }, { status: 400 });
 
-  const choice = currentModel();
+  const choice = isProvider(body.provider) ? modelFor(body.provider) : currentModel();
   const sources = passages.map((p, i) => `[${i + 1}] ${p.title || p.url}\n${p.url}\n${p.text}`).join("\n\n");
   try {
     const transcript = await runLlm({

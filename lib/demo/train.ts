@@ -37,6 +37,7 @@ export type TrainingRunView = {
   preference: number;
   foldJobs: number;
   model: { name: string; company: string };
+  agent: { name: string; ansName: string };
   messages: A2AMessage[];
   quotes: PlanQuote[];
   chosen: PlanQuote | null;
@@ -80,6 +81,7 @@ function view(run: TrainingRun): TrainingRunView {
     preference: run.brief.preference,
     foldJobs: run.brief.foldJobs,
     model: run.model,
+    agent: { name: run.agent.name, ansName: run.agent.ansName },
     messages: run.messages,
     quotes: run.quotes,
     chosen: run.chosen,
@@ -115,6 +117,7 @@ export class TrainingRun {
   readonly spec: JobSpec;
   readonly brief: Brief;
   readonly model: { name: string; company: string };
+  readonly agent: { name: string; ansName: string; keyFile: string };
   readonly messages: A2AMessage[] = [];
   readonly transcript: { kind: string; content: string }[] = [];
   phase: JobPhase = "negotiating";
@@ -135,13 +138,20 @@ export class TrainingRun {
   liveAt: number | null = null;
   doneAt: number | null = null;
   sent = false;
+  chain: string[] = [];
   error: string | null = null;
 
   constructor(
     rt: Runtime,
     request: string,
     dataset: DatasetSource,
-    options: { budgetUsd: number; rateUsdHr?: number; deadlineMinutes?: number; preference: number },
+    options: {
+      agent?: { name: string; ansName: string; keyFile: string };
+      budgetUsd: number;
+      rateUsdHr?: number;
+      deadlineMinutes?: number;
+      preference: number;
+    },
   ) {
     this.rt = rt;
     this.id = `job_${Date.now().toString(36)}`;
@@ -152,6 +162,7 @@ export class TrainingRun {
     const deadlineMinutes = Math.min(120, Math.max(3, Math.round(options.deadlineMinutes ?? DEFAULT_DEADLINE_MINUTES)));
     const choice = currentModel();
     this.model = { name: choice.modelName, company: choice.company };
+    this.agent = options.agent ?? { name: "your agent", ansName: rt.actors.ops.name, keyFile: "ops" };
     this.brief = {
       request,
       kind: this.spec.kind,
@@ -177,14 +188,15 @@ export class TrainingRun {
   }
 
   private async mandateChain(): Promise<{ chain: string[]; jti: string }> {
-    const { human, ops } = this.rt.actors;
+    const { human } = this.rt.actors;
+    const subject = this.agent.ansName;
     const now = Math.floor(Date.now() / 1000);
     const jti = this.mandateJti!;
     const mandate: Mandate = {
       jti,
       iss: human.name,
-      sub: ops.name,
-      aud: ops.name,
+      sub: subject,
+      aud: subject,
       parent: null,
       depth: 0,
       max_depth: 2,
@@ -198,6 +210,7 @@ export class TrainingRun {
     const [protectedHeader, payload, signature] = compact.split(".");
     const admitted = await this.rt.registry.admitRoot({ protected: protectedHeader, payload, signature });
     if (!admitted.ok) throw new Error("your budget was refused before the job started");
+    this.chain = [compact];
     return { chain: [compact], jti };
   }
 
@@ -225,6 +238,7 @@ export class TrainingRun {
         "company.ts",
         {
           runId: this.id,
+          keyFile: this.agent.keyFile,
           brokerBase: new URL(this.rt.gateUrl).origin,
           chain,
           brief: this.brief,

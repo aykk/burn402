@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { importJWK, type JWK } from "jose";
 import { HttpTlSource, parseRootKeys, TransparencyLogDirectory, type DirectoryEntry } from "../ans";
+import { registrationConfig } from "./register";
 import { anchorTransaction, TurboGateway, type AnchorPolicy, type Network } from "../anchor";
 import type { Auditor } from "../auditor";
 import { Broker, FakeResource, VultrResource, type Resource } from "../burn";
@@ -17,6 +18,7 @@ export type Actor = SigningKey & { name: string; privateJwk: JWK };
 
 export type DemoConfig = {
   root: string;
+  registration: ReturnType<typeof registrationConfig>;
   tlUrl: string;
   tlApiKey: string;
   trustIndexUrl: string;
@@ -36,6 +38,7 @@ export function defaultNetwork(): Network {
 export function configFromEnv(root = process.cwd()): DemoConfig {
   return {
     root,
+    registration: registrationConfig(root),
     tlUrl: process.env.TL_URL ?? "http://localhost:18081",
     tlApiKey: process.env.TL_API_KEY ?? "tl-internal-key",
     trustIndexUrl: process.env.TRUST_INDEX_URL ?? "http://localhost:8090",
@@ -54,7 +57,7 @@ function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
 }
 
-async function loadActor(root: string, name: string): Promise<Actor> {
+export async function loadActor(root: string, name: string): Promise<Actor> {
   const f = readJson<{ ansName?: string; principal?: string; kid: string; privateJwk: JWK }>(join(root, ".burn402", "keys", `${name}.json`));
   return {
     name: f.ansName ?? f.principal!,
@@ -77,7 +80,7 @@ function simulatedResource(root: string, region: string, now: () => number): Fak
 export type Runtime = {
   config: DemoConfig;
   log: DemoLog;
-  actors: { human: Actor; ops: Actor; broker: Actor; auditor: Actor; stresstester: Actor; helper: Actor; vultr: Actor };
+  actors: { human: Actor; ops: Actor; broker: Actor; auditor: Actor; stresstester: Actor; helper: Actor; vultr: Actor; company?: Actor };
   entries: Record<string, DirectoryEntry>;
   tl: HttpTlSource;
   directory: TransparencyLogDirectory;

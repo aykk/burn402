@@ -26,6 +26,7 @@ export {
   type PlanQuote,
 } from "./estimate";
 export { TRAIN_DIR, UPLOAD_PATH, trainerSource, trainingBootScript } from "./boot";
+export { combine, withinLimit, type Combined, type Part } from "./combine";
 export {
   RUNTIMES,
   formatMetric,
@@ -46,6 +47,7 @@ export {
   filterQuotes,
   jobDescription,
   offerFor,
+  planNamed,
   vultrSystemPrompt,
   vultrTask,
   type A2ARequest,

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/demo/session";
 import { currentModel } from "@/lib/demo/models";
 import { lastText, runLlm } from "@/lib/demo/llm";
 import { signJws, toCompact, verifyJws } from "@/lib/mandate";
-import { A2A_TYP, offerFor, vultrSystemPrompt, vultrTask, type A2ARequest, type Offer } from "@/lib/train";
+import { A2A_TYP, offerFor, planNamed, vultrSystemPrompt, vultrTask, type A2ARequest, type Offer } from "@/lib/train";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +50,6 @@ export async function POST(request: Request) {
     limits: counter ? { maxSeconds: counter.maxSeconds, maxUsd: counter.maxUsd } : undefined,
   });
   run.quotes = quotes;
-  if (chosen) {
-    run.chosen = chosen;
-    run.chosenReason = reason;
-  }
 
   const choice = currentModel();
   let text: string;
@@ -64,13 +60,19 @@ export async function POST(request: Request) {
       apiKey: choice.apiKey,
       baseUrl: choice.baseUrl,
       system: vultrSystemPrompt(rt.config.region),
-      task: vultrTask(run.brief, quotes, chosen, reason, counter?.ask ?? null),
+      task: vultrTask(run.brief, quotes, counter?.ask ?? null),
       maxTurns: 1,
       maxTokens: 700,
     });
     text = lastText(transcript) || reason;
   } catch (error) {
     text = `${reason}. (the desk's model was unavailable: ${(error as Error).message})`;
+  }
+
+  const recommended = planNamed(quotes, text) ?? chosen;
+  if (recommended) {
+    run.chosen = recommended;
+    run.chosenReason = recommended.plan === chosen?.plan ? reason : `${recommended.plan} is what the Vultr desk recommended for this job`;
   }
 
   const offer: Offer = {
@@ -80,7 +82,7 @@ export async function POST(request: Request) {
     aud: message.iss,
     at: Math.floor(Date.now() / 1000),
     quotes,
-    recommend: chosen?.plan ?? null,
+    recommend: recommended?.plan ?? null,
     reason,
     text,
   };

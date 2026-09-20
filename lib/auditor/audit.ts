@@ -107,7 +107,7 @@ const RULE_TO_CHECK: Record<number, CheckId> = {
 const EPSILON = 1e-9;
 
 function usd(n: number): string {
-  return n.toFixed(2);
+  return n.toFixed(4).replace(/(\.\d{2}[1-9]*?)0+$/, "$1");
 }
 
 type Finding = { check: CheckId; mode: FailureMode; detail: string };

@@ -14,6 +14,9 @@ export type Snapshot = {
   network: "testnet" | "production";
   helper: { ansName: string; budget: number; hourlyCap: number };
   agent: AgentRunView;
+  company: { name: string; ansName: string } | null;
+  runs: TrainingRunView[];
+  agents: string[];
   job: TrainingRunView | null;
   previous: TrainingRunView | null;
   models: ModelsView;
@@ -40,6 +43,9 @@ export function snapshot(s: DemoSession): Snapshot {
     network: rt.network,
     helper: { ansName: rt.actors.helper.name, budget: AGENT_BUDGET, hourlyCap: HOURLY_CAP },
     agent: s.agent,
+    company: s.company ? { name: s.company.name, ansName: s.company.ansName } : null,
+    runs: s.finished().map((r) => r.view()),
+    agents: Object.keys(s.rt.entries),
     job: s.job?.view() ?? null,
     previous: s.previous,
     models: modelsView(),

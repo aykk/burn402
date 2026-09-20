@@ -2,10 +2,13 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #000000;
-  --muted: #6e7781;
-  --rule: #d0d7de;
+  --foreground: #16181d;
+  --muted: #71757e;
+  --rule: #e6e8ec;
+  --rule-strong: #c9cdd4;
+  --surface: #fafbfc;
   --burn: #c2410c;
+  --mark: #f97316;
   --ok: #1a7f37;
   --bad: #cf222e;
   --paid: #0969da;
@@ -17,7 +20,10 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-surface: var(--surface);
   --color-burn: var(--burn);
+  --color-mark: var(--mark);
   --color-ok: var(--ok);
   --color-bad: var(--bad);
   --color-paid: var(--paid);
@@ -26,15 +32,86 @@
   --font-mono: var(--font-geist-mono);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 13px;
-}
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 13.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
+  }
 
-a {
-  color: var(--paid);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  h1,
+  h2 {
+    letter-spacing: -0.02em;
+  }
+
+  a {
+    color: var(--paid);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: color-mix(in srgb, var(--paid) 35%, transparent);
+    transition: text-decoration-color 120ms ease;
+  }
+
+  a:hover {
+    text-decoration-color: var(--paid);
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    border-radius: 6px;
+  }
+
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  textarea,
+  select {
+    background: var(--surface);
+    transition:
+      border-color 120ms ease,
+      background 120ms ease;
+  }
+
+  input[type="text"]:focus-visible,
+  input[type="password"]:focus-visible,
+  input[type="number"]:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: var(--rule-strong);
+    background: var(--background);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--rule) 60%, transparent);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--muted) 80%, transparent);
+  }
+
+  button {
+    transition:
+      background 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input[type="range"] {
+    accent-color: var(--foreground);
+  }
+
+  table {
+    font-variant-numeric: tabular-nums;
+  }
 }

@@ -9,6 +9,10 @@ import type { DatasetSource, TrainedModel } from "./types";
 
 const LIMITS = { budgetUsd: 20, rateUsdHr: 5, prepayHours: 1 / 12 };
 
+function repeat<T>(rows: T[], times: number): T[] {
+  return Array.from({ length: times }, () => rows).flat();
+}
+
 const PLANS: CatalogPlan[] = [
   { id: "vc2-1c-1gb", family: "vc2", vcpus: 1, ramGb: 1, diskGb: 25, hourlyUsd: 0.007, monthlyUsd: 5 },
   { id: "vc2-2c-2gb", family: "vc2", vcpus: 2, ramGb: 2, diskGb: 55, hourlyUsd: 0.021, monthlyUsd: 15 },
@@ -241,10 +245,13 @@ describe("document search", () => {
   };
 
   it("detects a corpus of passages with links as a search job, not a classifier", () => {
-    const body = [
-      JSON.stringify({ title: "Deploy Redis", url: "https://docs.example/redis", text: "Install Redis on Ubuntu with apt and enable the service." }),
-      JSON.stringify({ title: "Object storage", url: "https://docs.example/storage", text: "Create a bucket and upload files with the s3 compatible API." }),
-    ].join("\n");
+    const body = repeat(
+      [
+        JSON.stringify({ title: "Deploy Redis", url: "https://docs.example/redis", text: "Install Redis on Ubuntu with apt and enable the service." }),
+        JSON.stringify({ title: "Object storage", url: "https://docs.example/storage", text: "Create a bucket and upload files with the s3 compatible API." }),
+      ],
+      15,
+    ).join("\n");
     const { dataset } = detect(body, { name: "docs.jsonl", bytes: body.length, origin: "upload", url: "upload://up_1", uploadId: "up_1" });
     expect(dataset.kind).toBe("retrieval");
     expect(dataset.urlField).toBe("url");
@@ -300,10 +307,13 @@ describe("reading data the user brought", () => {
 
   it("finds the label and text columns in a CSV", async () => {
     serve(
-      [
-        '"3","Stocks slip","Shares fell again as traders weighed the outlook for rates and earnings."',
-        '"2","Cup final","The match went to penalties after ninety minutes of deadlock in the final."',
-      ].join("\n"),
+      repeat(
+        [
+          '"3","Stocks slip","Shares fell again as traders weighed the outlook for rates and earnings."',
+          '"2","Cup final","The match went to penalties after ninety minutes of deadlock in the final."',
+        ],
+        30,
+      ).join("\n"),
     );
     const { dataset } = await sniff("https://example.test/news.csv");
     expect(dataset.kind).toBe("classifier");
@@ -315,7 +325,9 @@ describe("reading data the user brought", () => {
 
   it("reads JSONL by field name and reports the labels it found", async () => {
     serve(
-      [JSON.stringify({ label: "urgent", text: "the site is down for everyone" }), JSON.stringify({ label: "normal", text: "can you send the invoice" })].join("\n"),
+      repeat([JSON.stringify({ label: "urgent", text: "the site is down for everyone" }), JSON.stringify({ label: "normal", text: "can you send the invoice" })], 30).join(
+        "\n",
+      ),
     );
     const { dataset, labels } = await sniff("https://example.test/tickets.jsonl");
     expect(dataset.format).toBe("jsonl");
@@ -325,7 +337,7 @@ describe("reading data the user brought", () => {
   });
 
   it("treats plain text as a language model job", async () => {
-    serve("To be or not to be, that is the question.\nWhether tis nobler in the mind to suffer.");
+    serve(repeat(["To be or not to be, that is the question.", "Whether tis nobler in the mind to suffer."], 100).join("\n"));
     expect((await sniff("https://example.test/play.txt")).dataset.kind).toBe("generator");
   });
 
@@ -333,8 +345,23 @@ describe("reading data the user brought", () => {
     await expect(sniff("file:///etc/passwd")).rejects.toThrow("http");
   });
 
+  it("refuses data too small to train on, before anyone pays for a server", async () => {
+    serve(["urgent\tthe site is down", "normal\tsend the invoice"].join("\n"));
+    await expect(sniff("https://example.test/tiny.tsv")).rejects.toThrow("at least");
+  });
+
+  it("refuses a file that is not text", async () => {
+    serve(String.fromCharCode(...Array.from({ length: 400 }, (_, i) => (i * 7) % 12)));
+    await expect(sniff("https://example.test/blob.bin")).rejects.toThrow("not text");
+  });
+
+  it("refuses a web page and says to use the data behind it", async () => {
+    serve(`<!doctype html><html><body>${"<p>hello</p>".repeat(400)}</body></html>`);
+    await expect(sniff("https://example.test/page.html")).rejects.toThrow("web page");
+  });
+
   it("detects an uploaded file without fetching anything", () => {
-    const body = ["urgent\tthe site is down for everyone", "normal\tcan you send the invoice over"].join("\n");
+    const body = repeat(["urgent\tthe site is down for everyone", "normal\tcan you send the invoice over"], 30).join("\n");
     const { dataset, labels } = detect(body, { name: "tickets.tsv", bytes: body.length, origin: "upload", url: "upload://up_9", uploadId: "up_9" });
     expect(dataset.origin).toBe("upload");
     expect(dataset.uploadId).toBe("up_9");

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { Nav } from "@/app/nav";
 import { useEffect, useState } from "react";
 
 type Step = { name: string; ok: boolean; detail: string };
@@ -16,6 +16,7 @@ type Record = {
   issuedAt: number | null;
   anchoredAt: number | null;
   subject: string | null;
+  reason: string | null;
   outcome: Outcome;
   verified: boolean;
   steps: Step[];
@@ -34,7 +35,9 @@ function when(seconds: number | null): string | null {
 
 export default function RecordsPage() {
   const [network, setNetwork] = useState<"testnet" | "production">("production");
-  const [fqdn, setFqdn] = useState("");
+  const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad">("all");
+  const [agent, setAgent] = useState("");
+  const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -48,7 +51,7 @@ export default function RecordsPage() {
     const run = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/records?network=${network}${fqdn ? `&fqdn=${encodeURIComponent(fqdn)}` : ""}`, { cache: "no-store" });
+        const res = await fetch(`/api/records?network=${network}`, { cache: "no-store" });
         const body = (await res.json()) as Response;
         if (!cancelled) setData(body);
       } finally {
@@ -60,63 +63,102 @@ export default function RecordsPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [network, fqdn]);
+  }, [network]);
+
+  const records = data?.records ?? [];
+  const agents = [...new Set(records.map((r) => r.subject ?? "").filter(Boolean))].sort();
+  const shown = records.filter(
+    (r) =>
+      (outcome === "all" || r.outcome.tone === outcome) &&
+      (agent === "" || r.subject === agent) &&
+      (needle === "" ||
+        `${r.headline} ${r.outcome.label} ${r.reason ?? ""} ${r.subject ?? ""} ${r.kind} ${r.id} ${when(r.issuedAt) ?? ""}`.toLowerCase().includes(needle.toLowerCase())),
+  );
 
   return (
-    <main className="mx-auto w-full max-w-[1100px] px-4 py-4 space-y-4">
-      <header className="flex flex-wrap items-center gap-4 border-b border-rule pb-2">
-        <Link href="/" className="font-bold text-foreground no-underline">
-          burn402
-        </Link>
-        <span className="font-bold">Arweave records</span>
-        <span className="ml-auto flex items-center gap-2">
+    <main className="mx-auto flex h-screen w-full max-w-[1280px] flex-col overflow-hidden px-10 py-6">
+      <Nav current="/records">
+        <span className="flex items-center gap-2">
           <span className="text-muted">Arweave</span>
           {(["testnet", "production"] as const).map((n) => (
-            <button key={n} className={`border px-2 ${network === n ? "border-foreground font-bold" : "border-rule text-muted"}`} onClick={() => setNetwork(n)}>
+            <button
+              key={n}
+              className={`border px-3 py-1 ${network === n ? "border-foreground bg-foreground text-background" : "border-rule-strong text-muted hover:border-foreground"}`}
+              onClick={() => setNetwork(n)}
+            >
               {n === "production" ? "mainnet" : "testnet"}
             </button>
           ))}
         </span>
-      </header>
+      </Nav>
 
-      <p className="max-w-[80ch]">
+      <p className="mt-4 max-w-[80ch] shrink-0">
         All records (successful handshakes, transactions, failures) are written to Arweave. You can toggle between
         Testnet and Mainnet (Mainnet is truly permanent and public). Refresh page to reload.
       </p>
 
-      <label className="flex flex-wrap items-center gap-2">
-        <span className="text-muted">Filter by agent domain</span>
+      <div className="mt-4 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-rule pb-4">
+        <span className="flex items-center gap-2">
+          {(
+            [
+              ["all", "everything"],
+              ["good", "allowed"],
+              ["warn", "refused"],
+              ["bad", "broken rules"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={`border px-3 py-1 ${outcome === key ? "border-foreground bg-foreground text-background" : "border-rule-strong text-muted hover:border-foreground"}`}
+              onClick={() => setOutcome(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </span>
+        <select className="min-w-0 border border-rule px-2.5 py-1.5" value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <option value="">every agent</option>
+          {agents.map((a) => (
+            <option key={a} value={a}>
+              {a.replace(/^ans:\/\/v[\d.]+\./, "")}
+            </option>
+          ))}
+        </select>
         <input
-          className="min-w-0 flex-1 max-w-[380px] border border-rule px-2 py-1"
-          placeholder="every agent"
-          value={fqdn}
-          onChange={(e) => setFqdn(e.target.value.trim())}
+          className="min-w-0 flex-1 border border-rule px-2.5 py-1.5"
+          placeholder="search"
+          value={needle}
+          onChange={(e) => setNeedle(e.target.value)}
         />
-      </label>
+      </div>
 
-      {loading && <div className="text-muted">Reading from Arweave and checking each record…</div>}
-      {data?.error && <div className="text-bad">{data.error}</div>}
+      {loading && <div className="mt-4 shrink-0 text-muted">Reading from Arweave and checking each record…</div>}
+      {data?.error && <div className="mt-4 shrink-0 text-bad">{data.error}</div>}
       {data?.records && !loading && (
-        <div className="space-y-4">
-          <div>
-            {data.records.length} record{data.records.length === 1 ? "" : "s"}
-            {data.fqdn ? ` for ${data.fqdn}` : ""} on Arweave {data.network === "production" ? "mainnet" : "testnet"}.{" "}
-            <span className="text-muted">Gateway: {data.gatewayUrl}</span>
+        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3">
+          <div className="shrink-0">
+            {shown.length === records.length
+              ? `${records.length} record${records.length === 1 ? "" : "s"}`
+              : `${shown.length} of ${records.length} records`}{" "}
+            on Arweave {data.network === "production" ? "mainnet" : "testnet"}. <span className="text-muted">Gateway: {data.gatewayUrl}</span>
           </div>
-          {data.records.map((r) => (
-            <div key={r.id} className="border border-rule p-3 space-y-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-4 pr-3">
+          {shown.length === 0 && <div className="text-muted">Nothing matches those filters.</div>}
+          {shown.map((r) => (
+            <div key={r.id} className="space-y-1.5 rounded-lg border border-rule p-4">
               <div className="flex flex-wrap items-baseline gap-x-4">
                 <span className="text-muted">{r.kind}</span>
                 <span>{r.headline}</span>
                 <span className="text-muted">{when(r.issuedAt) ?? when(r.anchoredAt) ?? "date not on record"}</span>
-                <span className="text-muted">{r.subject}</span>
+                <span className="text-muted">{(r.subject ?? "").replace(/^ans:\/\/v[\d.]+\./, "")}</span>
                 <span className="ml-auto flex items-baseline gap-3">
                   <span className="font-bold" style={{ color: TONE[r.outcome.tone] }}>
                     {r.outcome.tone === "good" ? "✓" : r.outcome.tone === "bad" ? "✗" : "!"} {r.outcome.label}
                   </span>
-                  <span className={r.verified ? "text-muted" : "text-bad"}>{r.verified ? "signature checks out" : "signature did not check out"}</span>
+                  <span className={r.verified ? "text-muted" : "text-bad"}>{r.verified ? "signature verified" : "signature not verified"}</span>
                 </span>
               </div>
+              {r.reason && <div className="text-muted">{r.reason}</div>}
               <div className="break-all">
                 <a href={r.rawUrl} target="_blank" rel="noreferrer">
                   raw record {r.id}
@@ -141,6 +183,7 @@ export default function RecordsPage() {
               </details>
             </div>
           ))}
+          </div>
         </div>
       )}
     </main>

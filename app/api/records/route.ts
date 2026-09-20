@@ -45,12 +45,29 @@ function transactionOutcome(outcome: string | null): Outcome {
   return { label: outcome ?? "unknown", tone: "warn" };
 }
 
+export function plainRefusal(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
+  if (rate) return `the server costs $${rate[1]} an hour and the budget allowed $${rate[2]}`;
+  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "the budget was signed by a key that does not belong to the agent named on it";
+  if (/BUDGET_EXCEEDED/.test(reason)) return "the budget had no money left in it";
+  if (/WINDOW_EXPIRED/.test(reason)) return "the budget had already expired";
+  if (/SCOPE_ESCALATION/.test(reason)) return "the budget does not cover renting servers";
+  if (/IDENTITY_UNANCHORED/.test(reason)) return "the agent is not registered in ANS";
+  if (/DEPTH_EXCEEDED/.test(reason)) return "the budget had been passed on more times than it allows";
+  if (/PLAN_UNKNOWN/.test(reason)) return "there is no such plan at the provider";
+  if (/PLAN_UNAVAILABLE/.test(reason)) return "that plan is not available in this region";
+  if (/Cannot add instance|out of stock|capacity/i.test(reason)) return "the provider had none of that plan left to give";
+  if (/PROVIDER_ERROR/.test(reason)) return `the provider refused to start it: ${reason.replace(/^.*HTTP \d+: /, "").slice(0, 120)}`;
+  return reason.replace(/^[A-Z_]+: /, "");
+}
+
 function plainTransaction(outcome: string | null, plan: string | null, usd: number | null | undefined): string {
   const server = plan ? `a ${plan} server` : "a server";
   if (outcome === "accepted") return `paid ${usd !== null && usd !== undefined ? `${usd.toFixed(6)} USDC ` : ""}for ${server}`;
   if (outcome === "refused") return `asked for ${server} and was refused`;
   if (outcome === "payment rejected") return `tried to pay for ${server} and the payment was rejected`;
-  if (outcome === "failed") return `paid for ${server} but it could not be started`;
+  if (outcome === "failed") return `asked for ${server} and it could not be started`;
   return `${outcome ?? "asked"} ${server}`;
 }
 
@@ -66,6 +83,7 @@ type StoredRecord = {
   issuedAt: number | null;
   anchoredAt: number | null;
   subject: string | null;
+  reason: string | null;
   outcome: Outcome;
   verified: boolean;
   steps: Step[];
@@ -106,6 +124,7 @@ export async function GET(request: Request) {
           issuedAt: report.verdict?.issued_at ?? seconds(tagOf(item.tags, "Issued-At")),
           anchoredAt: item.blockAt,
           subject: report.verdict?.subject ?? tagOf(item.tags, "Subject-ANS"),
+          reason: report.verdict?.checks?.find((c) => c.result === "FAIL")?.detail ?? null,
           outcome: verdictOutcome(report.verdict?.verdict),
           verified: report.ok,
           steps: report.steps,
@@ -117,10 +136,11 @@ export async function GET(request: Request) {
         let subject = tagOf(item.tags, "Subject-FQDN");
         let headline = plainTransaction(tagOf(item.tags, "Outcome"), tagOf(item.tags, "Plan"), null);
         let outcome = transactionOutcome(tagOf(item.tags, "Outcome"));
+        let reason: string | null = null;
         let verified = false;
         try {
           const body = JSON.parse(new TextDecoder().decode(await gateway.fetchData(item.id))) as {
-            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null };
+            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null };
             jws?: string;
           };
           steps.push({ name: "arweave item", ok: true, detail: `uploaded by ${item.ownerKey}` });
@@ -129,6 +149,7 @@ export async function GET(request: Request) {
             subject = body.transaction.subject ?? subject;
             headline = plainTransaction(body.transaction.outcome ?? null, body.transaction.plan ?? null, body.transaction.usd);
             outcome = transactionOutcome(body.transaction.outcome ?? null);
+            reason = plainRefusal(body.transaction.reason);
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {
@@ -150,6 +171,7 @@ export async function GET(request: Request) {
           issuedAt,
           anchoredAt: item.blockAt,
           subject,
+          reason,
           outcome,
           verified,
           steps,

@@ -42,6 +42,13 @@ export function filterQuotes(list: PlanQuote[], limits: { maxSeconds: number | n
   return list.filter((q) => (limits.maxSeconds === null || q.totalSeconds <= limits.maxSeconds) && (limits.maxUsd === null || q.jobUsd <= limits.maxUsd));
 }
 
+export function planNamed(list: PlanQuote[], text: string): PlanQuote | null {
+  const named = list
+    .filter((q) => new RegExp(`\\b${q.plan.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text))
+    .sort((a, b) => text.indexOf(a.plan) - text.indexOf(b.plan));
+  return named[0] ?? null;
+}
+
 export function offerFor(options: {
   spec: JobSpec;
   plans: CatalogPlan[];
@@ -63,50 +70,52 @@ export function offerFor(options: {
 
 export function vultrSystemPrompt(region: string): string {
   return [
-    "You are the Vultr desk: an agent that knows one thing well, which Vultr instance suits a job.",
-    `Every plan you quote is a real Vultr plan available in ${region}, with its real hourly price.`,
-    "The timings you are given come from a measured model of this exact training job: a hyperparameter grid search cross-validated across a process pool, one worker per vCPU.",
-    "Answer in at most four short sentences. Name the plan you recommend, say what it costs for this job and how long it takes, and name the one plan a buyer might pick instead and why they might not.",
-    "Never invent a plan, a price or a timing. Never recommend a plan that does not have enough RAM.",
+    `You are the Vultr desk. You sell compute in ${region} and you know the catalogue better than the buyer does.`,
+    "You are given every plan that fits the buyer's hourly ceiling, with its real price and a predicted time for their exact job.",
+    "Choose the plan you would actually sell them, given what they asked for in their own words. The choice is yours, not theirs.",
+    "Name it exactly as it appears in the list, say what it costs for this job and when the model would be ready, and give the one reason you picked it over the nearest alternative.",
+    "If they push back, answer the constraint they raised. Change your recommendation if their constraint makes a different plan better, and say so plainly if it does not.",
+    "Never name a plan that is not in the list, never invent a price or a timing, and never recommend one marked as not fitting.",
+    "Three or four sentences. No preamble, no bullet points.",
   ].join(" ");
 }
 
-export function vultrTask(brief: Brief, list: PlanQuote[], chosen: PlanQuote | null, reason: string, ask: string | null): string {
+export function vultrTask(brief: Brief, list: PlanQuote[], ask: string | null): string {
+  const line = (q: PlanQuote) => {
+    const flags = [q.withinRate ? null : "over their hourly ceiling", q.enoughRam ? null : "not enough RAM for this job", q.withinDeadline ? null : "too slow for their deadline"].filter(
+      Boolean,
+    );
+    return `${q.plan}: ${q.vcpus} vCPU, ${q.ramGb} GB, ${q.familyLabel} cores, $${q.hourlyUsd.toFixed(4)} an hour. Ready in ${Math.round(q.totalSeconds / 6) / 10} min. This job costs $${q.jobUsd.toFixed(4)}. Their budget would cover ${q.budgetHours} hours of it.${flags.length > 0 ? ` DOES NOT FIT: ${flags.join(", ")}.` : ""}`;
+  };
   return [
-    ask ? `The company agent is pushing back: "${ask}"` : `The company agent asks for a quote: "${brief.request}"`,
+    ask ? `The buyer is pushing back: "${ask}"` : `A buyer asks for a quote. What they told their own agent, word for word: "${brief.request}"`,
     "",
-    `Job: ${jobDescription(brief.kind)} on ${brief.dataset.name} (${brief.dataset.note}).`,
-    `Work: ${brief.foldJobs} cross-validation jobs, which spread across vCPUs.`,
-    `Limits: budget $${brief.budgetUsd} in total, at most $${brief.rateUsdHr} per hour, and the model must be ready within ${brief.deadlineMinutes} minutes. Preference ${preferenceLabel(brief.preference)}.`,
+    `The job: ${jobDescription(brief.kind)} over ${brief.dataset.name} (${brief.dataset.note}), which splits into ${brief.foldJobs} pieces that run in parallel, one per vCPU.`,
+    `Their limits: $${brief.budgetUsd} in total, at most $${brief.rateUsdHr} an hour, and it has to be ready inside ${brief.deadlineMinutes} minutes. They said they lean ${preferenceLabel(brief.preference)}.`,
     "",
-    "Plans, timings and costs for this job:",
-    list
-      .map(
-        (q) =>
-          `${q.plan}: ${q.vcpus} vCPU, ${q.ramGb} GB, ${q.familyLabel} cores, $${q.hourlyUsd.toFixed(4)}/hour. Ready in ${Math.round(q.totalSeconds / 6) / 10} min (${q.trainSeconds}s training after an 80s boot). This job costs $${q.jobUsd.toFixed(4)}. The budget would last ${q.budgetHours} hours. Needs ${q.ramNeededGb} GB${q.enoughRam ? "" : " - NOT ENOUGH RAM ON THIS PLAN"}.`,
-      )
-      .join("\n"),
-    "",
-    chosen ? `The measured pick for this preference is ${chosen.plan}: ${reason}.` : "No plan fits those limits.",
+    "Your catalogue for this job:",
+    list.map(line).join("\n"),
   ].join("\n");
 }
 
 export function companySystemPrompt(name: string, budgetUsd: number, rateUsdHr: number): string {
   return [
-    `You are the company's own agent, ANS identity ${name}.`,
-    `You hold a mandate worth $${budgetUsd} in total with a ceiling of $${rateUsdHr} per hour, and you spend it through a broker over x402. You never hold a Vultr key.`,
-    "Your job: get the model your operator asked for, trained, for a sensible price.",
-    "Talk to the Vultr desk with ask_vultr. Ask for a quote first. Push back exactly once, with a concrete constraint, then rent with rent_server.",
-    "Rent one server only. Keep every message to two sentences. When you are done, say in one sentence what you rented, what it costs, and when the model will be ready.",
+    `You are a company's own agent, registered as ${name}.`,
+    `You hold a mandate worth $${budgetUsd} in total with a ceiling of $${rateUsdHr} an hour. You spend it through a broker over x402 and you never hold a provider key.`,
+    "Your operator has told you what they want in their own words. Read it and decide what actually matters to them before you talk to anyone.",
+    "Use ask_vultr to get a quote from the Vultr desk. Open by saying what your operator actually wants, in their words, before any of the technical detail. The desk already knows the job size; it does not know what this is for.",
+    "Then push back once, on whatever is weakest about the desk's answer for your operator: the price, the timing, the headroom, or the fit. Be specific about what you want instead.",
+    "Then rent one plan with rent_server. You may take the desk's recommendation or overrule it, but only from the plans it quoted.",
+    "Two sentences per message. Finish with one sentence saying what you rented, what it costs and when the model will be ready.",
   ].join(" ");
 }
 
 export function companyTask(brief: Brief): string {
   return [
-    `Your operator asked for: "${brief.request}"`,
+    `Your operator's request, word for word: "${brief.request}". Lead with this when you talk to the desk.`,
     `The dataset is ${brief.dataset.name} (${brief.dataset.note}), and the job is a ${jobDescription(brief.kind)} with ${brief.foldJobs} cross-validation jobs.`,
     `Your mandate: $${brief.budgetUsd} in total, a ceiling of $${brief.rateUsdHr} per hour, and it expires in ${brief.deadlineMinutes} minutes, so the model has to be ready before then.`,
     `Your operator's preference is ${preferenceLabel(brief.preference)}.`,
-    "Ask the Vultr desk what to rent, push back once on price or speed, then rent it.",
+    "Work out what that request implies about speed against cost, then get a quote, push back once, and rent.",
   ].join("\n");
 }

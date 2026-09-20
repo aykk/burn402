@@ -46,6 +46,13 @@ export function selectModel(id: ProviderId, key?: string): void {
   if (trimmed) store.keys[id] = trimmed;
 }
 
+export function modelFor(id: ProviderId): ModelChoice {
+  const p = PROVIDERS[id];
+  const apiKey = keyFor(id);
+  if (!apiKey) throw new Error(`add a ${p.name} API key first`);
+  return { provider: id, model: p.model, modelName: p.modelName, company: p.company, apiKey, baseUrl: p.baseUrl };
+}
+
 export function currentModel(): ModelChoice {
   const id = store.selected;
   const p = PROVIDERS[id];

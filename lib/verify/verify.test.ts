@@ -97,7 +97,7 @@ describe("publish then verify", () => {
     expect(report.ok).toBe(true);
     expect(report.steps.map((s) => s.name)).toEqual(["arweave item", "verdict record", "verdict signature", "arweave owner", "evidence hash", "re-audit"]);
     expect(report.chain.map((c) => [c.depth, c.jti])).toEqual([[0, "m_root"], [1, "m_rogue"]]);
-    expect(report.verdict?.checks.find((c) => c.id === "rate_ceiling")?.detail).toBe("provisioned 0.12/hr against mandate rate 0.06/hr");
+    expect(report.verdict?.checks.find((c) => c.id === "rate_ceiling")?.detail).toBe("provisioned 0.118/hr against mandate rate 0.06/hr");
   });
 
   it("the record fits the free upload tier", async () => {

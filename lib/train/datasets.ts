@@ -31,6 +31,9 @@ export const GENERATOR_SIZING = {
 
 export const MAX_DATASET_BYTES = 8000000;
 export const PROBE_BYTES = 200000;
+export const MIN_LABELLED_ROWS = 40;
+export const MIN_PASSAGES = 20;
+export const MIN_TEXT_CHARS = 5000;
 
 export type SniffResult = { dataset: DatasetSource; sampleRows: string[]; labels: string[] };
 
@@ -49,6 +52,11 @@ function splitCsv(line: string, sep: string): string[] {
   return out;
 }
 
+function atLeast(rows: number, minimum: number, what: string): number {
+  if (rows < minimum) throw new Error(`that file has about ${rows} ${what}; training needs at least ${minimum}`);
+  return rows;
+}
+
 function looksLikeLabel(value: string): boolean {
   return value.length > 0 && value.length <= 24 && !/\s{2}/.test(value) && value.split(/\s+/).length <= 3;
 }
@@ -59,6 +67,13 @@ export function detect(
 ): SniffResult {
   const lines = head.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length === 0) throw new Error("there is no readable text in that file");
+  const sampled = [...head.slice(0, 4000)];
+  const unreadable = sampled.filter((c) => {
+    const code = c.charCodeAt(0);
+    return c === "\uFFFD" || (code < 32 && c !== "\n" && c !== "\t" && c !== "\r");
+  }).length;
+  if (sampled.length > 0 && unreadable / sampled.length > 0.05) throw new Error("that file is not text, so there is nothing to read from it");
+  if (/^\s*(<!doctype html|<html|<\?xml)/i.test(head)) throw new Error("that looks like a web page rather than data; save the text or the table behind it and use that");
   const bytes = Math.max(options.bytes, head.length);
   const maxBytes = Math.min(bytes, MAX_DATASET_BYTES);
   const base = { id: "dataset", name: options.name.slice(0, 60), origin: options.origin, url: options.url, uploadId: options.uploadId, maxBytes, bytes };
@@ -73,6 +88,7 @@ export function detect(
       } catch {}
     }
     if (parsed.length === 0) throw new Error("those lines are not readable JSON objects");
+    if (parsed.length < 2) throw new Error("that file has one usable line in it, which is not enough to learn from");
     const keys = Object.keys(parsed[0]);
     const urlField = keys.find((k) => /^(url|link|source|href)$/i.test(k));
     const passageField = keys.find((k) => /text|body|content|passage|chunk/i.test(k));
@@ -89,7 +105,7 @@ export function detect(
           textField: passageField,
           urlField,
           titleField,
-          rows: Math.max(parsed.length, Math.round(parsed.length * scale)),
+          rows: atLeast(Math.max(parsed.length, Math.round(parsed.length * scale)), MIN_PASSAGES, "passages with links"),
           charsPerRow: Math.round(texts.reduce((sum, t) => sum + t.length, 0) / Math.max(1, texts.length)),
         },
         sampleRows: texts.slice(0, 3).map((t) => t.slice(0, 200)),
@@ -109,7 +125,7 @@ export function detect(
         labelField,
         textField,
         labels: labels.slice(0, 24),
-        rows: Math.max(parsed.length, Math.round(parsed.length * scale)),
+        rows: atLeast(Math.max(parsed.length, Math.round(parsed.length * scale)), MIN_LABELLED_ROWS, "labelled rows"),
         charsPerRow: Math.round(texts.reduce((sum, t) => sum + t.length, 0) / Math.max(1, texts.length)),
       },
       sampleRows: texts.slice(0, 3).map((t) => t.slice(0, 200)),
@@ -152,7 +168,7 @@ export function detect(
             labelColumn,
             textColumn,
             labels: labels.slice(0, 24),
-            rows: Math.max(body.length, Math.round(body.length * scale)),
+            rows: atLeast(Math.max(body.length, Math.round(body.length * scale)), MIN_LABELLED_ROWS, "labelled rows"),
             charsPerRow: Math.round(avgLength[textColumn]),
           },
           sampleRows: columns[textColumn].slice(0, 3).map((v) => v.slice(0, 200)),
@@ -163,6 +179,7 @@ export function detect(
   }
 
   if (options.want === "classifier") throw new Error("that file has no label column, so it can only train a language model");
+  if (bytes < MIN_TEXT_CHARS) throw new Error(`that file holds ${bytes} characters; a language model needs at least ${MIN_TEXT_CHARS.toLocaleString()}`);
   return {
     dataset: { ...base, kind: "generator", note: `plain text, ${Math.round(bytes / 1024).toLocaleString()} KB to learn a style from`, rows: 0, charsPerRow: 0 },
     sampleRows: [head.slice(0, 200)],

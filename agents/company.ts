@@ -8,6 +8,7 @@ import { payingFetch, requestProvision } from "../lib/x402";
 
 type Input = {
   runId: string;
+  keyFile?: string;
   brokerBase: string;
   chain: string[];
   brief: Brief;
@@ -30,8 +31,8 @@ function env(name: string): string {
   return value;
 }
 
-async function identity(): Promise<SigningKey & { name: string }> {
-  const f = JSON.parse(readFileSync(join(ROOT, ".burn402", "keys", "ops.json"), "utf8")) as { ansName: string; kid: string; privateJwk: JWK };
+async function identity(keyFile: string): Promise<SigningKey & { name: string }> {
+  const f = JSON.parse(readFileSync(join(ROOT, ".burn402", "keys", `${keyFile}.json`), "utf8")) as { ansName: string; kid: string; privateJwk: JWK };
   return { name: f.ansName, kid: f.kid, privateKey: (await importJWK(f.privateJwk, "EdDSA")) as CryptoKey };
 }
 
@@ -67,7 +68,7 @@ const tools: ToolDef[] = [
 
 async function main() {
   const input = await readInput();
-  const me = await identity();
+  const me = await identity(input.keyFile ?? "ops");
   let rented: { lease?: { handle?: string; plan?: string } } | null = null;
   let plan: string | null = null;
   let asks = 0;
