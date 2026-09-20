@@ -1,13 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 170">
   <defs>
-    <linearGradient id="f" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#FF4D00"/>
-      <stop offset="1" stop-color="#FFB02E"/>
+    <linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdba74"/>
+      <stop offset="45%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#c2410c"/>
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="8" fill="#0B0B0C"/>
-  <g transform="translate(16 16) scale(1.15) translate(-16 -15.65)">
-    <path fill="url(#f)" d="M16 4.5c.6 3.4 2.4 5.6 4.3 7.6 1.9 2 3.2 4.1 3.2 7.2A7.5 7.5 0 0 1 16 26.8a7.5 7.5 0 0 1-7.5-7.5c0-2.6 1.1-4.6 2.6-6.2.2 1.9 1 3.1 2.3 3.8-.4-4.6 1.1-9 2.6-12.4z"/>
-    <path fill="#FFE3A3" d="M16 16.5c1.8 1.7 3.1 3.2 3.1 5.2a3.1 3.1 0 0 1-6.2 0c0-2 1.3-3.5 3.1-5.2z"/>
-  </g>
+  <path fill="url(#f)" fill-rule="evenodd" d="M88 8 C 94 46 124 58 128 96 C 132 130 108 158 80 158 C 52 158 28 132 32 98 C 34 78 48 64 56 48 C 62 68 72 76 80 82 C 76 54 80 28 88 8 Z M80 92 C 88 106 100 114 100 128 C 100 142 91 152 80 152 C 69 152 60 142 60 128 C 60 114 72 106 80 92 Z"/>
 </svg>

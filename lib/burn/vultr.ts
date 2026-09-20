@@ -1,3 +1,4 @@
+import { setDefaultResultOrder } from "node:dns";
 import type { Resource, Spec } from "./resource";
 
 export const VULTR_API = "https://api.vultr.com/v2";
@@ -25,6 +26,31 @@ type VultrPlan = {
   locations: string[];
   location_cost?: Record<string, { hourly_cost?: number }>;
   gpu_type?: string;
+  gpu_vram_gb?: number;
+  vcpu_count?: number;
+  ram?: number;
+  disk?: number;
+  monthly_cost?: number;
+};
+
+export type PlanInfo = {
+  id: string;
+  gpu: boolean;
+  gpuType: string | null;
+  gpuVramGb: number | null;
+  vcpus: number | null;
+  ramGb: number | null;
+  diskGb: number | null;
+};
+
+export type CatalogPlan = {
+  id: string;
+  family: string;
+  vcpus: number;
+  ramGb: number;
+  diskGb: number;
+  hourlyUsd: number;
+  monthlyUsd: number;
 };
 
 type VultrInstance = {
@@ -70,6 +96,7 @@ export class VultrResource implements Resource {
 
   constructor(options: VultrOptions) {
     if (!options.apiKey) throw new VultrError("UNAUTHORIZED", "VULTR_API_KEY is not set");
+    setDefaultResultOrder("ipv4first");
     this.apiKey = options.apiKey;
     this.osId = options.osId ?? UBUNTU_24_04;
     this.apiUrl = (options.apiUrl ?? VULTR_API).replace(/\/$/, "");
@@ -87,6 +114,36 @@ export class VultrResource implements Resource {
     return plan.location_cost?.[spec.region]?.hourly_cost ?? plan.hourly_cost;
   }
 
+  async planInfo(plan: string): Promise<PlanInfo> {
+    const p = (await this.planTable()).get(plan);
+    if (!p) throw new VultrError("PLAN_UNKNOWN", `no Vultr plan ${plan}`);
+    return {
+      id: p.id,
+      gpu: p.type === "vcg" || Boolean(p.gpu_type),
+      gpuType: p.gpu_type ?? null,
+      gpuVramGb: p.gpu_vram_gb ?? null,
+      vcpus: p.vcpu_count ?? null,
+      ramGb: p.ram ? Math.round((p.ram / 1024) * 10) / 10 : null,
+      diskGb: p.disk ?? null,
+    };
+  }
+
+  async catalog(region: string): Promise<CatalogPlan[]> {
+    const plans = [...(await this.planTable()).values()];
+    return plans
+      .filter((p) => p.locations.includes(region) && p.type !== "vcg" && !p.gpu_type && p.vcpu_count && p.ram)
+      .map((p) => ({
+        id: p.id,
+        family: p.type,
+        vcpus: p.vcpu_count!,
+        ramGb: Math.round((p.ram! / 1024) * 10) / 10,
+        diskGb: p.disk ?? 0,
+        hourlyUsd: p.location_cost?.[region]?.hourly_cost ?? p.hourly_cost,
+        monthlyUsd: p.monthly_cost ?? 0,
+      }))
+      .sort((a, b) => a.hourlyUsd - b.hourlyUsd);
+  }
+
   async isGpu(plan: string): Promise<boolean> {
     const p = (await this.planTable()).get(plan);
     return p?.type === "vcg" || Boolean(p?.gpu_type);
@@ -100,6 +157,7 @@ export class VultrResource implements Resource {
       os_id: this.osId,
       label: spec.label ?? `${BURN402_TAG}-${spec.plan}`,
       tags: [BURN402_TAG],
+      ...(spec.userData ? { user_data: Buffer.from(spec.userData).toString("base64") } : {}),
     };
     const { instance } = (await this.request("POST", "/instances", body)) as { instance: VultrInstance };
     this.hourly.set(instance.id, hourly);
@@ -125,12 +183,17 @@ export class VultrResource implements Resource {
     return (hourly * Math.max(0, this.now() - s.createdAt)) / 3600;
   }
 
-  async destroy(handle: string): Promise<void> {
-    try {
-      await this.request("DELETE", `/instances/${encodeURIComponent(handle)}`);
-    } catch (error) {
-      if (error instanceof VultrError && error.status === 404) return;
-      throw error;
+  async destroy(handle: string, attempts = 24, waitMs = 5000): Promise<void> {
+    for (let i = 1; ; i++) {
+      try {
+        await this.request("DELETE", `/instances/${encodeURIComponent(handle)}`);
+        return;
+      } catch (error) {
+        if (error instanceof VultrError && error.status === 404) return;
+        const locked = error instanceof VultrError && error.status === 409;
+        if (!locked || i >= attempts) throw error;
+        await this.sleep(waitMs);
+      }
     }
   }
 
@@ -176,16 +239,23 @@ export class VultrResource implements Resource {
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
-    let response: Response;
-    try {
-      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
-        method,
-        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch (error) {
-      throw new VultrError("PROVIDER_ERROR", `${method} ${path}: ${(error as Error).message}`);
+    let response: Response | null = null;
+    let networkError = "";
+    for (let attempt = 1; attempt <= 3 && response === null; attempt++) {
+      try {
+        response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+          method,
+          headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch (error) {
+        networkError = (error as Error).message;
+        const cause = (error as { cause?: { message?: string } }).cause?.message;
+        if (cause) networkError = `${networkError} (${cause})`;
+        if (attempt < 3) await this.sleep(attempt * 1000);
+      }
     }
+    if (response === null) throw new VultrError("PROVIDER_ERROR", `${method} ${path}: ${networkError}`);
     const text = await response.text();
     if (response.ok) return text ? JSON.parse(text) : {};
 

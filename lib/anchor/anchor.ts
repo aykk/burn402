@@ -1,9 +1,31 @@
+import type { AnsProof } from "../ans";
 import type { KeyResolver } from "../mandate";
-import { fqdnOf, verifyVerdict, VerdictError, type SignedVerdict, type Verdict } from "../auditor";
+import { fqdnOf, sha256Of, verifyVerdict, VerdictError, type EvidenceBundle, type SignedVerdict, type Verdict } from "../auditor";
 import type { ArweaveGateway, ArweaveItem, ArweaveTag } from "./arweave";
 
 export const APP_NAME = "burn402";
 export const SCHEMA = "verdict-v1";
+export const RECORD_SCHEMA = "burn402/verdict-record-v1";
+export const MAX_RECORD_BYTES = 100 * 1024;
+
+export type VerdictRecord = {
+  schema: typeof RECORD_SCHEMA;
+  verdict: SignedVerdict;
+  evidence?: EvidenceBundle;
+  ans?: AnsProof;
+};
+
+export type Attachments = {
+  evidence?: EvidenceBundle;
+  ans?: AnsProof;
+};
+
+export function parseRecord(data: Uint8Array): VerdictRecord {
+  const parsed = JSON.parse(new TextDecoder().decode(data)) as Partial<VerdictRecord> & { protected?: unknown };
+  if (parsed.schema === RECORD_SCHEMA && parsed.verdict) return parsed as VerdictRecord;
+  if (typeof parsed.protected === "string") return { schema: RECORD_SCHEMA, verdict: parsed as unknown as SignedVerdict };
+  throw new Error("not a burn402 verdict record");
+}
 
 export type AnchorPolicy = {
   gateway: ArweaveGateway;
@@ -20,6 +42,7 @@ export type HistoryEntry = {
   id: string;
   verdict: Verdict;
   auditorKey: string;
+  record: VerdictRecord;
 };
 
 export type RejectedEntry = {
@@ -43,6 +66,7 @@ export function verdictTags(v: Verdict): ArweaveTag[] {
     { name: "Auditor-FQDN", value: fqdnOf(v.iss) },
     { name: "Failure-Mode", value: v.failure_mode ?? "NONE" },
     { name: "Issued-At", value: String(v.issued_at) },
+    { name: "Date", value: new Date(v.issued_at * 1000).toISOString() },
     { name: "Verdict-Jti", value: v.jti },
     { name: "Evidence", value: v.evidence },
   ];
@@ -53,7 +77,7 @@ async function auditorKeyOf(policy: AnchorPolicy, auditor: string): Promise<stri
   return key?.x ?? null;
 }
 
-export async function anchorVerdict(policy: AnchorPolicy, jws: SignedVerdict): Promise<AnchorResult> {
+export async function anchorVerdict(policy: AnchorPolicy, jws: SignedVerdict, attachments: Attachments = {}): Promise<AnchorResult> {
   let verdict: Verdict;
   try {
     verdict = (await verifyVerdict(jws, policy.resolveAuditorKeys, policy.trustedAuditors)).verdict;
@@ -62,6 +86,12 @@ export async function anchorVerdict(policy: AnchorPolicy, jws: SignedVerdict): P
     throw error;
   }
   if (verdict.verdict !== "BREACH") return { status: "REFUSED", reason: "only BREACH verdicts are anchored" };
+  if (attachments.evidence && sha256Of(attachments.evidence) !== verdict.evidence) {
+    return { status: "REFUSED", reason: "attached evidence does not hash to the verdict's evidence commitment" };
+  }
+  const record: VerdictRecord = { schema: RECORD_SCHEMA, verdict: jws, ...attachments };
+  const data = new TextEncoder().encode(JSON.stringify(record));
+  if (data.length > MAX_RECORD_BYTES) return { status: "REFUSED", reason: `record is ${data.length} bytes, over the ${MAX_RECORD_BYTES} byte limit` };
 
   const auditorKey = await auditorKeyOf(policy, verdict.iss);
   if (!auditorKey) return { status: "REFUSED", reason: `no ANS key resolved for ${verdict.iss}` };
@@ -77,7 +107,7 @@ export async function anchorVerdict(policy: AnchorPolicy, jws: SignedVerdict): P
   if (prior) return { status: "DUPLICATE", id: prior.id, jti: verdict.jti };
 
   const tags = verdictTags(verdict);
-  const { id, ownerKey } = await policy.gateway.upload(new TextEncoder().encode(JSON.stringify(jws)), tags);
+  const { id, ownerKey } = await policy.gateway.upload(data, tags);
   if (ownerKey !== auditorKey) throw new Error(`gateway signed with ${ownerKey}, expected ${auditorKey}`);
   return { status: "ANCHORED", id, jti: verdict.jti, tags };
 }
@@ -99,9 +129,10 @@ export async function historyFor(policy: AnchorPolicy, fqdn: string): Promise<Hi
 
   for (const item of items) {
     let verdict: Verdict;
+    let record: VerdictRecord;
     try {
-      const data = await policy.gateway.fetchData(item.id);
-      verdict = (await verifyVerdict(JSON.parse(new TextDecoder().decode(data)), policy.resolveAuditorKeys, policy.trustedAuditors)).verdict;
+      record = parseRecord(await policy.gateway.fetchData(item.id));
+      verdict = (await verifyVerdict(record.verdict, policy.resolveAuditorKeys, policy.trustedAuditors)).verdict;
     } catch (error) {
       rejected.push({ id: item.id, reason: error instanceof Error ? error.message : String(error) });
       continue;
@@ -121,7 +152,7 @@ export async function historyFor(policy: AnchorPolicy, fqdn: string): Promise<Hi
     }
     if (seen.has(verdict.jti)) continue;
     seen.add(verdict.jti);
-    entries.push({ id: item.id, verdict, auditorKey });
+    entries.push({ id: item.id, verdict, auditorKey: auditorKey!, record });
   }
 
   entries.sort((a, b) => a.verdict.issued_at - b.verdict.issued_at);

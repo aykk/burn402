@@ -1,11 +1,16 @@
 export {
   anchorVerdict,
   APP_NAME,
+  MAX_RECORD_BYTES,
+  parseRecord,
+  RECORD_SCHEMA,
   historyFor,
   SCHEMA,
   verdictTags,
   type AnchorPolicy,
   type AnchorResult,
+  type Attachments,
+  type VerdictRecord,
   type History,
   type HistoryEntry,
   type RejectedEntry,
@@ -18,3 +23,4 @@ export {
   type ArweaveTag,
   type Network,
 } from "./arweave";
+export { anchorTransaction, TRANSACTION_SCHEMA, TRANSACTION_TYP, transactionTags, type SignedTransaction } from "./transactions";

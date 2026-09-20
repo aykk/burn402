@@ -2,6 +2,7 @@ export type Spec = {
   plan: string;
   region: string;
   label?: string;
+  userData?: string;
 };
 
 export interface Resource {
@@ -25,10 +26,12 @@ export class FakeResource implements Resource {
   private readonly now: () => number;
   private readonly instances = new Map<string, FakeInstance>();
   private counter = 0;
+  private readonly prefix: string;
 
-  constructor(prices: Record<string, number>, now: () => number) {
+  constructor(prices: Record<string, number>, now: () => number, prefix = "fake") {
     this.prices = prices;
     this.now = now;
+    this.prefix = prefix;
   }
 
   async quote(spec: Spec): Promise<number> {
@@ -39,7 +42,7 @@ export class FakeResource implements Resource {
 
   async provision(spec: Spec): Promise<string> {
     const hourlyUsd = await this.quote(spec);
-    const handle = `fake-${++this.counter}`;
+    const handle = `${this.prefix}-${++this.counter}`;
     this.instances.set(handle, { spec, hourlyUsd, startedAt: this.now(), destroyedAt: null });
     return handle;
   }

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { History } from "../anchor";
+import type { History, VerdictRecord } from "../anchor";
 import type { Verdict } from "../auditor";
 import { behaviorObservation, TrustIndexClient } from "./index";
 
@@ -53,7 +53,7 @@ describe.runIf(live)("live Trust Index", () => {
     const history: History = {
       fqdn: "rogue.burn402.xyz",
       rejected: [],
-      entries: [{ id: "arweave-tx-id", auditorKey: "k", verdict: { verdict: "BREACH", failure_mode: "RATE_CEILING_EXCEEDED", iss: "ans://v1.0.0.auditor.burn402.xyz", issued_at: 1 } as Verdict }],
+      entries: [{ id: "arweave-tx-id", auditorKey: "k", record: {} as VerdictRecord, verdict: { verdict: "BREACH", failure_mode: "RATE_CEILING_EXCEEDED", iss: "ans://v1.0.0.auditor.burn402.xyz", issued_at: 1 } as Verdict }],
     };
     await ti.importObservations([behaviorObservation("live-rogue", history, "https://ar-io.dev", new Date(stamp))]);
 

@@ -16,7 +16,9 @@ export {
   UBUNTU_24_04,
   VultrError,
   VultrResource,
+  type CatalogPlan,
   type InstanceState,
+  type PlanInfo,
   type VultrErrorCode,
   type VultrOptions,
 } from "./vultr";

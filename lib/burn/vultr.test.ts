@@ -104,6 +104,20 @@ describe("VultrResource", () => {
     expect(await v.consumed(id)).toBeCloseTo(0.118);
   });
 
+  it("destroy waits out a locked server instead of failing", async () => {
+    let calls = 0;
+    const base = fakeVultr();
+    const locking = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "DELETE" && calls++ < 2) return new Response(JSON.stringify({ error: "Server is currently locked" }), { status: 409 });
+      return base.fetchImpl(input, init);
+    }) as typeof fetch;
+    const v = new VultrResource({ apiKey: "k", fetch: locking, sleep: async () => {} });
+    const id = await v.provision({ plan: "vc2-1c-1gb", region: "ewr" });
+    await v.destroy(id);
+    expect(base.instances.size).toBe(0);
+    expect(calls).toBe(3);
+  });
+
   it("destroy is idempotent", async () => {
     const f = fakeVultr();
     const v = new VultrResource({ apiKey: "k", fetch: f.fetchImpl });

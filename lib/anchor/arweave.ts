@@ -7,12 +7,14 @@ export type ArweaveItem = {
   id: string;
   ownerKey: string;
   tags: ArweaveTag[];
+  blockAt: number | null;
 };
 
 export interface ArweaveGateway {
   readonly ownerKey: string | null;
   upload(data: Uint8Array, tags: ArweaveTag[]): Promise<{ id: string; ownerKey: string }>;
   query(tags: ArweaveTag[], first?: number): Promise<ArweaveItem[]>;
+  item(id: string): Promise<ArweaveItem | null>;
   fetchData(id: string): Promise<Uint8Array>;
 }
 
@@ -47,23 +49,36 @@ export class TurboGateway implements ArweaveGateway {
     return { id: result.id, ownerKey: this.client.owner.toString("base64url") };
   }
 
-  async query(tags: ArweaveTag[], first = 100): Promise<ArweaveItem[]> {
+  query(tags: ArweaveTag[], first = 100): Promise<ArweaveItem[]> {
+    return this.graphql(
+      "query($tags: [TagFilter!], $first: Int) { transactions(tags: $tags, first: $first, sort: HEIGHT_ASC) { edges { node { id owner { key } block { timestamp } tags { name value } } } } }",
+      { tags: tags.map((t) => ({ name: t.name, values: [t.value] })), first },
+    );
+  }
+
+  async item(id: string): Promise<ArweaveItem | null> {
+    const [found] = await this.graphql("query($ids: [ID!]) { transactions(ids: $ids) { edges { node { id owner { key } block { timestamp } tags { name value } } } } }", { ids: [id] });
+    return found ?? null;
+  }
+
+  private async graphql(query: string, variables: Record<string, unknown>): Promise<ArweaveItem[]> {
     const response = await fetch(`${this.gatewayUrl}/graphql`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query:
-          "query($tags: [TagFilter!], $first: Int) { transactions(tags: $tags, first: $first, sort: HEIGHT_ASC) { edges { node { id owner { key } tags { name value } } } } }",
-        variables: { tags: tags.map((t) => ({ name: t.name, values: [t.value] })), first },
-      }),
+      body: JSON.stringify({ query, variables }),
     });
     if (!response.ok) throw new Error(`graphql HTTP ${response.status}`);
     const body = (await response.json()) as {
-      data?: { transactions?: { edges?: { node: { id: string; owner: { key: string }; tags: ArweaveTag[] } }[] } };
+      data?: { transactions?: { edges?: { node: { id: string; owner: { key: string }; block: { timestamp: number } | null; tags: ArweaveTag[] } }[] } };
       errors?: unknown;
     };
     if (body.errors) throw new Error(`graphql error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-    return (body.data?.transactions?.edges ?? []).map(({ node }) => ({ id: node.id, ownerKey: node.owner.key, tags: node.tags }));
+    return (body.data?.transactions?.edges ?? []).map(({ node }) => ({
+      id: node.id,
+      ownerKey: node.owner.key,
+      tags: node.tags ?? [],
+      blockAt: node.block?.timestamp ?? null,
+    }));
   }
 
   async fetchData(id: string): Promise<Uint8Array> {

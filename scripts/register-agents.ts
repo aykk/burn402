@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { exportJWK, generateKeyPair, type JWK } from "jose";
 import { AnsError, HttpTlSource, jwkToDidKey, parseRootKeys, TransparencyLogDirectory, type DirectoryEntry, type ResolvedAgent } from "../lib/ans";
@@ -13,7 +13,7 @@ const ANS_REPO = resolve(process.env.ANS_REPO ?? "ans");
 const OUT = resolve(process.env.BURN402_STATE ?? ".burn402");
 const DOMAIN = process.env.BURN402_DOMAIN ?? "burn402.xyz";
 const VERSION = process.env.BURN402_AGENT_VERSION ?? "1.0.0";
-const AGENTS = (process.env.BURN402_AGENTS ?? "ops,broker,auditor,rogue").split(",");
+const AGENTS = (process.env.BURN402_AGENTS ?? "ops,broker,auditor,stresstester,helper").split(",");
 
 type Registered = {
   name: string;
@@ -117,20 +117,32 @@ async function main() {
   if (rootKeys.size === 0) throw new Error("TL returned no usable root keys");
   writeFileSync(join(OUT, "tl-root-keys.txt"), rootKeysText);
 
-  const human = await mintKey();
-  writeFileSync(join(keysDir, "human.json"), JSON.stringify({ principal: human.did, kid: human.kid, privateJwk: human.privateJwk }, null, 2), {
-    mode: 0o600,
-  });
-  process.stdout.write(`human root   ${human.did}\n\n`);
+  const humanFile = join(keysDir, "human.json");
+  let humanDid: string;
+  if (existsSync(humanFile)) {
+    humanDid = (JSON.parse(readFileSync(humanFile, "utf8")) as { principal: string }).principal;
+    process.stdout.write(`human root   ${humanDid} (kept)\n\n`);
+  } else {
+    const human = await mintKey();
+    writeFileSync(humanFile, JSON.stringify({ principal: human.did, kid: human.kid, privateJwk: human.privateJwk }, null, 2), { mode: 0o600 });
+    humanDid = human.did;
+    process.stdout.write(`human root   ${humanDid}\n\n`);
+  }
+
+  const directoryFile = join(OUT, "directory.json");
+  const existing: Record<string, DirectoryEntry> = existsSync(directoryFile) && process.env.BURN402_FRESH !== "1" ? JSON.parse(readFileSync(directoryFile, "utf8")) : {};
+  const wanted = AGENTS.filter((name) => !existing[`ans://v${VERSION}.${name}.${DOMAIN}`]);
+  for (const name of AGENTS.filter((n) => !wanted.includes(n))) process.stdout.write(`ans://v${VERSION}.${name}.${DOMAIN} already registered (kept)\n`);
 
   const registered: Registered[] = [];
-  for (const name of AGENTS) registered.push(await registerOne(name, keysDir));
+  for (const name of wanted) registered.push(await registerOne(name, keysDir));
 
-  const entries: Record<string, DirectoryEntry> = Object.fromEntries(
-    registered.map((r) => [r.ansName, { agentId: r.agentId, identityId: r.identityId }]),
-  );
-  writeFileSync(join(OUT, "directory.json"), JSON.stringify(entries, null, 2));
-  writeFileSync(join(OUT, "root-principals.json"), JSON.stringify([human.did], null, 2));
+  const entries: Record<string, DirectoryEntry> = {
+    ...existing,
+    ...Object.fromEntries(registered.map((r) => [r.ansName, { agentId: r.agentId, identityId: r.identityId }])),
+  };
+  writeFileSync(directoryFile, JSON.stringify(entries, null, 2));
+  writeFileSync(join(OUT, "root-principals.json"), JSON.stringify([humanDid], null, 2));
 
   const directory = new TransparencyLogDirectory({ source: new HttpTlSource(TL_URL, TL_API_KEY), rootKeys, entries });
   process.stdout.write("\nverifying against the transparency log\n");
@@ -140,7 +152,7 @@ async function main() {
     if (kid !== r.kid) throw new Error(`${r.ansName}: TL key ${kid} does not match minted key ${r.kid}`);
     process.stdout.write(`  ok ${r.ansName.padEnd(36)} kid ${kid}\n`);
   }
-  process.stdout.write(`\nwrote ${join(OUT, "directory.json")} and ${registered.length + 1} keys under ${keysDir}\n`);
+  process.stdout.write(`\n${registered.length} new agent(s); directory now lists ${Object.keys(entries).length} under ${OUT}\n`);
 }
 
 main().catch((error) => {

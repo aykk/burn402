@@ -1,6 +1,6 @@
 import { exportJWK, generateKeyPair, type JWK } from "jose";
 import { describe, expect, it } from "vitest";
-import { anchorVerdict, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag, type History } from "../anchor";
+import { anchorVerdict, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag, type History, type VerdictRecord } from "../anchor";
 import { verdictJti, VERDICT_TYP, type Verdict } from "../auditor";
 import { kidFor, signJws } from "../mandate";
 import { behaviorObservation, behaviorScore, riskCode, syncBehavior, TrustIndexClient, TrustIndexError } from "./index";
@@ -18,6 +18,7 @@ function history(fqdn: string, modes: (Verdict["failure_mode"])[]): History {
     entries: modes.map((m, i) => ({
       id: `tx_${i + 1}`,
       auditorKey: "k",
+      record: {} as VerdictRecord,
       verdict: { failure_mode: m, verdict: "BREACH", iss: AUDITOR, issued_at: 1789800000 + i } as Verdict,
     })),
   };
@@ -79,12 +80,17 @@ class MemoryGateway implements ArweaveGateway {
   }
   async upload(data: Uint8Array, tags: ArweaveTag[]) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey: this.ownerKey!, tags, data });
+    this.items.push({ id, ownerKey: this.ownerKey!, tags, data, blockAt: null });
     return { id, ownerKey: this.ownerKey! };
   }
   async query(tags: ArweaveTag[]) {
     return this.items.filter((i) => tags.every((t) => i.tags.some((x) => x.name === t.name && x.value === t.value)));
   }
+  async item(id: string) {
+    const found = this.items.find((i) => i.id === id);
+    return found ? { id: found.id, ownerKey: found.ownerKey, tags: found.tags, blockAt: found.blockAt } : null;
+  }
+
   async fetchData(id: string) {
     return this.items.find((i) => i.id === id)!.data;
   }

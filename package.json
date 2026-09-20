@@ -9,11 +9,14 @@
     "lint": "eslint",
     "test": "vitest run",
     "register-agents": "tsx scripts/register-agents.ts",
-    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 BURN402_LIVE_TRUST=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts lib/trust/live.test.ts",
+    "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 BURN402_LIVE_TRUST=1 BURN402_LIVE_E2E=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts lib/trust/live.test.ts lib/verify/e2e.live.test.ts",
     "vultr:sweep": "tsx scripts/vultr-sweep.ts",
-    "trust-index": "agent-trust-discovery/bin/agent-trust-discovery -config config/trust-index/runtime.yaml"
+    "trust-index": "agent-trust-discovery/bin/agent-trust-discovery -config config/trust-index/runtime.yaml",
+    "burn402": "tsx cli/burn402.ts",
+    "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@ardrive/turbo-upload": "^0.3.0",
     "@x402/core": "^2.26.0",
     "@x402/fetch": "^2.26.0",

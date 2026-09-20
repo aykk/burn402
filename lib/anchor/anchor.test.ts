@@ -37,14 +37,19 @@ class MemoryGateway implements ArweaveGateway {
 
   put(data: Uint8Array, tags: ArweaveTag[], ownerKey: string) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey, tags, data });
+    this.items.push({ id, ownerKey, tags, data, blockAt: null });
     return { id, ownerKey };
   }
 
   async query(tags: ArweaveTag[]) {
     return this.items
       .filter((item) => tags.every((t) => item.tags.some((x) => x.name === t.name && x.value === t.value)))
-      .map(({ id, ownerKey, tags: t }) => ({ id, ownerKey, tags: t }));
+      .map(({ id, ownerKey, tags: t, blockAt }) => ({ id, ownerKey, tags: t, blockAt }));
+  }
+
+  async item(id: string) {
+    const found = this.items.find((i) => i.id === id);
+    return found ? { id: found.id, ownerKey: found.ownerKey, tags: found.tags, blockAt: found.blockAt } : null;
   }
 
   async fetchData(id: string) {

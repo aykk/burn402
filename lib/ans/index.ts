@@ -20,3 +20,4 @@ export {
   type ResolvedAgent,
   type TlSource,
 } from "./directory";
+export { collectAnsProof, proofEntries, ProofTlSource, type AnsProof, type AnsProofEntry } from "./proof";

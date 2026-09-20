@@ -162,6 +162,7 @@ describe("x402 provision gate", () => {
   it("refuses a mandate violation with 403 and never asks for payment", async () => {
     const res = await post({ plan: "vcg-a16-2c-16g-4vram" });
     expect(res.status).toBe(403);
+    expect(events.at(-1)).toMatchObject({ type: "TRANSACTION", record: { outcome: "refused", plan: "vcg-a16-2c-16g-4vram" } });
     expect(await res.json()).toMatchObject({ refused: true, stage: "provision", code: "RATE_CEILING_EXCEEDED" });
     expect(processor.requirementsCalls).toBe(0);
   });
@@ -183,7 +184,8 @@ describe("x402 provision gate", () => {
     expect(body.receipt).toMatchObject({ iss: BROKER, mandate: leafHash, usd: 0.059, pay_to: PAY_TO });
     expect(res.headers.get("PAYMENT-RESPONSE")).toBeTruthy();
     expect(resource.running()).toHaveLength(1);
-    expect(events.at(-1)).toMatchObject({ type: "PAYMENT_SETTLED" });
+    expect(events.find((e) => e.type === "PAYMENT_SETTLED")).toBeTruthy();
+    expect(events.at(-1)).toMatchObject({ type: "TRANSACTION", record: { outcome: "accepted", subject: AGENT, usd: 0.059 } });
 
     const verify = receiptVerifier(resolve, [BROKER]);
     expect(await verify(gate.receipts[0])).toBe(true);
@@ -214,7 +216,8 @@ describe("x402 provision gate", () => {
     const res = await post({ payment: { amount: "59000" } });
     expect(res.status).toBe(402);
     expect(resource.running()).toHaveLength(0);
-    expect(events.at(-1)).toMatchObject({ type: "SETTLEMENT_FAILED", reason: "blockhash expired" });
+    expect(events.find((e) => e.type === "SETTLEMENT_FAILED")).toMatchObject({ reason: "blockhash expired" });
+    expect(events.at(-1)).toMatchObject({ type: "TRANSACTION", record: { outcome: "failed" } });
     expect(gate.receipts).toHaveLength(0);
   });
 

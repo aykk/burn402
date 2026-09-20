@@ -1,5 +1,5 @@
 import type { PaymentReceipt } from "../auditor";
-import type { Broker, Lease } from "../burn";
+import type { Broker, Lease, Spec } from "../burn";
 import { mandateHash, MandateError, type KeyResolver, type MandateRegistry, type SigningKey } from "../mandate";
 import type { PaymentProcessor } from "./processor";
 import { signReceipt, verifyProvisionRequest, type ProvisionRequest, type Receipt } from "./signed";
@@ -9,7 +9,24 @@ export type GateEvent =
   | { type: "PAYMENT_REQUIRED"; at: number; mandate: string; plan: string; usd: number }
   | { type: "PAYMENT_REJECTED"; at: number; mandate: string; reason: string }
   | { type: "PAYMENT_SETTLED"; at: number; mandate: string; usd: number; tx: string; handle: string }
-  | { type: "SETTLEMENT_FAILED"; at: number; mandate: string; reason: string; destroyed: string };
+  | { type: "SETTLEMENT_FAILED"; at: number; mandate: string; reason: string; destroyed: string }
+  | { type: "TRANSACTION"; at: number; record: TransactionRecord };
+
+export type TransactionOutcome = "accepted" | "refused" | "payment rejected" | "failed";
+
+export type TransactionRecord = {
+  at: number;
+  subject: string;
+  mandate: string | null;
+  mandateJti: string | null;
+  plan: string;
+  region: string;
+  outcome: TransactionOutcome;
+  reason: string | null;
+  usd: number | null;
+  tx: string | null;
+  server: string | null;
+};
 
 export type GateOptions = {
   registry: MandateRegistry;
@@ -24,13 +41,14 @@ export type GateOptions = {
   maxSkewSec?: number;
   now?: () => number;
   onEvent?: (event: GateEvent) => void;
+  decorateSpec?: (spec: Spec, context: { subject: string; mandateJti: string; limitUsd: number; rateUsdHr: number }) => Spec;
 };
 
 type Body = { chain?: unknown; request?: unknown };
 
 export class ProvisionGate {
   readonly receipts: PaymentReceipt[] = [];
-  private readonly o: Required<Omit<GateOptions, "onEvent">> & Pick<GateOptions, "onEvent">;
+  private readonly o: Required<Omit<GateOptions, "onEvent" | "decorateSpec">> & Pick<GateOptions, "onEvent" | "decorateSpec">;
   private readonly seen = new Map<string, number>();
 
   constructor(options: GateOptions) {
@@ -66,7 +84,10 @@ export class ProvisionGate {
       const parts = compact.split(".");
       const input = { protected: parts[0], payload: parts[1], signature: parts[2] };
       const result = i === 0 ? await this.o.registry.admitRoot(input) : await this.o.registry.admit(input);
-      if (!result.ok) return this.json(403, { refused: true, stage: "delegation", ...result.refusal });
+      if (!result.ok) {
+        this.transaction({ subject: req.iss, mandate: null, mandateJti: null, plan: req.plan, region: req.region, outcome: "refused", reason: `${result.refusal.code}: ${result.refusal.detail}`, usd: null, tx: null, server: null });
+        return this.json(403, { refused: true, stage: "delegation", ...result.refusal });
+      }
     }
     const leafHash = mandateHash(chain[chain.length - 1]);
     const leaf = this.o.registry.get(leafHash)!;
@@ -75,7 +96,10 @@ export class ProvisionGate {
 
     const spec = { plan: req.plan, region: req.region, label: leaf.mandate.jti };
     const pre = await this.o.broker.precheck(leafHash, spec);
-    if (!pre.ok) return this.json(403, { refused: true, stage: "provision", ...pre.refusal });
+    if (!pre.ok) {
+      this.transaction({ subject: req.iss, mandate: leafHash, mandateJti: leaf.mandate.jti, plan: spec.plan, region: spec.region, outcome: "refused", reason: `${pre.refusal.code}: ${pre.refusal.detail}`, usd: null, tx: null, server: null });
+      return this.json(403, { refused: true, stage: "provision", ...pre.refusal });
+    }
 
     const usd = pre.hourlyUsd * this.o.prepayHours;
     const requirements = await this.o.processor.requirements(usd);
@@ -92,18 +116,28 @@ export class ProvisionGate {
       return this.paymentRejected(leafHash, "payment header could not be decoded");
     }
     const verified = await this.o.processor.verify(payload, requirements);
-    if (!verified.ok) return this.paymentRejected(leafHash, verified.reason);
+    if (!verified.ok) {
+      this.transaction({ subject: req.iss, mandate: leafHash, mandateJti: leaf.mandate.jti, plan: spec.plan, region: spec.region, outcome: "payment rejected", reason: verified.reason, usd, tx: null, server: null });
+      return this.paymentRejected(leafHash, verified.reason);
+    }
 
     this.seen.set(req.jti, req.iat);
     this.prune(now);
 
-    const provisioned = await this.o.broker.provision(leafHash, spec);
-    if (!provisioned.ok) return this.json(provisioned.refusal.code === "PROVIDER_ERROR" ? 502 : 403, { refused: true, stage: "provision", ...provisioned.refusal });
+    const finalSpec = this.o.decorateSpec
+      ? this.o.decorateSpec(spec, { subject: leaf.mandate.sub, mandateJti: leaf.mandate.jti, limitUsd: leaf.mandate.limit_usd, rateUsdHr: leaf.mandate.rate_usd_hr })
+      : spec;
+    const provisioned = await this.o.broker.provision(leafHash, finalSpec);
+    if (!provisioned.ok) {
+      this.transaction({ subject: req.iss, mandate: leafHash, mandateJti: leaf.mandate.jti, plan: spec.plan, region: spec.region, outcome: provisioned.refusal.code === "PROVIDER_ERROR" ? "failed" : "refused", reason: `${provisioned.refusal.code}: ${provisioned.refusal.detail}`, usd, tx: null, server: null });
+      return this.json(provisioned.refusal.code === "PROVIDER_ERROR" ? 502 : 403, { refused: true, stage: "provision", ...provisioned.refusal });
+    }
 
     const settlement = await this.o.processor.settle(payload, requirements);
     if (!settlement.ok) {
       await this.o.broker.release(provisioned.lease.handle);
       this.emit({ type: "SETTLEMENT_FAILED", at: now, mandate: leafHash, reason: settlement.reason, destroyed: provisioned.lease.handle });
+      this.transaction({ subject: req.iss, mandate: leafHash, mandateJti: leaf.mandate.jti, plan: spec.plan, region: spec.region, outcome: "failed", reason: `settlement failed: ${settlement.reason}; server destroyed`, usd, tx: null, server: provisioned.lease.handle });
       return this.json(402, { error: "settlement failed; the instance was destroyed", reason: settlement.reason }, {
         "PAYMENT-RESPONSE": this.o.processor.responseHeader(settlement, requirements),
       });
@@ -124,10 +158,15 @@ export class ProvisionGate {
     const sig = await signReceipt(receipt, this.o.brokerKey);
     this.receipts.push({ mandate_jti: receipt.mandate_jti, usd, tx: receipt.tx, sig });
     this.emit({ type: "PAYMENT_SETTLED", at: now, mandate: leafHash, usd, tx: settlement.tx, handle: provisioned.lease.handle });
+    this.transaction({ subject: req.iss, mandate: leafHash, mandateJti: leaf.mandate.jti, plan: spec.plan, region: spec.region, outcome: "accepted", reason: null, usd, tx: settlement.tx, server: provisioned.lease.handle });
 
     return this.json(200, { lease: leaseView(provisioned.lease), receipt: { ...receipt, sig } }, {
       "PAYMENT-RESPONSE": this.o.processor.responseHeader(settlement, requirements),
     });
+  }
+
+  private transaction(fields: Omit<TransactionRecord, "at">): void {
+    this.emit({ type: "TRANSACTION", at: this.o.now(), record: { at: this.o.now(), ...fields } });
   }
 
   private prune(now: number): void {

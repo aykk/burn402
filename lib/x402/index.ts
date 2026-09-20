@@ -1,4 +1,4 @@
-export { ProvisionGate, type GateEvent, type GateOptions } from "./gate";
+export { ProvisionGate, type GateEvent, type GateOptions, type TransactionOutcome, type TransactionRecord } from "./gate";
 export { DEFAULT_FACILITATOR, SOLANA_DEVNET, usdPrice, X402Processor, type PaymentProcessor, type Settlement } from "./processor";
 export {
   PROVISION_REQUEST_TYP,

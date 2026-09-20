@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "ans/**",
     "agent-trust-discovery/**",
+    ".burn402/**",
   ]),
 ]);
 
