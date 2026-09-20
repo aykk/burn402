@@ -36,7 +36,7 @@ export type StressView = {
   status: "idle" | "running" | "done" | "failed";
   job: { id: string; agent: string; request: string } | null;
   target: { agent: string; budgetUsd: number; rateUsdHr: number; pricePerHour: number; plan: string } | null;
-  attempts: { what: string; result: string; ok: boolean; blocked: boolean | null; proves: string }[];
+  attempts: { what: string; result: string; ok: boolean; blocked: boolean | null; mark: number | null; quiet: boolean; proves: string }[];
   verdict: Verdict | null;
   verdictId: string | null;
   verdictUrl: string | null;
@@ -206,8 +206,22 @@ export class DemoSession {
     this.busy = true;
     this.stress = { ...this.stress, status: "running", job: null, target: null, attempts: [], error: null };
     const log = this.rt.log;
-    const attempt = (what: string, result: string, ok: boolean, proves: string, blocked: boolean | null = null) =>
-      this.stress.attempts.push({ what, result, ok, blocked, proves });
+    let mark = 0;
+    // ties an attempt to the broker records it produced, so the same event
+    // carries the same number in both lists
+    const marking = (from: number): number => {
+      mark += 1;
+      for (let i = from; i < this.rt.transactions.length; i++) this.rt.transactions[i].mark = mark;
+      return mark;
+    };
+    const attempt = (
+      what: string,
+      result: string,
+      ok: boolean,
+      proves: string,
+      blocked: boolean | null = null,
+      options: { mark?: number | null; quiet?: boolean } = {},
+    ) => this.stress.attempts.push({ what, result, ok, blocked, mark: options.mark ?? null, quiet: options.quiet ?? false, proves });
     log.push("step", "STRESS TEST", "a second agent tries to spend against the same budget");
     try {
       const { rt } = this;
@@ -242,15 +256,19 @@ export class DemoSession {
       this.stress.trustBefore = await this.readTrust(tester.name);
       const chain = await this.attackChain(job, tester);
 
+      const beforePricey = rt.transactions.length;
       const pricey = await runStressTester<{ status: number }>(rt.config.root, { command: "rent", brokerUrl: rt.gateUrl, chain, plan: overCap.id, region: rt.config.region });
+      const priceyMark = marking(beforePricey);
       attempt(
         `it asked the broker for ${overCap.id}, at $${overCap.hourlyUsd.toFixed(3)} an hour`,
         pricey.result?.status === 403 ? `refused: you capped it at $${rateUsdHr}/hour` : `unexpected ${pricey.result?.status}`,
         pricey.result?.status === 403,
         "the hourly cap you set is enforced by the broker, not by the agent",
         pricey.result?.status === 403,
+        { mark: priceyMark },
       );
 
+      const beforeForged = rt.transactions.length;
       const forged = await runStressTester<{ status: number }>(rt.config.root, {
         command: "forge",
         brokerUrl: rt.gateUrl,
@@ -259,12 +277,14 @@ export class DemoSession {
         plan: "vc2-1c-1gb",
         region: rt.config.region,
       });
+      const forgedMark = marking(beforeForged);
       attempt(
         `it signed itself a $20 budget in the name of ${job.agent.ansName}`,
         forged.result?.status === 403 ? "refused: the signature does not match the key sealed for that name" : `unexpected ${forged.result?.status}`,
         forged.result?.status === 403,
         "an agent cannot mint itself a bigger budget by claiming someone else's name",
         forged.result?.status === 403,
+        { mark: forgedMark },
       );
 
       // some plan families the provider sells cannot be started on their own, so
@@ -297,6 +317,7 @@ export class DemoSession {
         false,
         "nothing can stop an agent that already holds a provider key, which is why the next step matters",
         false,
+        { quiet: true },
       );
       log.push("breach", "OUT_OF_BAND", `${direct.handle} ${rented.id} rented without the broker`);
 
