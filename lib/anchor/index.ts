@@ -24,3 +24,19 @@ export {
   type Network,
 } from "./arweave";
 export { anchorTransaction, TRANSACTION_SCHEMA, TRANSACTION_TYP, transactionTags, type SignedTransaction } from "./transactions";
+export {
+  anchorConversation,
+  anchoredMessage,
+  commitmentFor,
+  conversationTags,
+  CONVERSATION_SCHEMA,
+  CONVERSATION_TYP,
+  parseConversationRecord,
+  reveal,
+  verifyConversation,
+  type AnchoredMessage,
+  type ConversationRecord,
+  type ConversationTurn,
+  type Disclosure,
+  type VerifiedConversation,
+} from "./conversations";

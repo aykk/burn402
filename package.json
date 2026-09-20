@@ -13,7 +13,8 @@
     "vultr:sweep": "tsx scripts/vultr-sweep.ts",
     "trust-index": "agent-trust-discovery/bin/agent-trust-discovery -config config/trust-index/runtime.yaml",
     "burn402": "tsx cli/burn402.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "build-docs": "tsx scripts/build-docs.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",

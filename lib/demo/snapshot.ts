@@ -12,6 +12,7 @@ export type Snapshot = {
   now: number;
   busy: boolean;
   network: "testnet" | "production";
+  disclosure: "desk-only" | "full";
   helper: { ansName: string; budget: number; hourlyCap: number };
   agent: AgentRunView;
   company: { name: string; ansName: string } | null;
@@ -41,6 +42,7 @@ export function snapshot(s: DemoSession): Snapshot {
     now: Date.now() / 1000,
     busy: s.busy,
     network: rt.network,
+    disclosure: rt.disclosure,
     helper: { ansName: rt.actors.helper.name, budget: AGENT_BUDGET, hourlyCap: HOURLY_CAP },
     agent: s.agent,
     company: s.company ? { name: s.company.name, ansName: s.company.ansName } : null,

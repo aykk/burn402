@@ -97,6 +97,11 @@ def parse_passages(raw, source):
             continue
         title = str(d.get(title_field, "")).strip() if title_field else ""
         rows.append({"text": text, "url": url, "title": title})
+    seen_per_url = {}
+    for row in rows:
+        pos = seen_per_url.get(row["url"], 0)
+        row["pos"] = pos
+        seen_per_url[row["url"]] = pos + 1
     return rows
 
 
@@ -142,6 +147,40 @@ def indexed_text(passage):
     return "%s %s %s" % (title, title, passage["text"])
 
 
+LEAD_BOOST = 0.4
+VAGUE_IDF_RATIO = 0.35
+VAGUE_LEAD_POWER = 4
+
+
+def lead_weight(passage):
+    return round(1.0 + LEAD_BOOST / (1.0 + passage.get("pos", 0)), 4)
+
+
+QUESTION_WORDS = {
+    "a", "about", "an", "and", "are", "can", "do", "does", "explain", "for", "how", "in", "is",
+    "it", "me", "of", "on", "tell", "that", "the", "to", "what", "when", "where", "which", "who",
+    "why", "with", "you", "your",
+}
+
+
+def subject_of(text):
+    return {w for w in re.findall(r"[a-z0-9']+", text.lower()) if w not in QUESTION_WORDS}
+
+
+def title_match(title, subject):
+    # a page whose title is exactly the thing being asked about is the page that
+    # says what it is
+    return bool(subject) and subject_of(title) == subject
+
+
+def lead_power(query_vector, idf, idf_max):
+    # a question like "what is X" over a corpus all about X matches nothing
+    # informative, so fall back to where a page opens, which is where it says
+    # what it is
+    best = max((idf[i] for i, _ in query_vector), default=0.0)
+    return VAGUE_LEAD_POWER if idf_max <= 0 or best / idf_max < VAGUE_IDF_RATIO else 1
+
+
 def run_retrieval(passages):
     cap = CONFIG.get("maxPassages", 4000)
     if len(passages) > cap:
@@ -172,20 +211,34 @@ def run_retrieval(passages):
     vectors = []
     used = set()
     for p in passages:
-        vector = sorted(vectorize(indexed[len(vectors)], vocab, idf), key=lambda pair: -pair[1])[:keep_n]
+        full = vectorize(indexed[len(vectors)], vocab, idf)
+        # the words in a page's title are how people ask for it, even when they
+        # are common enough to be pruned on weight alone
+        title_terms = {vocab[t] for t in tokenize(p.get("title", "")) if t in vocab}
+        vector = sorted(full, key=lambda pair: -pair[1])[:keep_n]
+        chosen = {i for i, _ in vector}
+        vector += [(i, v) for i, v in full if i in title_terms and i not in chosen]
         vectors.append(vector)
         used.update(i for i, _ in vector)
     keep = sorted(used)
     remap = {old: new for new, old in enumerate(keep)}
+
+    leads = [lead_weight(p) for p in passages]
+    idf_max = max(idf) if idf else 0.0
 
     hits = 0
     top3 = 0
     for probe in probes:
         query = vectorize(probe["query"], vocab, idf)
         weights = {i: v for i, v in query}
+        power = lead_power(query, idf, idf_max)
+        subject = subject_of(probe["query"]) if power > 1 else set()
+        titled = [3.0 if subject and title_match(p.get("title", ""), subject) else 1.0 for p in passages] if subject else None
         ranked = sorted(
             range(len(vectors)),
-            key=lambda index: -sum(w * v for i, v in vectors[index] for w in [weights.get(i)] if w is not None),
+            key=lambda index: -(leads[index] ** power)
+            * (titled[index] if titled else 1.0)
+            * sum(w * v for i, v in vectors[index] for w in [weights.get(i)] if w is not None),
         )[:3]
         if ranked and ranked[0] == probe["index"]:
             hits += 1
@@ -236,11 +289,15 @@ def run_retrieval(passages):
         },
         "terms": [terms[i] for i in keep],
         "idf": [round(idf[i], 4) for i in keep],
+        "vagueIdfRatio": VAGUE_IDF_RATIO,
+        "vagueLeadPower": VAGUE_LEAD_POWER,
+        "titleBoost": 3.0,
         "passages": [
             {
                 "title": p["title"][:120],
                 "url": p["url"],
                 "text": p["text"][:600],
+                "lead": leads[n],
                 "vector": [[remap[i], round(v, 4)] for i, v in vectors[n] if i in remap],
             }
             for n, p in enumerate(passages)
@@ -526,6 +583,9 @@ def run_classifier(rows):
         "labels": labels,
         "terms": [terms[i] for i in keep],
         "idf": [round(idf[i], 4) for i in keep],
+        "vagueIdfRatio": VAGUE_IDF_RATIO,
+        "vagueLeadPower": VAGUE_LEAD_POWER,
+        "titleBoost": 3.0,
         "weights": [[round(weights[c][i], 5) for i in keep] for c in range(len(labels))],
         "bias": [round(b, 5) for b in bias],
     }

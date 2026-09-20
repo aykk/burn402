@@ -101,12 +101,37 @@ const charNgram: Runner = {
   },
 };
 
-type Passage = { title: string; url: string; text: string; vector: [number, number][] };
-type TfidfPassages = { terms: string[]; idf: number[]; passages: Passage[] };
+type Passage = { title: string; url: string; text: string; lead?: number; vector: [number, number][] };
+type TfidfPassages = {
+  terms: string[];
+  idf: number[];
+  passages: Passage[];
+  vagueIdfRatio?: number;
+  vagueLeadPower?: number;
+  titleBoost?: number;
+};
+
+const QUESTION_WORDS = new Set([
+  "a", "about", "an", "and", "are", "can", "do", "does", "explain", "for", "how", "in", "is",
+  "it", "me", "of", "on", "tell", "that", "the", "to", "what", "when", "where", "which", "who",
+  "why", "with", "you", "your",
+]);
+
+function subjectOf(text: string): Set<string> {
+  return new Set((text.toLowerCase().match(TOKEN) ?? []).filter((w) => !QUESTION_WORDS.has(w)));
+}
+
+function sameSubject(title: string, subject: Set<string>): boolean {
+  if (subject.size === 0) return false;
+  const words = subjectOf(title);
+  if (words.size !== subject.size) return false;
+  for (const w of words) if (!subject.has(w)) return false;
+  return true;
+}
 
 const tfidfPassages: Runner = {
   id: "tfidf-passages",
-  describe: "tf-idf over passages, ranked by cosine similarity to the question",
+  describe: "tf-idf over passages, ranked by cosine similarity to the question and where the passage sits on its page",
   run(model, input, controls) {
     const m = model as unknown as TfidfPassages;
     const index = new Map(m.terms.map((t, i) => [t, i]));
@@ -119,6 +144,12 @@ const tfidfPassages: Runner = {
     const raw = [...counts].map(([i, c]) => [i, (1 + Math.log(c)) * m.idf[i]] as [number, number]);
     const norm = Math.sqrt(raw.reduce((sum, [, v]) => sum + v * v, 0)) || 1;
     const query = new Map(raw.map(([i, v]) => [i, v / norm]));
+    const idfMax = Math.max(...m.idf, 0);
+    const best = Math.max(...[...counts.keys()].map((i) => m.idf[i]), 0);
+    const vague = idfMax <= 0 || best / idfMax < (m.vagueIdfRatio ?? 0.35);
+    const power = vague ? (m.vagueLeadPower ?? 4) : 1;
+    const subject = vague ? subjectOf(input) : new Set<string>();
+    const boost = m.titleBoost ?? 3;
     const scored = m.passages
       .map((p) => {
         let score = 0;
@@ -126,7 +157,8 @@ const tfidfPassages: Runner = {
           const w = query.get(i);
           if (w !== undefined) score += w * v;
         }
-        return { title: p.title, url: p.url, text: p.text, score };
+        const titled = sameSubject(p.title, subject) ? boost : 1;
+        return { title: p.title, url: p.url, text: p.text, score: score * Math.pow(p.lead ?? 1, power) * titled };
       })
       .filter((p) => p.score > 0)
       .sort((a, b) => b.score - a.score)

@@ -1,4 +1,5 @@
-export { FakeResource, type Resource, type Spec } from "./resource";
+export { FakeResource, type LiveInstance, type Resource, type Spec } from "./resource";
+export { reconcile, usageFor, type Reconciliation, type SettledLease } from "./reconcile";
 export {
   Broker,
   PROVISION_SCOPE,

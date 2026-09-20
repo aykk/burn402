@@ -7,6 +7,7 @@
   --rule: #e6e8ec;
   --rule-strong: #c9cdd4;
   --surface: #fafbfc;
+  --charcoal: #2c3037;
   --burn: #c2410c;
   --mark: #f97316;
   --ok: #1a7f37;
@@ -22,6 +23,7 @@
   --color-rule: var(--rule);
   --color-rule-strong: var(--rule-strong);
   --color-surface: var(--surface);
+  --color-charcoal: var(--charcoal);
   --color-burn: var(--burn);
   --color-mark: var(--mark);
   --color-ok: var(--ok);

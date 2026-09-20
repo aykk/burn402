@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRootKeys } from "../lib/ans";
-import { APP_NAME, SCHEMA, TurboGateway, type Network } from "../lib/anchor";
-import { DEFAULT_AUDITOR, DEFAULT_BROKER, verifyAnchoredVerdict, type VerifyReport } from "../lib/verify";
+import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TurboGateway, type Network } from "../lib/anchor";
+import { DEFAULT_AUDITOR, DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict, type ConversationReport, type VerifyReport } from "../lib/verify";
 
 type Flags = Record<string, string | boolean>;
 
@@ -61,6 +61,29 @@ function print(report: VerifyReport): void {
   if (report.mismatches.length > 0) out(`mismatched fields: ${report.mismatches.join(", ")}`);
 }
 
+function printConversation(report: ConversationReport): void {
+  const out = (line = "") => process.stdout.write(`${line}\n`);
+  out(`burn402 verify ${report.txid}`);
+  for (const s of report.steps) out(`${dots(s.name)} ${s.ok ? "ok" : "FAIL"}  ${s.detail}`);
+  const r = report.record;
+  if (r) {
+    out();
+    out(`buyer:  ${r.buyer}`);
+    out(`desk:   ${r.desk}`);
+    out(`mandate: ${r.mandateJti ?? "none"}   agreed plan: ${r.agreedPlan ?? "none"}`);
+    out();
+    for (const t of report.turns) {
+      const who = t.iss === r.desk ? "desk " : t.iss === r.buyer ? "buyer" : "?????";
+      if (t.state === "withheld") out(`  ${t.seq}. ${who} ${t.kind.padEnd(14)} withheld  ${t.reason ?? ""}`);
+      else if (t.state === "broken") out(`  ${t.seq}. ${who} ${"".padEnd(14)} BROKEN    ${t.reason ?? ""}`);
+      else out(`  ${t.seq}. ${who} ${t.kind.padEnd(14)} ${t.text.replace(/\s+/g, " ").slice(0, 120)}`);
+    }
+    out();
+    out(`conversation: ${report.ok ? "verified" : "NOT verified"}`);
+  }
+  if (report.problems.length > 0) for (const p of report.problems) out(`  problem: ${p}`);
+}
+
 function gateway(flags: Flags): TurboGateway {
   const network = str(flags, "network", "testnet") as Network;
   if (network !== "testnet" && network !== "production") throw new Error("--network must be testnet or production");
@@ -74,7 +97,16 @@ async function main(argv: string[]): Promise<number> {
   const trustedBrokers = list(flags, "broker", DEFAULT_BROKER);
 
   if (command === "verify" && args[0]) {
-    const report = await verifyAnchoredVerdict({ gateway: gateway(flags), txid: args[0], tlRootKeys: rootKeys, trustedAuditors, trustedBrokers });
+    const gw = gateway(flags);
+    const item = await gw.item(args[0]);
+    const schema = item?.tags.find((t) => t.name === "Schema")?.value;
+    if (schema === CONVERSATION_SCHEMA) {
+      const report = await verifyAnchoredConversation({ gateway: gw, txid: args[0], tlRootKeys: rootKeys });
+      if (flags.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      else printConversation(report);
+      return report.ok ? 0 : 1;
+    }
+    const report = await verifyAnchoredVerdict({ gateway: gw, txid: args[0], tlRootKeys: rootKeys, trustedAuditors, trustedBrokers });
     if (flags.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     else print(report);
     return report.ok ? 0 : 1;
@@ -105,6 +137,7 @@ async function main(argv: string[]): Promise<number> {
     [
       "usage:",
       "  burn402 verify <arweave-txid> [--network testnet|production] [--json]",
+      "                          verdicts and negotiation records are both accepted",
       "  burn402 history <fqdn> [--network testnet|production]",
       "options:",
       "  --tl-root-keys <file>   pinned ANS transparency log root keys (default config/ans/tl-root-keys.txt)",
