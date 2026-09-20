@@ -36,6 +36,10 @@ The trainer on the box uses only the Python standard library: a hashed tf-idf cl
 
 The auditor takes public evidence, runs its own eight checks over it, and signs a verdict that carries the evidence it was made from, so anyone can reproduce it. Verdicts feed the Trust Index as a behaviour score, and anchored records live on Arweave attributed to the agent's domain (ANS identity).
 
+The auditor does not have to be told where to look. It lists every instance on the provider account and diffs that against the receipts that settled, so a server nobody paid for shows up on its own.
+
+The negotiation itself is anchored too. Every message between the two agents is a signed JWS, and the exchange goes to Arweave alongside the payment receipt, so you can check afterwards what the desk actually recommended and whether the agent rented it. The desk's side is stored as text. Your side is stored as a SHA-256 commitment instead, so the request you typed and the name of your file never go public, and anyone holding the original message can still prove it is the one the record commits to. A toggle on the page publishes your side in full if you want it there.
+
 **Timings are measured.** We rented one box per Vultr CPU family and timed the same job on each, then fitted a cost model to the shape of the data. The page shows predicted time against actual, so you can see whether the estimate was realized.
 
 ## Check it yourself
@@ -46,7 +50,7 @@ Every transaction, approval, every refusal and every broken rule is signed and w
 npm run burn402 -- verify <arweave-txid>
 ```
 
-It downloads the record, checks the auditor's signature against the key sealed in the transparency log, checks the evidence hash, and runs every check again. `/records` does the same in the browser for every record burn402 has written. `/audit` lets you pick an agent that has run a job and set a second agent loose on its budget.
+It downloads the record, checks the auditor's signature against the key sealed in the transparency log, checks the evidence hash, and runs every check again. `/records` does the same in the browser for every record burn402 has written. Negotiation records verify the same way: it checks both agents' signatures against the transparency log and that the plan the agent rented is one the desk actually named in the exchange. `/audit` lets you pick an agent that has run a job and set a second agent loose on its budget.
 
 ## Supports:
 
@@ -54,6 +58,7 @@ It downloads the record, checks the auditor's signature against the key sealed i
 - USDC on Solana devnet, settled through an x402 facilitator.
 - ANS identities registered against the reference registration authority and transparency log.
 - Arweave mainnet records, uploaded with the auditor's and broker's own keys.
+- Negotiation transcripts on Arweave, signed by both agents, with your own messages held back as hashes.
 - Timings from measurement: single-core runs on each Vultr CPU family, fitted to the shape of your data.
 
 ## Running it
