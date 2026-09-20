@@ -384,7 +384,7 @@ export default function Page() {
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-[15px] font-bold">What should it learn to do?</h2>
+              <h2 className="text-[15px] font-bold">What should the custom model learn to do?</h2>
               <textarea
                 className="w-full resize-none border border-rule px-3 py-2.5 leading-relaxed"
                 rows={3}
