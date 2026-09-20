@@ -5,12 +5,21 @@ export type Spec = {
   userData?: string;
 };
 
+export type LiveInstance = {
+  id: string;
+  plan: string;
+  region: string;
+  label: string;
+  createdAt: number;
+};
+
 export interface Resource {
   readonly kind: string;
   quote(spec: Spec): Promise<number>;
   provision(spec: Spec): Promise<string>;
   consumed(handle: string): Promise<number>;
   destroy(handle: string): Promise<void>;
+  listTagged?(): Promise<LiveInstance[]>;
 }
 
 type FakeInstance = {
@@ -64,6 +73,18 @@ export class FakeResource implements Resource {
 
   running(): string[] {
     return [...this.instances].filter(([, i]) => i.destroyedAt === null).map(([h]) => h);
+  }
+
+  async listTagged(): Promise<LiveInstance[]> {
+    return [...this.instances]
+      .filter(([, i]) => i.destroyedAt === null)
+      .map(([id, i]) => ({
+        id,
+        plan: i.spec.plan,
+        region: i.spec.region,
+        label: i.spec.label ?? `${this.prefix}-${i.spec.plan}`,
+        createdAt: i.startedAt,
+      }));
   }
 
   private get(handle: string): FakeInstance {

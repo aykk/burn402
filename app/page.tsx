@@ -229,6 +229,15 @@ export default function Page() {
     <main className="mx-auto flex h-screen w-full max-w-[1280px] flex-col overflow-hidden px-10 py-6">
       <Nav current="/">
         {snap && <ModelPicker models={snap.models} disabled={running} onSave={(provider, key) => post("/api/demo/model", { provider, key })} />}
+        <label className="flex items-center gap-2 text-muted" title="Your own words go on Arweave with the negotiation, permanently and publicly. Off by default: only the desk's side is stored as text, yours as a hash.">
+          <input
+            type="checkbox"
+            checked={snap?.disclosure === "full"}
+            disabled={running}
+            onChange={(e) => post("/api/demo/network", { disclosure: e.target.checked ? "full" : "desk-only" })}
+          />
+          Append conversations to record
+        </label>
         <button className="underline underline-offset-2" onClick={() => setDrawer(true)}>
           Log
         </button>
@@ -316,7 +325,7 @@ export default function Page() {
                   }}
                 />
                 <button
-                  className="border border-foreground bg-foreground px-3 py-1 text-background hover:opacity-85 disabled:opacity-30"
+                  className="border border-charcoal bg-charcoal px-3 py-1 text-background hover:opacity-85 disabled:opacity-30"
                   disabled={running || reading}
                   onClick={() => fileRef.current?.click()}
                 >
@@ -450,7 +459,7 @@ export default function Page() {
                   ).map(([label, value]) => (
                     <button
                       key={label}
-                      className={`border px-4 py-1.5 ${preference === value ? "border-foreground bg-foreground text-background" : "border-rule-strong text-muted hover:border-foreground hover:text-foreground"} disabled:opacity-40`}
+                      className={`border px-4 py-1.5 ${preference === value ? "border-charcoal bg-charcoal text-background" : "border-rule-strong text-muted hover:border-charcoal hover:text-foreground"} disabled:opacity-40`}
                       disabled={running}
                       onClick={() => setPreference(value)}
                     >
@@ -463,7 +472,7 @@ export default function Page() {
 
             <div className="flex flex-wrap items-center gap-4">
               <button
-                className="border border-foreground bg-foreground px-6 py-2.5 font-bold text-background hover:opacity-85 disabled:opacity-30"
+                className="border border-charcoal bg-charcoal px-6 py-2.5 font-bold text-background hover:opacity-85 disabled:opacity-30"
                 disabled={running || !hasKey || !detected || !snap?.company}
                 onClick={() =>
                   post("/api/demo/job", {
@@ -562,48 +571,115 @@ function MetricList({ metrics }: { metrics: Metric[] }) {
   );
 }
 
+function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
+  if (a.blocked === null) return a.ok ? "var(--ok)" : "var(--bad)";
+  return a.blocked ? "var(--bad)" : "var(--ok)";
+}
+
 function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string, body?: unknown) => Promise<void> }) {
   const stress = snap?.stress;
   const target = stress?.target;
+  const attempts = stress?.attempts.length ?? 0;
+  const tries = attempts > 0 ? `${attempts} ways` : "every way it can";
+  const before = stress?.trustBefore?.behavior ?? null;
+  const after = stress?.trustAfter?.behavior ?? null;
   return (
     <div className="space-y-3 border-t border-rule pt-8">
       <div className="flex flex-wrap items-baseline gap-x-4">
-        <h2 className="text-[15px] font-bold">Do the limits actually hold?</h2>
+        <h2 className="text-[15px] font-bold">Limit testing:</h2>
         <button
-          className="border border-foreground px-3.5 py-1.5 hover:bg-foreground hover:text-background disabled:opacity-40"
+          className="border border-charcoal bg-charcoal px-3.5 py-1.5 text-background hover:opacity-85 disabled:opacity-40"
           disabled={stress?.status === "running" || snap?.busy}
           onClick={() => post("/api/demo/stress")}
         >
-          {stress?.status === "running" ? "Trying…" : stress?.status === "done" ? "Try again" : "Send a second agent to break them"}
+          {stress?.status === "running" ? "Trying…" : stress?.status === "done" ? "Start test" : "Send a second agent to break them"}
         </button>
       </div>
       <div className="text-muted">
         {target
-          ? `A second agent is handed a slice of the same budget: ${money(target.budgetUsd)} at up to ${money(target.rateUsdHr)} an hour. It tries four ways to spend more than that.`
+          ? `A second agent is handed a slice of the same budget: ${money(target.budgetUsd)} at up to ${money(target.rateUsdHr)} an hour. It tries ${tries} to spend more than that.`
           : "A second agent is handed a slice of the budget this job used, then tries to spend more than it was allowed."}
       </div>
       {stress?.error && <div className="text-bad">{stress.error}</div>}
       {stress && stress.attempts.length > 0 && (
         <div className="space-y-2">
           {stress.attempts.map((a, i) => (
-            <div key={i} className="border-l-2 pl-3" style={{ borderColor: a.ok ? "var(--ok)" : "var(--bad)" }}>
-              <div>
-                <span className="text-muted">it </span>
-                {a.what}
-              </div>
-              <div style={{ color: a.ok ? "var(--ok)" : "var(--bad)" }}>{a.result}</div>
+            <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
+              <div>{a.what}</div>
+              <div style={{ color: toneOf(a) }}>{a.result}</div>
               <div className="text-muted">{a.proves}</div>
             </div>
           ))}
+          {after !== null && (
+            <div className="flex flex-wrap items-center gap-x-4 pt-1">
+              <span className="inline-block h-1.5 w-40 shrink-0 border border-rule-strong">
+                <span
+                  className="block h-full transition-all"
+                  style={{
+                    width: `${Math.max(3, after)}%`,
+                    background: after >= 70 ? "var(--ok)" : after >= 40 ? "var(--warn)" : "var(--bad)",
+                  }}
+                />
+              </span>
+              <span className="text-muted">
+                {stress.trustAfter?.profile} · {before !== null && before !== after ? `${before} → ${after}` : after}
+              </span>
+              {(stress.trustAfter?.riskFactors ?? []).length > 0 && (
+                <span className="text-muted">{stress.trustAfter!.riskFactors.join(", ")}</span>
+              )}
+            </div>
+          )}
           {stress.verdictUrl && (
             <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
-              the verdict, permanently on Arweave
+              Verdict (Stored on Arweave)
             </a>
           )}
         </div>
       )}
     </div>
   );
+}
+
+function BurnMeter({ spent, budget }: { spent: number | null; budget: number }) {
+  const used = spent === null || budget <= 0 ? 0 : Math.min(1, spent / budget);
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="inline-block h-1.5 w-24 shrink-0 border border-rule-strong align-middle">
+        <span
+          className="block h-full transition-all"
+          style={{ width: `${Math.max(used > 0 ? 3 : 0, Math.round(used * 100))}%`, background: `linear-gradient(90deg, var(--mark), var(--burn))` }}
+        />
+      </span>
+      <span className="text-muted">
+        {money(spent ?? 0)} of {money(budget)} spent
+      </span>
+    </span>
+  );
+}
+
+function Fold({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
+  return (
+    <button className="text-muted hover:text-foreground" onClick={onToggle} style={{ background: "none", border: "none", padding: 0 }}>
+      {label} {open ? "\u25b4" : "\u25be"}
+    </button>
+  );
+}
+
+function collapseLog(log: { at: number; text: string }[]): { at: number; text: string }[] {
+  const out: { at: number; text: string }[] = [];
+  for (const line of log) {
+    const step = /^(.*?)\s(\d+)\s+of\s+(\d+)$/.exec(line.text);
+    const last = out[out.length - 1];
+    if (step && last) {
+      const prior = /^(.*?)\s(\d+)\s+of\s+(\d+)$/.exec(last.text);
+      if (prior && prior[1] === step[1]) {
+        out[out.length - 1] = { at: line.at, text: `${step[1]} ${step[2]}/${step[3]}` };
+        continue;
+      }
+    }
+    out.push(step ? { at: line.at, text: `${step[1]} ${step[2]}/${step[3]}` } : line);
+  }
+  return out;
 }
 
 function Timeline({
@@ -620,13 +696,28 @@ function Timeline({
   const status = job.status;
   const progress = status?.progress ?? 0;
   const elapsed = status?.elapsed ?? null;
+  const settled = job.phase === "done" || job.phase === "failed";
+  const [openTalk, setOpenTalk] = useState(false);
+  const [openPlans, setOpenPlans] = useState(false);
+  const live = job.handle !== null && !settled;
+  const lastDesk = [...job.messages].reverse().find((m) => m.fromLabel === "vultr") ?? null;
+  const talk = settled ? openTalk : true;
+  const plans = settled ? openPlans : job.plan === null;
+  const near = job.quotes
+    .map((q, i) => ({ q, i }))
+    .filter(({ q }) => q.plan !== job.chosen?.plan)
+    .slice(0, 2)
+    .map(({ q }) => q);
+  const shownQuotes = plans ? job.quotes : job.quotes.filter((q) => q.plan === job.chosen?.plan || near.includes(q));
   return (
     <div className="space-y-9 border-t border-rule pt-8">
-      <div className="flex flex-wrap items-baseline gap-x-4">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
         <h2 className="text-[15px] font-bold">{PHASE_TEXT[job.phase]}</h2>
         <span className="text-muted">
-          {job.agent.ansName} · running on {job.model.name} · mandate {job.mandateJti} · {money(job.budgetUsd)} total, {money(job.rateUsdHr)}/hour cap,
-          expires in {job.deadlineMinutes} min
+          {job.agent.ansName} · running on {job.model.name} · mandate {job.mandateJti} · {money(job.rateUsdHr)}/hour cap, expires in {job.deadlineMinutes} min
+        </span>
+        <span className="ml-auto">
+          <BurnMeter spent={job.paidUsd} budget={job.budgetUsd} />
         </span>
       </div>
       {job.error && <div className="text-bad">{job.error}</div>}
@@ -636,27 +727,63 @@ function Timeline({
 
       {job.messages.length > 0 && (
         <div className="space-y-3">
-          <div className="text-muted">Agents have signed both ways, ANS keys verified.</div>
-          {job.messages.map((m) => (
-            <div key={m.seq} className={`flex ${m.fromLabel === "company" ? "justify-start" : "justify-end"}`}>
-              <div className="max-w-[80%] border-l-2 pl-3" style={{ borderColor: m.fromLabel === "company" ? "var(--paid)" : "var(--warn)" }}>
-                <div className="text-muted">
-                  <span style={{ color: m.fromLabel === "company" ? "var(--paid)" : "var(--warn)" }}>
-                    {m.fromLabel === "company" ? "your agent" : "Vultr desk"}
-                  </span>{" "}
-                  · {m.kind.replace(/_/g, " ")} · sig {m.signed}…{" "}
-                  {m.verified ? <span className="text-ok">verified</span> : <span className="text-bad">unverified</span>}
-                </div>
-                <div className="whitespace-pre-wrap">{m.text}</div>
+          <div className="flex flex-wrap items-baseline gap-x-4">
+            <span className="text-muted">Agents have signed both ways, ANS keys verified.</span>
+            {settled && (
+              <span className="ml-auto">
+                <Fold label={`read the full exchange (${job.messages.length} messages)`} open={openTalk} onToggle={() => setOpenTalk(!openTalk)} />
+              </span>
+            )}
+          </div>
+          {!talk && lastDesk && (
+            <div className="border-l-2 pl-3" style={{ borderColor: "var(--warn)" }}>
+              <div className="text-muted">
+                <span style={{ color: "var(--warn)" }}>Vultr desk</span> · {lastDesk.kind.replace(/_/g, " ")} · sig {lastDesk.signed}…{" "}
+                <span className="text-ok">verified</span>
               </div>
+              <div className="whitespace-pre-wrap">{lastDesk.text}</div>
             </div>
-          ))}
+          )}
+          {talk &&
+            job.messages.map((m) => (
+              <div key={m.seq} className={`flex ${m.fromLabel === "company" ? "justify-start" : "justify-end"}`}>
+                <div className="max-w-[80%] border-l-2 pl-3" style={{ borderColor: m.fromLabel === "company" ? "var(--paid)" : "var(--warn)" }}>
+                  <div className="text-muted">
+                    <span style={{ color: m.fromLabel === "company" ? "var(--paid)" : "var(--warn)" }}>
+                      {m.fromLabel === "company" ? "your agent" : "Vultr desk"}
+                    </span>{" "}
+                    · {m.kind.replace(/_/g, " ")} · sig {m.signed}…{" "}
+                    {m.verified ? <span className="text-ok">verified</span> : <span className="text-bad">unverified</span>}
+                  </div>
+                  <div className="whitespace-pre-wrap">{m.text}</div>
+                </div>
+              </div>
+            ))}
+          {job.conversation?.url && (
+            <div className="text-muted">
+              <a href={job.conversation.url} target="_blank" rel="noreferrer">
+                this exchange on Arweave
+              </a>
+              {job.conversation.withheld > 0 && ` · ${job.conversation.withheld} of ${job.conversation.messages} stored as hash`}
+            </div>
+          )}
         </div>
       )}
 
       {job.quotes.length > 0 && (
         <div className="space-y-2">
-          <div className="text-muted">Recommended plans with budget of {money(job.budgetUsd)}:</div>
+          <div className="flex flex-wrap items-baseline gap-x-4">
+            <span className="text-muted">Recommended plans with budget of {money(job.budgetUsd)}:</span>
+            {job.quotes.length > shownQuotes.length || plans ? (
+              <span className="ml-auto">
+                <Fold
+                  label={plans ? `${job.quotes.length} plans the desk quoted` : `all ${job.quotes.length} plans the desk quoted`}
+                  open={plans}
+                  onToggle={() => setOpenPlans(!openPlans)}
+                />
+              </span>
+            ) : null}
+          </div>
           <table className="w-full border-collapse">
             <thead className="text-muted">
               <tr className="border-b border-rule-strong text-left">
@@ -670,12 +797,12 @@ function Timeline({
               </tr>
             </thead>
             <tbody>
-              {job.quotes.map((q) => {
+              {shownQuotes.map((q) => {
                 const chosen = q.plan === job.chosen?.plan;
                 return (
                   <tr key={q.plan} className={`border-b border-rule ${chosen ? "font-bold" : q.enoughRam && q.withinDeadline ? "" : "text-muted"}`}>
                     <td className="py-1.5 pr-4">
-                      {chosen ? "→ " : ""}
+                      {chosen ? <span style={{ color: "var(--mark)" }}>→ </span> : ""}
                       {q.plan}
                     </td>
                     <td className="py-1.5 pr-4">
@@ -701,7 +828,7 @@ function Timeline({
       )}
 
       {job.plan && (
-        <div className="space-y-1">
+        <div className="space-y-1 border-l-2 pl-3" style={{ borderColor: live ? "var(--mark)" : "var(--rule)" }}>
           <div className="text-muted">Rented and paid</div>
           <div>
             <b>{job.plan}</b> in {REGIONS[job.region] ?? job.region} ·{" "}
@@ -747,15 +874,20 @@ function Timeline({
           <div className="h-2 w-full max-w-[520px] border border-foreground">
             <div
               className="h-full transition-all"
-              style={{ width: `${Math.round(progress * 100)}%`, background: job.phase === "done" ? "var(--ok)" : "var(--warn)" }}
+              style={{
+                width: `${Math.round(progress * 100)}%`,
+                background: job.phase === "done" ? "var(--ok)" : "linear-gradient(90deg, var(--mark), var(--burn))",
+              }}
             />
           </div>
           <div className="space-y-0.5 text-muted">
-            {(status?.log ?? []).slice(-6).map((l, i) => (
-              <div key={i}>
-                {l.at.toFixed(1)}s {l.text}
-              </div>
-            ))}
+            {collapseLog(status?.log ?? [])
+              .slice(-4)
+              .map((l, i) => (
+                <div key={i}>
+                  {l.at.toFixed(1)}s {l.text}
+                </div>
+              ))}
             {job.phase === "booting" && !status && <div>waiting for the box to answer, usually under two minutes</div>}
           </div>
         </div>
@@ -854,7 +986,7 @@ function TryIt({ title, job, model, models }: { title: string; job: TrainingRunV
 
           {!live && (
             <button
-              className="border border-foreground px-3.5 py-1.5 hover:bg-foreground hover:text-background"
+              className="border border-charcoal bg-charcoal px-3.5 py-1.5 text-background hover:opacity-85"
               onClick={() => {
                 const out = runModel(model, input, controls);
                 setProduced(out && out.type === "text" ? out.text : null);
@@ -868,8 +1000,8 @@ function TryIt({ title, job, model, models }: { title: string; job: TrainingRunV
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="border border-foreground px-3.5 py-1.5 hover:bg-foreground hover:text-background disabled:opacity-40"
-                  disabled={asking || !result || result.type !== "passages"}
+                  className="border border-charcoal bg-charcoal px-3 py-1 text-background hover:opacity-85 disabled:cursor-not-allowed disabled:border-rule-strong disabled:bg-surface disabled:text-muted"
+                  disabled={asking || !input.trim() || !result || result.type !== "passages" || !runner}
                   onClick={async () => {
                     if (!result || result.type !== "passages") return;
                     setAsking(true);
@@ -891,7 +1023,7 @@ function TryIt({ title, job, model, models }: { title: string; job: TrainingRunV
                     }
                   }}
                 >
-                  {asking ? "Asking…" : "Answer it"}
+                  {asking ? "Asking…" : "Submit"}
                 </button>
                 <span className="text-muted">
                   answered by{" "}
@@ -1064,7 +1196,7 @@ function ModelPicker({
   return (
     <span className="relative">
       <button
-        className={`flex items-center gap-2 border px-3 py-1 ${missingKey ? "border-bad text-bad" : "border-rule-strong hover:border-foreground"}`}
+        className={`flex items-center gap-2 border px-3 py-1 ${missingKey ? "border-bad text-bad" : "border-charcoal bg-charcoal text-background hover:opacity-85"}`}
         onClick={() => setOpen(!open)}
       >
         <Image src={`/models/${selected.id}.svg`} alt="" width={14} height={14} unoptimized />
@@ -1084,7 +1216,7 @@ function ModelPicker({
             {models.providers.map((p) => (
               <button
                 key={p.id}
-                className={`flex items-center gap-2 border px-3 py-1.5 ${p.id === models.selected ? "border-foreground" : "border-rule-strong text-muted hover:border-foreground hover:text-foreground"} ${disabled ? "opacity-40" : ""}`}
+                className={`flex items-center gap-2 border px-3 py-1.5 ${p.id === models.selected ? "border-charcoal" : "border-rule-strong text-muted hover:border-charcoal hover:text-foreground"} ${disabled ? "opacity-40" : ""}`}
                 disabled={disabled || p.id === models.selected}
                 onClick={() => {
                   setDraft("");
@@ -1124,7 +1256,7 @@ function ModelPicker({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <button className="border border-foreground px-3 disabled:opacity-40" disabled={disabled || !draft.trim()}>
+            <button className="border border-charcoal bg-charcoal px-3 text-background disabled:opacity-40" disabled={disabled || !draft.trim()}>
               Save
             </button>
           </form>

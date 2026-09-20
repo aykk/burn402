@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
-import { APP_NAME, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
+import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getSession } from "@/lib/demo/session";
 import { fromCompact, verifyJws } from "@/lib/mandate";
-import { DEFAULT_BROKER, verifyAnchoredVerdict } from "@/lib/verify";
+import { DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict } from "@/lib/verify";
 
 export const dynamic = "force-dynamic";
 
@@ -71,12 +71,24 @@ function plainTransaction(outcome: string | null, plan: string | null, usd: numb
   return `${outcome ?? "asked"} ${server}`;
 }
 
+function conversationOutcome(ok: boolean, withheld: number): Outcome {
+  if (!ok) return { label: "could not be checked", tone: "bad" };
+  if (withheld > 0) return { label: "signatures verified, some held back", tone: "warn" };
+  return { label: "signatures verified", tone: "good" };
+}
+
+function plainConversation(plan: string | null, messages: number, withheld: number): string {
+  const agreed = plan ? `agreed on a ${plan} server` : "did not agree on a server";
+  const held = withheld > 0 ? `, ${withheld} of them kept private` : "";
+  return `negotiated over ${messages} signed message${messages === 1 ? "" : "s"} and ${agreed}${held}`;
+}
+
 type Outcome = { label: string; tone: "good" | "bad" | "warn" };
 
 type StoredRecord = {
   id: string;
   schema: string;
-  kind: "verdict" | "transaction";
+  kind: "verdict" | "transaction" | "conversation";
   headline: string;
   rawUrl: string;
   explorerUrl: string | null;
@@ -100,9 +112,10 @@ export async function GET(request: Request) {
   const query = [{ name: "App-Name", value: APP_NAME }];
 
   try {
-    const [verdicts, transactions] = await Promise.all([
+    const [verdicts, transactions, conversations] = await Promise.all([
       gateway.query([...query, { name: "Schema", value: SCHEMA }, ...subjectTag]),
       gateway.query([...query, { name: "Schema", value: TRANSACTION_SCHEMA }, ...subjectTag]),
+      gateway.query([...query, { name: "Schema", value: CONVERSATION_SCHEMA }, ...subjectTag]),
     ]);
 
     const tagOf = (tags: { name: string; value: string }[], name: string) => tags.find((t) => t.name === name)?.value ?? null;
@@ -175,6 +188,26 @@ export async function GET(request: Request) {
           outcome,
           verified,
           steps,
+        };
+      }),
+      ...conversations.map(async (item): Promise<StoredRecord> => {
+        const report = await verifyAnchoredConversation({ gateway, txid: item.id, tlRootKeys: rootKeys });
+        const withheld = report.turns.filter((t) => t.state === "withheld").length;
+        const messages = report.record?.messages.length ?? Number(tagOf(item.tags, "Message-Count") ?? 0);
+        return {
+          id: item.id,
+          schema: CONVERSATION_SCHEMA,
+          kind: "conversation",
+          headline: plainConversation(report.record?.agreedPlan ?? tagOf(item.tags, "Plan"), messages, withheld),
+          rawUrl: `${gateway.gatewayUrl}/${item.id}`,
+          explorerUrl: EXPLORER[network](item.id),
+          issuedAt: report.record?.at ? Math.floor(report.record.at) : seconds(tagOf(item.tags, "Issued-At")),
+          anchoredAt: item.blockAt,
+          subject: report.record?.buyer ?? tagOf(item.tags, "Subject-FQDN"),
+          reason: report.problems[0] ?? null,
+          outcome: conversationOutcome(report.ok, withheld),
+          verified: report.ok,
+          steps: report.steps,
         };
       }),
     ]);

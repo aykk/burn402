@@ -30,11 +30,11 @@ The dashboard reads both wallets from the chain with `getTokenAccountsByOwner`, 
 
 `Next.js` for web platform, `Arweave` for storage, `x402` for payment gateway, `Ed25519` and `JWS` for signatures.
 
-**The mandate is the core:** a signed permission slip with a budget, an hourly ceiling, a scope and an expiry, plus eight attenuation rules that the broker checks before anything is provisioned. The x402 gate answers `402`, verifies the payment, provisions, settles and signs a receipt. A reaper watches the burn rate and destroys the instance once reaching zero.
+**The mandate is the core:** a signed permission slip with a budget, an hourly ceiling, a scope and an expiry, plus ten attenuation rules that the broker checks before anything is provisioned. The x402 gate answers `402`, verifies the payment, provisions, settles and signs a receipt. A reaper watches the burn rate and destroys the instance once reaching zero.
 
 The trainer on the box uses only the Python standard library: a hashed tf-idf classifier trained by gradient descent, a character n-gram language model, and a tf-idf passage index. All three start from scratch on your data. **Nothing is pretrained** (check it yourself!)
 
-The auditor takes public evidence, runs the same eight checks, and signs a verdict that carries the evidence it was made from, so anyone can reproduce it. Verdicts feed the Trust Index as a behaviour score, and anchored records live on Arweave attributed to the agent's domain (ANS identity).
+The auditor takes public evidence, runs its own eight checks over it, and signs a verdict that carries the evidence it was made from, so anyone can reproduce it. Verdicts feed the Trust Index as a behaviour score, and anchored records live on Arweave attributed to the agent's domain (ANS identity).
 
 **Timings are measured.** We rented one box per Vultr CPU family and timed the same job on each, then fitted a cost model to the shape of the data. The page shows predicted time against actual, so you can see whether the estimate was realized.
 

@@ -1,5 +1,5 @@
 import { historyFor } from "../anchor";
-import { VultrResource } from "../burn";
+import { reconcile, usageFor, VultrResource } from "../burn";
 import { fqdnOf, type EvidenceBundle, type UsageRecord, type Verdict } from "../auditor";
 import { mandateHash, signMandate, toCompact, type Mandate } from "../mandate";
 import { syncBehavior } from "../trust";
@@ -36,7 +36,7 @@ export type StressView = {
   status: "idle" | "running" | "done" | "failed";
   job: { id: string; agent: string; request: string } | null;
   target: { agent: string; budgetUsd: number; rateUsdHr: number; pricePerHour: number; plan: string } | null;
-  attempts: { what: string; result: string; ok: boolean; proves: string }[];
+  attempts: { what: string; result: string; ok: boolean; blocked: boolean | null; proves: string }[];
   verdict: Verdict | null;
   verdictId: string | null;
   verdictUrl: string | null;
@@ -206,7 +206,8 @@ export class DemoSession {
     this.busy = true;
     this.stress = { ...this.stress, status: "running", job: null, target: null, attempts: [], error: null };
     const log = this.rt.log;
-    const attempt = (what: string, result: string, ok: boolean, proves: string) => this.stress.attempts.push({ what, result, ok, proves });
+    const attempt = (what: string, result: string, ok: boolean, proves: string, blocked: boolean | null = null) =>
+      this.stress.attempts.push({ what, result, ok, blocked, proves });
     log.push("step", "STRESS TEST", "a second agent tries to spend against the same budget");
     try {
       const { rt } = this;
@@ -242,10 +243,11 @@ export class DemoSession {
 
       const pricey = await runStressTester<{ status: number }>(rt.config.root, { command: "rent", brokerUrl: rt.gateUrl, chain, plan: overCap.id, region: rt.config.region });
       attempt(
-        `asked the broker for ${overCap.id}, at $${overCap.hourlyUsd.toFixed(3)} an hour`,
+        `it asked the broker for ${overCap.id}, at $${overCap.hourlyUsd.toFixed(3)} an hour`,
         pricey.result?.status === 403 ? `refused: you capped it at $${rateUsdHr}/hour` : `unexpected ${pricey.result?.status}`,
         pricey.result?.status === 403,
         "the hourly cap you set is enforced by the broker, not by the agent",
+        pricey.result?.status === 403,
       );
 
       const forged = await runStressTester<{ status: number }>(rt.config.root, {
@@ -257,10 +259,11 @@ export class DemoSession {
         region: rt.config.region,
       });
       attempt(
-        `signed itself a $20 budget in the name of ${job.agent.ansName}`,
+        `it signed itself a $20 budget in the name of ${job.agent.ansName}`,
         forged.result?.status === 403 ? "refused: the signature does not match the key sealed for that name" : `unexpected ${forged.result?.status}`,
         forged.result?.status === 403,
         "an agent cannot mint itself a bigger budget by claiming someone else's name",
+        forged.result?.status === 403,
       );
 
       const direct = await runStressTester<{ handle: string; hourlyUsd: number }>(rt.config.root, {
@@ -274,18 +277,35 @@ export class DemoSession {
       this.direct.push(direct.result.handle);
       await rt.servers.add(direct.result.handle, { rentedBy: "stress tester", how: "directly from Vultr, skipping the broker", plan: overCap.id, region: rt.config.region, hourlyUsd: direct.result.hourlyUsd });
       attempt(
-        `went around the broker and rented ${overCap.id} straight from Vultr`,
+        `it went around the broker and rented ${overCap.id} straight from Vultr`,
         "not stopped: the broker never saw this one",
         false,
         "nothing can stop an agent that already holds a provider key, which is why the next step matters",
+        false,
       );
       log.push("breach", "OUT_OF_BAND", `${direct.result.handle} ${overCap.id} rented without the broker`);
 
-      const now = Math.floor(Date.now() / 1000);
-      const usage: UsageRecord[] = [
-        { mandate_jti: `${job.mandateJti}_tester`, handle: direct.result.handle, plan: overCap.id, hourly_usd: direct.result.hourlyUsd, started_at: now - 1, ended_at: null },
-      ];
+      const found = await reconcile({
+        resource: rt.resource,
+        settled: rt.transactions.map((t) => ({ handle: t.server ?? "", mandateJti: t.mandateJti, plan: t.plan, usd: t.usd, tx: t.tx })),
+      });
+      attempt(
+        "the auditor listed every instance on the provider account itself",
+        found.unattributed.length > 0
+          ? `${found.live.length} running, ${found.settled.length} with a settled receipt, ${found.unattributed.length} with none: ${found.unattributed.map((i) => `${i.id} (${i.plan})`).join(", ")}`
+          : `${found.live.length} running, all of them paid for`,
+        found.unattributed.some((i) => i.id === direct.result!.handle),
+        "the rogue box was found by diffing the provider against the receipts, not by being told about it",
+      );
+      const usage: UsageRecord[] = await usageFor({
+        resource: rt.resource,
+        instances: found.unattributed,
+        mandateJti: `${job.mandateJti}_tester`,
+        observedAt: found.observedAt,
+      });
+      const now = found.observedAt;
       const bundle: EvidenceBundle = { subject: tester.name, chain, delegations: [], usage, receipts: [], observed_at: now + 1 };
+      log.push("step", "AUDITOR", `${usage.length} instance(s) with no settled receipt handed to the auditor as evidence`);
       const { verdict, anchored } = await publishVerdict({ auditor: rt.auditor, bundle, tl: rt.tl, entries: rt.entries, anchor: rt.anchor });
       this.stress.verdict = verdict;
       if (anchored.status === "ANCHORED" || anchored.status === "DUPLICATE") {

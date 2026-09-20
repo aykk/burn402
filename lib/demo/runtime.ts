@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { importJWK, type JWK } from "jose";
 import { HttpTlSource, parseRootKeys, TransparencyLogDirectory, type DirectoryEntry } from "../ans";
 import { registrationConfig } from "./register";
-import { anchorTransaction, TurboGateway, type AnchorPolicy, type Network } from "../anchor";
+import { anchorTransaction, TurboGateway, type AnchorPolicy, type Disclosure, type Network } from "../anchor";
 import type { Auditor } from "../auditor";
 import { Broker, FakeResource, VultrResource, type Resource } from "../burn";
 import { MandateRegistry, type SigningKey } from "../mandate";
@@ -93,6 +93,7 @@ export type Runtime = {
   anchor: AnchorPolicy;
   arweave: TurboGateway;
   network: Network;
+  disclosure: Disclosure;
   trust: TrustIndexClient;
   wallets: WalletWatcher;
   servers: ServerTracker;
@@ -128,6 +129,15 @@ export type LedgerEntry = {
 export function displayName(ans: string): string {
   const name = /^ans:\/\/v[\d.]+\.([^.]+)\./.exec(ans)?.[1] ?? ans;
   return ({ ops: "your agent", helper: "helper", stresstester: "stress tester", broker: "broker", auditor: "auditor" } as Record<string, string>)[name] ?? name;
+}
+
+export function setDisclosure(rt: Runtime, disclosure: Disclosure): void {
+  rt.disclosure = disclosure;
+  rt.log.info(
+    disclosure === "full"
+      ? "your own words now go on Arweave with the negotiation, permanently and publicly"
+      : "only the desk's side of the negotiation goes on Arweave; your words are stored as a hash",
+  );
 }
 
 export function setNetwork(rt: Runtime, network: Network): void {
@@ -307,6 +317,7 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
     anchor,
     arweave,
     network,
+    disclosure: "desk-only",
     trust: new TrustIndexClient({ baseUrl: config.trustIndexUrl }),
     wallets,
     servers,

@@ -38,6 +38,7 @@ export async function POST(request: Request) {
     kind: message.kind,
     text: counter ? counter.ask : message.kind === "quote_request" ? message.note || run.brief.request : "",
     signed: body.signature.slice(0, 16),
+    jws: `${body.protected}.${body.payload}.${body.signature}`,
     verified: true,
   });
 
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
     text,
   };
   const signed = await signJws(offer, rt.actors.vultr, A2A_TYP);
+  const compact = toCompact(signed);
   run.record({
     from: offer.iss,
     fromLabel: "vultr",
@@ -94,8 +96,9 @@ export async function POST(request: Request) {
     kind: offer.kind,
     text,
     signed: signed.signature.slice(0, 16),
+    jws: compact,
     verified: true,
   });
 
-  return Response.json({ offer, jws: toCompact(signed) });
+  return Response.json({ offer, jws: compact });
 }

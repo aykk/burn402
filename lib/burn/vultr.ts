@@ -62,6 +62,7 @@ type VultrInstance = {
   date_created: string;
   plan: string;
   region: string;
+  label?: string;
   tags?: string[];
 };
 
@@ -81,6 +82,9 @@ export type InstanceState = {
   server: string;
   ip: string;
   createdAt: number;
+  plan: string;
+  region: string;
+  label: string;
 };
 
 export class VultrResource implements Resource {
@@ -173,6 +177,9 @@ export class VultrResource implements Resource {
       server: instance.server_status,
       ip: instance.main_ip,
       createdAt: Date.parse(instance.date_created) / 1000,
+      plan: instance.plan,
+      region: instance.region,
+      label: instance.label ?? "",
     };
   }
 
@@ -218,6 +225,9 @@ export class VultrResource implements Resource {
         server: i.server_status,
         ip: i.main_ip,
         createdAt: Date.parse(i.date_created) / 1000,
+        plan: i.plan,
+        region: i.region,
+        label: i.label ?? "",
       }));
   }
 

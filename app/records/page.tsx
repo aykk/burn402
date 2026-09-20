@@ -9,7 +9,7 @@ type Outcome = { label: string; tone: "good" | "bad" | "warn" };
 type Record = {
   id: string;
   schema: string;
-  kind: "verdict" | "transaction";
+  kind: "verdict" | "transaction" | "conversation";
   headline: string;
   rawUrl: string;
   explorerUrl: string | null;
@@ -35,7 +35,7 @@ function when(seconds: number | null): string | null {
 
 export default function RecordsPage() {
   const [network, setNetwork] = useState<"testnet" | "production">("production");
-  const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad">("all");
+  const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad" | "negotiation">("all");
   const [agent, setAgent] = useState("");
   const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
@@ -69,7 +69,7 @@ export default function RecordsPage() {
   const agents = [...new Set(records.map((r) => r.subject ?? "").filter(Boolean))].sort();
   const shown = records.filter(
     (r) =>
-      (outcome === "all" || r.outcome.tone === outcome) &&
+      (outcome === "all" || (outcome === "negotiation" ? r.kind === "conversation" : r.outcome.tone === outcome && r.kind !== "conversation")) &&
       (agent === "" || r.subject === agent) &&
       (needle === "" ||
         `${r.headline} ${r.outcome.label} ${r.reason ?? ""} ${r.subject ?? ""} ${r.kind} ${r.id} ${when(r.issuedAt) ?? ""}`.toLowerCase().includes(needle.toLowerCase())),
@@ -83,7 +83,7 @@ export default function RecordsPage() {
           {(["testnet", "production"] as const).map((n) => (
             <button
               key={n}
-              className={`border px-3 py-1 ${network === n ? "border-foreground bg-foreground text-background" : "border-rule-strong text-muted hover:border-foreground"}`}
+              className={`border px-3 py-1 ${network === n ? "border-charcoal bg-charcoal text-background" : "border-rule-strong text-muted hover:border-charcoal"}`}
               onClick={() => setNetwork(n)}
             >
               {n === "production" ? "mainnet" : "testnet"}
@@ -105,11 +105,12 @@ export default function RecordsPage() {
               ["good", "allowed"],
               ["warn", "refused"],
               ["bad", "broken rules"],
+              ["negotiation", "negotiations"],
             ] as const
           ).map(([key, label]) => (
             <button
               key={key}
-              className={`border px-3 py-1 ${outcome === key ? "border-foreground bg-foreground text-background" : "border-rule-strong text-muted hover:border-foreground"}`}
+              className={`border px-3 py-1 ${outcome === key ? "border-charcoal bg-charcoal text-background" : "border-rule-strong text-muted hover:border-charcoal"}`}
               onClick={() => setOutcome(key)}
             >
               {label}
@@ -145,7 +146,11 @@ export default function RecordsPage() {
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-4 pr-3">
           {shown.length === 0 && <div className="text-muted">Nothing matches those filters.</div>}
           {shown.map((r) => (
-            <div key={r.id} className="space-y-1.5 rounded-lg border border-rule p-4">
+            <div
+              key={r.id}
+              className="space-y-1.5 rounded-lg border border-rule p-4"
+              style={{ borderLeftWidth: "2px", borderLeftColor: data.network === "production" ? "var(--mark)" : "var(--rule-strong)" }}
+            >
               <div className="flex flex-wrap items-baseline gap-x-4">
                 <span className="text-muted">{r.kind}</span>
                 <span>{r.headline}</span>

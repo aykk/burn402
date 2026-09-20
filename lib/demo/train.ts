@@ -1,3 +1,5 @@
+import { collectAnsProof } from "../ans";
+import { anchorConversation, anchoredMessage, TurboGateway, type Disclosure } from "../anchor";
 import { signMandate, toCompact, type Mandate } from "../mandate";
 import { foldJobs, jobSpec, trainingBootScript, type Brief, type JobSpec, type Metric, type PlanQuote, type TrainedModel, type TrainingStatus } from "../train";
 import type { DatasetSource } from "../train";
@@ -20,10 +22,21 @@ export type A2AMessage = {
   kind: string;
   text: string;
   signed: string;
+  jws: string;
   verified: boolean;
 };
 
 export type JobPhase = "negotiating" | "paying" | "booting" | "training" | "publishing" | "done" | "failed";
+
+export type AnchoredConversation = {
+  id: string | null;
+  url: string | null;
+  storage: "uploading" | "stored" | "failed";
+  storageError: string | null;
+  messages: number;
+  disclosure: Disclosure;
+  withheld: number;
+};
 
 export type TrainingRunView = {
   id: string;
@@ -39,6 +52,7 @@ export type TrainingRunView = {
   model: { name: string; company: string };
   agent: { name: string; ansName: string };
   messages: A2AMessage[];
+  conversation: AnchoredConversation | null;
   quotes: PlanQuote[];
   chosen: PlanQuote | null;
   chosenReason: string | null;
@@ -83,6 +97,7 @@ function view(run: TrainingRun): TrainingRunView {
     model: run.model,
     agent: { name: run.agent.name, ansName: run.agent.ansName },
     messages: run.messages,
+    conversation: run.conversation,
     quotes: run.quotes,
     chosen: run.chosen,
     chosenReason: run.chosenReason,
@@ -138,6 +153,7 @@ export class TrainingRun {
   liveAt: number | null = null;
   doneAt: number | null = null;
   sent = false;
+  conversation: AnchoredConversation | null = null;
   chain: string[] = [];
   error: string | null = null;
 
@@ -259,12 +275,63 @@ export class TrainingRun {
       this.plan = lease.plan ?? this.plan;
       this.paidAt = Date.now() / 1000;
       this.phase = "booting";
+      void this.anchorNegotiation();
       await this.watch();
     } catch (error) {
       this.phase = "failed";
       this.error = (error as Error).message;
       this.rt.log.push("error", "JOB", this.error);
       await this.release();
+    }
+  }
+
+  private async anchorNegotiation(): Promise<void> {
+    const signed = this.messages.filter((m) => m.jws);
+    if (signed.length === 0) return;
+    const disclosure = this.rt.disclosure;
+    const messages = signed.map((m) =>
+      anchoredMessage({
+        jws: m.jws,
+        iss: m.from,
+        kind: m.kind,
+        at: m.at,
+        disclose: disclosure === "full" || m.fromLabel === "vultr" ? "full" : "hash",
+      }),
+    );
+    const withheld = messages.filter((m) => m.disclose === "hash").length;
+    this.conversation = { id: null, url: null, storage: "uploading", storageError: null, messages: messages.length, disclosure, withheld };
+    try {
+      const gateway = new TurboGateway({ network: this.rt.network, privateJwk: this.rt.actors.vultr.privateJwk });
+      const ans = await collectAnsProof([this.rt.actors.vultr.name, this.agent.ansName], this.rt.tl, this.rt.entries);
+      const { id } = await anchorConversation({
+        gateway,
+        desk: this.rt.actors.vultr.name,
+        deskKey: this.rt.actors.vultr,
+        ans,
+        record: {
+          conv: this.id,
+          at: Math.floor(Date.now() / 1000),
+          buyer: this.agent.ansName,
+          desk: this.rt.actors.vultr.name,
+          mandateJti: this.mandateJti,
+          agreedPlan: this.plan,
+          disclosure,
+          messages,
+        },
+      });
+      this.conversation = { id, url: `${gateway.gatewayUrl}/${id}`, storage: "stored", storageError: null, messages: messages.length, disclosure, withheld };
+      this.rt.log.push(
+        "anchor",
+        "ARWEAVE",
+        withheld > 0
+          ? `the negotiation for ${this.plan} stored, ${withheld} of ${messages.length} messages held back as hashes`
+          : `the ${messages.length}-message negotiation for ${this.plan} stored in full`,
+        { label: `ar://${id.slice(0, 10)}..`, href: this.conversation.url! },
+      );
+    } catch (error) {
+      const message = (error as Error).message;
+      this.conversation = { id: null, url: null, storage: "failed", storageError: message, messages: messages.length, disclosure, withheld };
+      this.rt.log.push("error", "ARWEAVE", `could not store the negotiation: ${message}`);
     }
   }
 
