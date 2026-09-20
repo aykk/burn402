@@ -1046,10 +1046,6 @@ function TryIt({ title, job, model, models }: { title: string; job: TrainingRunV
               {answer && (
                 <div className="border-l-2 pl-3" style={{ borderColor: "var(--paid)" }}>
                   <div className="whitespace-pre-wrap">{answer.answer}</div>
-                  <div className="mt-2 text-muted">
-                    written by {answer.model.name} using only the passages below. The rented server trained the index that found them; it did not write
-                    this answer.
-                  </div>
                 </div>
               )}
             </div>
