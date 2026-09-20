@@ -1168,7 +1168,6 @@ function TryIt({ title, job, model, models }: { title: string; job: TrainingRunV
         <button className="underline underline-offset-2" onClick={download}>
           Download the model
         </button>
-        <span className="text-muted">plain JSON, runs anywhere, no server needed</span>
       </div>
     </div>
   );
