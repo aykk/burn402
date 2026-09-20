@@ -244,7 +244,16 @@ export default function Page() {
         <button
           className="text-muted underline underline-offset-2"
           title="Forget this session: destroys any running server, clears the jobs and the log"
-          onClick={() => post("/api/demo/reset")}
+          onClick={async () => {
+            await post("/api/demo/reset");
+            setSources([]);
+            setDetected(null);
+            setDatasetError(null);
+            setUrl("");
+            setRequest("");
+            setAgentName("");
+            setRegisterError(null);
+          }}
         >
           Reset
         </button>

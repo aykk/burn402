@@ -6,8 +6,16 @@ export type WalletView = {
   address: string;
   usdc: number | null;
   sol: number | null;
+  tokenAccount: string | null;
   explorer: string;
 };
+
+// these wallets hold USDC but no SOL, so the owner address itself is not an
+// account on chain and an explorer will say so; the token account is the one
+// with a balance and a history
+function explorerFor(address: string, tokenAccount: string | null): string {
+  return `https://solscan.io/account/${tokenAccount ?? address}?cluster=devnet`;
+}
 
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   const res = await fetch(DEVNET_RPC, {
@@ -21,18 +29,20 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   return body.result;
 }
 
-async function balances(address: string): Promise<{ usdc: number; sol: number }> {
+async function balances(address: string): Promise<{ usdc: number; sol: number; tokenAccount: string | null }> {
   const [lamports, tokens] = await Promise.all([
     rpc<{ value: number }>("getBalance", [address, { commitment: "confirmed" }]),
-    rpc<{ value: { account: { data: { parsed: { info: { tokenAmount: { uiAmount: number } } } } } }[] }>("getTokenAccountsByOwner", [
+    rpc<{ value: { pubkey: string; account: { data: { parsed: { info: { tokenAmount: { uiAmount: number } } } } } }[] }>("getTokenAccountsByOwner", [
       address,
       { mint: DEVNET_USDC },
       { encoding: "jsonParsed", commitment: "confirmed" },
     ]),
   ]);
+  const held = tokens.value.slice().sort((a, b) => b.account.data.parsed.info.tokenAmount.uiAmount - a.account.data.parsed.info.tokenAmount.uiAmount);
   return {
     sol: lamports.value / 1e9,
     usdc: tokens.value.reduce((sum, a) => sum + a.account.data.parsed.info.tokenAmount.uiAmount, 0),
+    tokenAccount: held[0]?.pubkey ?? null,
   };
 }
 
@@ -45,7 +55,8 @@ export class WalletWatcher {
       ...e,
       usdc: null,
       sol: null,
-      explorer: `https://explorer.solana.com/address/${e.address}?cluster=devnet`,
+      tokenAccount: null,
+      explorer: explorerFor(e.address, null),
     }));
   }
 
@@ -53,7 +64,8 @@ export class WalletWatcher {
     await Promise.all(
       this.wallets.map(async (w) => {
         try {
-          Object.assign(w, await balances(w.address));
+          const next = await balances(w.address);
+          Object.assign(w, next, { explorer: explorerFor(w.address, next.tokenAccount) });
         } catch {}
       }),
     );
