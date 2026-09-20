@@ -35,7 +35,7 @@ npm run burn402 -- verify <arweave-txid>
 
 `/records` does the same in the browser for every record burn402 has written. `/audit` lets you pick an agent that has run a job and set a second agent loose on its budget.
 
-## What is real
+## Supports:
 
 - Vultr instances at Vultr's own hourly prices, provisioned and destroyed through their API.
 - USDC on Solana devnet, settled through an x402 facilitator.
