@@ -711,10 +711,11 @@ function Timeline({
   const plans = settled ? openPlans : job.plan === null;
   const near = job.quotes
     .map((q, i) => ({ q, i }))
-    .filter(({ q }) => q.plan !== job.chosen?.plan)
+    .filter(({ q }) => q.plan !== (job.plan ?? job.chosen?.plan))
     .slice(0, 2)
     .map(({ q }) => q);
-  const shownQuotes = plans ? job.quotes : job.quotes.filter((q) => q.plan === job.chosen?.plan || near.includes(q));
+  const marked = job.plan ?? job.chosen?.plan ?? null;
+  const shownQuotes = plans ? job.quotes : job.quotes.filter((q) => q.plan === marked || near.includes(q));
   return (
     <div className="space-y-9 border-t border-rule pt-8">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
@@ -804,7 +805,7 @@ function Timeline({
             </thead>
             <tbody>
               {shownQuotes.map((q) => {
-                const chosen = q.plan === job.chosen?.plan;
+                const chosen = q.plan === marked;
                 return (
                   <tr key={q.plan} className={`border-b border-rule ${chosen ? "font-bold" : q.enoughRam && q.withinDeadline ? "" : "text-muted"}`}>
                     <td className="py-1.5 pr-4">
@@ -829,7 +830,13 @@ function Timeline({
               })}
             </tbody>
           </table>
-          {job.chosenReason && <div>{job.chosenReason}</div>}
+          {job.plan && job.chosen && job.plan !== job.chosen.plan ? (
+            <div>
+              {job.chosen.plan} is what the Vultr desk recommended; your agent rented {job.plan}
+            </div>
+          ) : (
+            job.chosenReason && <div>{job.chosenReason}</div>
+          )}
         </div>
       )}
 
