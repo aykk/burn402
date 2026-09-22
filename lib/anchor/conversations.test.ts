@@ -8,6 +8,7 @@ import {
   parseConversationRecord,
   reveal,
   verifyConversation,
+  arweaveAddress,
   type ArweaveGateway,
   type ArweaveItem,
   type ArweaveTag,
@@ -38,7 +39,7 @@ class MemoryGateway implements ArweaveGateway {
 
   async upload(data: Uint8Array, tags: ArweaveTag[]) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey: this.ownerKey, tags, data, blockAt: null });
+    this.items.push({ id, ownerKey: this.ownerKey, ownerAddress: arweaveAddress(this.ownerKey), tags, data, blockAt: null });
     return { id, ownerKey: this.ownerKey };
   }
 

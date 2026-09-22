@@ -2,7 +2,7 @@ import { exportJWK, generateKeyPair, type JWK } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
 import { verdictJti, VERDICT_TYP, type Verdict } from "../auditor";
 import { kidFor, signJws, type SignedMandate, type SigningKey } from "../mandate";
-import { anchorVerdict, historyFor, verdictTags, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag } from "./index";
+import { anchorVerdict, arweaveAddress, historyFor, ownedBy, verdictTags, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag } from "./index";
 
 const AUDITOR = "ans://v1.0.0.auditor.burn402.xyz";
 const ROGUE_ANS = "ans://v1.0.0.rogue.burn402.xyz";
@@ -37,19 +37,19 @@ class MemoryGateway implements ArweaveGateway {
 
   put(data: Uint8Array, tags: ArweaveTag[], ownerKey: string) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey, tags, data, blockAt: null });
+    this.items.push({ id, ownerKey, ownerAddress: arweaveAddress(ownerKey), tags, data, blockAt: null });
     return { id, ownerKey };
   }
 
   async query(tags: ArweaveTag[]) {
     return this.items
       .filter((item) => tags.every((t) => item.tags.some((x) => x.name === t.name && x.value === t.value)))
-      .map(({ id, ownerKey, tags: t, blockAt }) => ({ id, ownerKey, tags: t, blockAt }));
+      .map(({ id, ownerKey, ownerAddress, tags: t, blockAt }) => ({ id, ownerKey, ownerAddress, tags: t, blockAt }));
   }
 
   async item(id: string) {
     const found = this.items.find((i) => i.id === id);
-    return found ? { id: found.id, ownerKey: found.ownerKey, tags: found.tags, blockAt: found.blockAt } : null;
+    return found ? { id: found.id, ownerKey: found.ownerKey, ownerAddress: found.ownerAddress, tags: found.tags, blockAt: found.blockAt } : null;
   }
 
   async fetchData(id: string) {
@@ -229,5 +229,22 @@ describe("history", () => {
     gateway.put(data, verdictTags(v), auditor.publicJwk.x!);
     gateway.put(data, verdictTags(v), auditor.publicJwk.x!);
     expect((await historyFor(policy, "rogue.burn402.xyz")).entries).toHaveLength(1);
+  });
+});
+
+describe("arweave ownership", () => {
+  it("matches an item the gateway serves without an owner key", () => {
+    const key = auditor.publicJwk.x!;
+    const address = arweaveAddress(key);
+    expect(ownedBy({ ownerKey: key, ownerAddress: address }, key)).toBe(true);
+    // gateways answer "<not-found>" for owner.key on some bundled items
+    expect(ownedBy({ ownerKey: "<not-found>", ownerAddress: address }, key)).toBe(true);
+  });
+
+  it("refuses an item owned by someone else", () => {
+    const key = auditor.publicJwk.x!;
+    expect(ownedBy({ ownerKey: "<not-found>", ownerAddress: arweaveAddress(rogue.publicJwk.x!) }, key)).toBe(false);
+    expect(ownedBy({ ownerKey: "<not-found>", ownerAddress: null }, key)).toBe(false);
+    expect(ownedBy({ ownerKey: key, ownerAddress: null }, undefined)).toBe(false);
   });
 });

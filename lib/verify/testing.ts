@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { Encoder, Tag } from "cbor-x";
 import { exportJWK, generateKeyPair, type JWK } from "jose";
 import { jwkToDidKey, sigStructure, type DirectoryEntry, type RootKeys, type TlSource } from "../ans";
-import type { ArweaveGateway, ArweaveItem, ArweaveTag } from "../anchor";
+import { arweaveAddress, type ArweaveGateway, type ArweaveItem, type ArweaveTag } from "../anchor";
 import { kidFor, type SigningKey } from "../mandate";
 
 const encoder = new Encoder({ mapsAsObjects: false, useRecords: false });
@@ -81,19 +81,19 @@ export class MemoryArweave implements ArweaveGateway {
 
   put(data: Uint8Array, tags: ArweaveTag[], ownerKey: string) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey, tags, data, blockAt: null });
+    this.items.push({ id, ownerKey, ownerAddress: arweaveAddress(ownerKey), tags, data, blockAt: null });
     return { id, ownerKey };
   }
 
   async query(tags: ArweaveTag[]) {
     return this.items
       .filter((i) => tags.every((t) => i.tags.some((x) => x.name === t.name && x.value === t.value)))
-      .map(({ id, ownerKey, tags: t, blockAt }) => ({ id, ownerKey, tags: t, blockAt }));
+      .map(({ id, ownerKey, ownerAddress, tags: t, blockAt }) => ({ id, ownerKey, ownerAddress, tags: t, blockAt }));
   }
 
   async item(id: string) {
     const found = this.items.find((i) => i.id === id);
-    return found ? { id: found.id, ownerKey: found.ownerKey, tags: found.tags, blockAt: found.blockAt } : null;
+    return found ? { id: found.id, ownerKey: found.ownerKey, ownerAddress: found.ownerAddress, tags: found.tags, blockAt: found.blockAt } : null;
   }
 
   async fetchData(id: string) {

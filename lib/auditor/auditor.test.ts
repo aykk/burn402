@@ -378,4 +378,30 @@ describe("reproducibility", () => {
     expect(result.reproduced).toBe(false);
     expect(result.mismatches).toEqual(expect.arrayContaining(["evidence", "verdict", "checks"]));
   });
+
+  it("still reproduces when only the wording of a check has changed", async () => {
+    const b = bundle(await scenario(), { usage: [usage({ hourly_usd: 2.04 })] });
+    const { verdict } = await issueVerdict(auditor, b, T0);
+    const failing = verdict.checks.find((c) => c.result === "FAIL")!;
+    const older = { ...verdict, checks: verdict.checks.map((c) => (c.id === failing.id ? { ...c, detail: "worded the way an older build worded it" } : c)) };
+
+    const result = await reproduce(older, JSON.parse(JSON.stringify(b)), deps());
+    expect(result.reproduced).toBe(true);
+    expect(result.mismatches).toEqual([]);
+    expect(result.reworded).toEqual([failing.id]);
+  });
+
+  it("does not reproduce when a check flips result, however it is worded", async () => {
+    const b = bundle(await scenario(), { usage: [usage({ hourly_usd: 2.04 })] });
+    const { verdict } = await issueVerdict(auditor, b, T0);
+    const failing = verdict.checks.find((c) => c.result === "FAIL")!;
+    const softened = {
+      ...verdict,
+      checks: verdict.checks.map((c) => (c.id === failing.id ? { id: c.id, result: "PASS" as const, detail: c.detail } : c)),
+    };
+
+    const result = await reproduce(softened, JSON.parse(JSON.stringify(b)), deps());
+    expect(result.reproduced).toBe(false);
+    expect(result.mismatches).toContain("checks");
+  });
 });

@@ -1,7 +1,7 @@
 import type { AnsProof } from "../ans";
 import type { KeyResolver } from "../mandate";
 import { fqdnOf, sha256Of, verifyVerdict, VerdictError, type EvidenceBundle, type SignedVerdict, type Verdict } from "../auditor";
-import type { ArweaveGateway, ArweaveItem, ArweaveTag } from "./arweave";
+import { ownedBy, type ArweaveGateway, type ArweaveItem, type ArweaveTag } from "./arweave";
 
 export const APP_NAME = "burn402";
 export const SCHEMA = "verdict-v1";
@@ -103,7 +103,7 @@ export async function anchorVerdict(policy: AnchorPolicy, jws: SignedVerdict, at
     { name: "Schema", value: SCHEMA },
     { name: "Verdict-Jti", value: verdict.jti },
   ]);
-  const prior = existing.find((item) => item.ownerKey === auditorKey);
+  const prior = existing.find((item) => ownedBy(item, auditorKey));
   if (prior) return { status: "DUPLICATE", id: prior.id, jti: verdict.jti };
 
   const tags = verdictTags(verdict);
@@ -146,8 +146,8 @@ export async function historyFor(policy: AnchorPolicy, fqdn: string): Promise<Hi
       continue;
     }
     const auditorKey = await auditorKeyOf(policy, verdict.iss);
-    if (item.ownerKey !== auditorKey) {
-      rejected.push({ id: item.id, reason: `uploaded by ${item.ownerKey}, not by ${verdict.iss}` });
+    if (!ownedBy(item, auditorKey ?? undefined)) {
+      rejected.push({ id: item.id, reason: `uploaded by ${item.ownerAddress ?? item.ownerKey}, not by ${verdict.iss}` });
       continue;
     }
     if (seen.has(verdict.jti)) continue;

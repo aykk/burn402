@@ -1,5 +1,5 @@
 import { proofEntries, ProofTlSource, TransparencyLogDirectory, type AnsProof, type RootKeys } from "../ans";
-import { parseConversationRecord, verifyConversation, type ArweaveGateway, type ConversationRecord, type ConversationTurn } from "../anchor";
+import { ownedBy, parseConversationRecord, verifyConversation, type ArweaveGateway, type ConversationRecord, type ConversationTurn } from "../anchor";
 import { fqdnOf } from "../auditor";
 import type { Step } from "./verify";
 
@@ -55,7 +55,8 @@ export async function verifyAnchoredConversation(options: {
   step("ans proof", true, `${Object.keys(proofEntries(parsed.ans)).length} identities sealed in the transparency log`);
 
   const deskKey = (await directory.resolveKeys(record.desk))[0];
-  if (!step("arweave owner", item!.ownerKey === deskKey?.x, item!.ownerKey === deskKey?.x ? `uploaded by ${record.desk}` : `uploaded by ${item!.ownerKey}, not by the desk`)) {
+  const byDesk = ownedBy(item!, deskKey?.x);
+  if (!step("arweave owner", byDesk, byDesk ? `uploaded by ${record.desk}` : `uploaded by ${item!.ownerAddress ?? item!.ownerKey}, not by the desk`)) {
     return report;
   }
 

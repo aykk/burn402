@@ -16,7 +16,9 @@ export {
   type RejectedEntry,
 } from "./anchor";
 export {
+  arweaveAddress,
   ed25519SecretKey,
+  ownedBy,
   TurboGateway,
   type ArweaveGateway,
   type ArweaveItem,

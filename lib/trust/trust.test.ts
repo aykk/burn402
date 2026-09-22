@@ -1,6 +1,6 @@
 import { exportJWK, generateKeyPair, type JWK } from "jose";
 import { describe, expect, it } from "vitest";
-import { anchorVerdict, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag, type History, type VerdictRecord } from "../anchor";
+import { arweaveAddress, anchorVerdict, type AnchorPolicy, type ArweaveGateway, type ArweaveItem, type ArweaveTag, type History, type VerdictRecord } from "../anchor";
 import { verdictJti, VERDICT_TYP, type Verdict } from "../auditor";
 import { kidFor, signJws } from "../mandate";
 import { behaviorObservation, behaviorScore, riskCode, syncBehavior, TrustIndexClient, TrustIndexError } from "./index";
@@ -80,7 +80,7 @@ class MemoryGateway implements ArweaveGateway {
   }
   async upload(data: Uint8Array, tags: ArweaveTag[]) {
     const id = `tx_${this.items.length + 1}`;
-    this.items.push({ id, ownerKey: this.ownerKey!, tags, data, blockAt: null });
+    this.items.push({ id, ownerKey: this.ownerKey!, ownerAddress: arweaveAddress(this.ownerKey!), tags, data, blockAt: null });
     return { id, ownerKey: this.ownerKey! };
   }
   async query(tags: ArweaveTag[]) {
@@ -88,7 +88,7 @@ class MemoryGateway implements ArweaveGateway {
   }
   async item(id: string) {
     const found = this.items.find((i) => i.id === id);
-    return found ? { id: found.id, ownerKey: found.ownerKey, tags: found.tags, blockAt: found.blockAt } : null;
+    return found ? { id: found.id, ownerKey: found.ownerKey, ownerAddress: found.ownerAddress, tags: found.tags, blockAt: found.blockAt } : null;
   }
 
   async fetchData(id: string) {
