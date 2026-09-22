@@ -1,5 +1,5 @@
 import { proofEntries, ProofTlSource, TransparencyLogDirectory, type RootKeys } from "../ans";
-import { parseRecord, type ArweaveGateway, type VerdictRecord } from "../anchor";
+import { ownedBy, parseRecord, type ArweaveGateway, type VerdictRecord } from "../anchor";
 import { reproduce, sha256Of, verifyVerdict, type Verdict } from "../auditor";
 import { fromCompact, verifyMandate } from "../mandate";
 import { DEFAULT_AUDITOR, DEFAULT_BROKER, publicAuditDeps, rootKeysFor } from "./policy";
@@ -15,6 +15,7 @@ export type VerifyReport = {
   verdict: Verdict | null;
   chain: ChainLink[];
   mismatches: string[];
+  reworded: string[];
 };
 
 export type VerifyOptions = {
@@ -35,7 +36,7 @@ function peekPayload(record: VerdictRecord): Partial<Verdict> {
 
 export async function verifyAnchoredVerdict(options: VerifyOptions): Promise<VerifyReport> {
   const steps: Step[] = [];
-  const report: VerifyReport = { txid: options.txid, ok: false, steps, verdict: null, chain: [], mismatches: [] };
+  const report: VerifyReport = { txid: options.txid, ok: false, steps, verdict: null, chain: [], mismatches: [], reworded: [] };
   const step = (name: string, ok: boolean, detail: string) => {
     steps.push({ name, ok, detail });
     return ok;
@@ -78,7 +79,8 @@ export async function verifyAnchoredVerdict(options: VerifyOptions): Promise<Ver
   report.verdict = verdict;
   const [auditorKey] = await directory.resolveKeys(verdict.iss);
   step("verdict signature", true, `signed by ${verdict.iss}, key sealed in the ANS transparency log`);
-  if (!step("arweave owner", item!.ownerKey === auditorKey?.x, item!.ownerKey === auditorKey?.x ? "uploaded by the auditor's ANS key" : `uploaded by ${item!.ownerKey}, not by ${verdict.iss}`)) return report;
+  const byAuditor = ownedBy(item!, auditorKey?.x);
+  if (!step("arweave owner", byAuditor, byAuditor ? "uploaded by the auditor's ANS key" : `uploaded by ${item!.ownerAddress ?? item!.ownerKey}, not by ${verdict.iss}`)) return report;
   if (!step("evidence hash", sha256Of(record.evidence) === verdict.evidence, verdict.evidence)) return report;
 
   for (const [i, compact] of record.evidence.chain.entries()) {
@@ -101,10 +103,16 @@ export async function verifyAnchoredVerdict(options: VerifyOptions): Promise<Ver
 
   const reproduction = await reproduce(verdict, record.evidence, publicAuditDeps(directory, trustedBrokers));
   report.mismatches = reproduction.mismatches;
+  report.reworded = reproduction.reworded;
+  const reproducedAs = `${verdict.verdict} ${verdict.failure_mode ?? ""} reproduced from public evidence`.trim();
   step(
     "re-audit",
     reproduction.reproduced,
-    reproduction.reproduced ? `${verdict.verdict} ${verdict.failure_mode ?? ""} reproduced from public evidence`.trim() : `differs in ${reproduction.mismatches.join(", ")}`,
+    reproduction.reproduced
+      ? reproduction.reworded.length > 0
+        ? `${reproducedAs}; ${reproduction.reworded.join(", ")} now worded differently`
+        : reproducedAs
+      : `differs in ${reproduction.mismatches.join(", ")}`,
   );
   report.ok = steps.every((s) => s.ok);
   return report;

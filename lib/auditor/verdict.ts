@@ -89,15 +89,29 @@ export async function verifyVerdict(
 export type Reproduction = {
   reproduced: boolean;
   mismatches: string[];
+  reworded: string[];
   recomputed: AuditResult;
 };
+
+// a check's detail is prose for a human; what has to reproduce is the outcome
+function outcomeOf(checks: AuditResult["checks"]) {
+  return checks.map((c) => ({ id: c.id, result: c.result, failure_mode: c.failure_mode ?? null }));
+}
 
 export async function reproduce(verdict: Verdict, bundle: EvidenceBundle, deps: AuditDeps): Promise<Reproduction> {
   const recomputed = await audit(bundle, deps);
   const mismatches: string[] = [];
-  const fields = ["evidence", "subject", "fqdn", "chain", "verdict", "failure_mode", "checks"] as const;
+  const fields = ["evidence", "subject", "fqdn", "chain", "verdict", "failure_mode"] as const;
   for (const field of fields) {
     if (canonicalJson(verdict[field]) !== canonicalJson(recomputed[field])) mismatches.push(field);
   }
-  return { reproduced: mismatches.length === 0, mismatches, recomputed };
+  if (canonicalJson(outcomeOf(verdict.checks)) !== canonicalJson(outcomeOf(recomputed.checks))) mismatches.push("checks");
+
+  // wording that has drifted since the verdict was signed, which does not
+  // change what the audit concluded
+  const reworded = verdict.checks
+    .filter((c, i) => (c.detail ?? "") !== (recomputed.checks[i]?.detail ?? ""))
+    .map((c) => c.id);
+
+  return { reproduced: mismatches.length === 0, mismatches, reworded, recomputed };
 }
