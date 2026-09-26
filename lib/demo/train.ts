@@ -1,6 +1,6 @@
 import { collectAnsProof } from "../ans";
 import { anchorConversation, anchoredMessage, TurboGateway, type Disclosure } from "../anchor";
-import { signMandate, toCompact, type Mandate } from "../mandate";
+import { mandateHash, signMandate, toCompact, type Mandate } from "../mandate";
 import { foldJobs, jobSpec, trainingBootScript, type Brief, type JobSpec, type Metric, type PlanQuote, type TrainedModel, type TrainingStatus } from "../train";
 import type { DatasetSource } from "../train";
 import { runAgentProgram } from "./agent";
@@ -410,12 +410,18 @@ export class TrainingRun {
   }
 
   private async release(): Promise<void> {
-    if (!this.handle) return;
-    try {
-      await this.rt.broker.release(this.handle);
-      this.rt.servers.markShutDown(this.handle, "the job finished");
-    } catch (error) {
-      this.rt.log.push("error", "RELEASE", (error as Error).message);
+    // the handle can be missing when the broker provisioned but the agent never
+    // read the reply, so go by the mandate the box was rented against
+    const leased = this.chain.length > 0 ? this.rt.broker.leasesOf(mandateHash(this.chain[this.chain.length - 1])).map((l) => l.handle) : [];
+    const handles = [...new Set([this.handle, ...leased].filter((h): h is string => typeof h === "string"))];
+    for (const handle of handles) {
+      try {
+        await this.rt.broker.release(handle);
+        this.rt.servers.markShutDown(handle, "the job finished");
+        if (handle !== this.handle) this.rt.log.push("info", "RELEASE", `${handle} was rented for this job but never reported back; released`);
+      } catch (error) {
+        this.rt.log.push("error", "RELEASE", (error as Error).message);
+      }
     }
   }
 }

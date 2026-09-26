@@ -128,16 +128,22 @@ async function main() {
       }
       rentals++;
       const leaf = input.chain[input.chain.length - 1];
-      const result = await requestProvision({
-        url: `${input.brokerBase}/api/provision`,
-        chain: input.chain,
-        mandate: mandateHash(leaf),
-        subject: me.name,
-        subjectKey: me,
-        plan: String(args.plan),
-        region: input.brief.region,
-        fetch: await payingFetch(env("AGENT_SOLANA_SECRET_KEY")),
-      });
+      let result: Awaited<ReturnType<typeof requestProvision>>;
+      try {
+        result = await requestProvision({
+          url: `${input.brokerBase}/api/provision`,
+          chain: input.chain,
+          mandate: mandateHash(leaf),
+          subject: me.name,
+          subjectKey: me,
+          plan: String(args.plan),
+          region: input.brief.region,
+          fetch: await payingFetch(env("AGENT_SOLANA_SECRET_KEY")),
+        });
+      } catch (error) {
+        rentals = 0;
+        return JSON.stringify({ error: `the broker could not be reached: ${(error as Error).message}` });
+      }
       if (result.status === 200) {
         rented = result.body as { lease?: { handle?: string; plan?: string } };
         plan = rented.lease?.plan ?? String(args.plan);
