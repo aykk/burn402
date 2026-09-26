@@ -48,5 +48,14 @@ export async function requestProvision(call: ProvisionCall): Promise<{ status: n
     body: JSON.stringify({ chain: call.chain, request }),
   });
   const header = response.headers.get("PAYMENT-RESPONSE");
-  return { status: response.status, body: await response.json(), payment: header ? decodePaymentResponseHeader(header) : null };
+  // the server may already have provisioned by the time it answers, so an
+  // unreadable body must not throw and lose the lease
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = text.length > 0 ? JSON.parse(text) : { error: `the broker answered ${response.status} with an empty body` };
+  } catch {
+    body = { error: `the broker answered ${response.status} with a body that is not JSON`, raw: text.slice(0, 400) };
+  }
+  return { status: response.status, body, payment: header ? decodePaymentResponseHeader(header) : null };
 }
