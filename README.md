@@ -18,7 +18,7 @@ Once they agree, the agent pays the broker per request over x402 in USDC on Sola
 
 ## Web3 stuff
 
-You don't request burn402 for a CPU instance, your agent actually buys one, which is made possible with x402. The broker answers the agent's request with `HTTP 402` and a price, the agent pays that price in USDC on Solana devnet through an x402 facilitator, and **the machine only boots once the payment settles**. Using Solana and Arweave is what allows us to create a receipt for the auditor to check later (along with Solscan).
+You don't request burn402 for a CPU instance, your agent actually buys one, which is made possible with x402. The broker answers the agent's request with `HTTP 402` and a price, the agent pays that price in USDC on Solana devnet through an x402 facilitator, and **the machine only boots once the payment verifies, and is destroyed if settlement fails**. Using Solana and Arweave is what allows us to create a receipt for the auditor to check later (along with Solscan).
 
 The payments are **SPL token transfers**, and there is one per request instead of a single settlement at the end. A job costs between `0.0006` and `0.0165` USDC depending on which plan the two agents agree on, so a session is a handful of tiny machine-to-machine payments. Every one of them returns a transaction signature you can open on Solscan, and the broker signs a receipt containing that signature, the mandate it was paid against, and who paid. That receipt is what we anchor on Arweave, so the payment and the reason for it stay attached to each other.
 
