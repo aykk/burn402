@@ -4,8 +4,6 @@ Give an agent a budget instead of your API key. It rents a real server, trains y
 
 🏆 **Winner: [MLH] Best Use of Solana at VTHacks 14** · [Devpost](https://devpost.com/software/burn402) · [Demo video](https://www.youtube.com/watch?v=YrKT41mxkuI)
 
-![Two agents negotiating a Vultr plan](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/805/datas/original.jpg)
-
 ## What it does
 
 An agent with an ANS identity is given limits and demands for a custom model from the user. It talks to a Vultr agent (also with an ANS identity), and they negotiate over which CPU plan suits the model. Once both agents sign, the agent pays over x402 to rent the CPU instance, and uses it to train the model the user requested. The entire interaction, pass or fail, is uploaded to Arweave to ensure the record is untouchable, public, and permanent.
@@ -17,35 +15,6 @@ In depth: your agent gets registered an ANS identity of its own, so that all rec
 Your agent then opens an A2A conversation with a second agent that sells Vultr compute (named `Vultr desk`). Both sides sign every message and verify the other against keys tied to its ANS identity, sealed in a transparency log. The desk quotes real plans at real prices for CPU instances with timings for that exact job, and recommends plans. For example, in one of our runs our agent pushed for a cheaper four core box and the desk refused, pointing out that the job splits into sixteen parallel pieces and four cores would run them in four serial batches, AKA it would make the work take four times longer, which went against the original wishes of the user.
 
 Once they agree, the agent pays the broker per request over x402 in USDC on Solana (Devnet for demo), and the broker provisions the instance. **Only the broker holds the Vultr key**, so no agent in the chain ever touches it. The box boots, trains, serves its own progress, and hands back a model as plain JSON that runs in your browser. Then the box is released, destroys itself, and the model keeps working without it.
-
-## Screenshots
-
-| Agent registered with an ANS identity | Budget and limits for renting |
-|---|---|
-| ![Agent registered with an ANS identity](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/952/datas/original.jpg) | ![Budget and limits for renting](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/798/datas/original.jpg) |
-
-| Agents negotiate a plan | Negotiation, continued |
-|---|---|
-| ![Agents negotiate a plan](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/805/datas/original.jpg) | ![Negotiation, continued](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/806/datas/original.jpg) |
-
-| Plans quoted and paid via x402 | Rented, paid, and trained |
-|---|---|
-| ![Plans quoted and paid via x402](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/799/datas/original.jpg) | ![Rented, paid, and trained](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/803/datas/original.jpg) |
-
-| Model loaded | Model answering with citations to the docs |
-|---|---|
-| ![Model loaded](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/797/datas/original.jpg) | ![Model answering with citations to the docs](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/801/datas/original.jpg) |
-
-| Records on Arweave | Signed negotiation records |
-|---|---|
-| ![Records on Arweave](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/795/datas/original.jpg) | ![Signed negotiation records](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/800/datas/original.jpg) |
-
-| Limit test | Limit test verdicts |
-|---|---|
-| ![Limit test](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/796/datas/original.jpg) | ![Limit test verdicts](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/804/datas/original.jpg) |
-
-![Audits and registered agents](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/005/353/807/datas/original.jpg)
-*Audits and registered agents*
 
 ## Web3 stuff
 
