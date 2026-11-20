@@ -81,6 +81,13 @@ function outcomeLabel(r: Record): string {
   return sentence(r.outcome.label);
 }
 
+/** Money in the site's format: "0.005500 USDC" becomes "$0.0055 USDC"; "provisioned 0.263/hr against mandate rate 0.25/hr" becomes an hourly sentence. */
+function moneyCopy(text: string): string {
+  return text
+    .replace(/provisioned \$?([\d.]+)\/hr against mandate rate \$?([\d.]+)\/hr/i, (_, a: string, b: string) => `provisioned at $${a} an hour against a $${b} limit`)
+    .replace(/\$?(\d+\.\d+) USDC/g, (_, n: string) => `$${Number(n).toFixed(4)} USDC`);
+}
+
 function when(seconds: number | null): string | null {
   if (seconds === null || !Number.isFinite(seconds)) return null;
   const at = new Date(seconds * 1000);
@@ -149,11 +156,14 @@ export default function RecordsPage() {
         <h1 className="text-[20px] leading-[26px] font-semibold">
           {count} on Arweave {where}
         </h1>
-        {data?.gatewayUrl && (
-          <p className="mt-1 text-[12px] leading-4 text-muted">
-            Gateway <span className="font-mono">{data.gatewayUrl}</span>
-          </p>
-        )}
+        {/* The line is always there so the page does not jump when the gateway arrives. */}
+        <p className="mt-1 min-h-4 text-[12px] leading-4 text-muted">
+          {data?.gatewayUrl && (
+            <>
+              Gateway <span className="font-mono">{data.gatewayUrl}</span>
+            </>
+          )}
+        </p>
         <p className="mt-3 max-w-[64ch] text-muted">
           Every handshake, transaction and failure is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
           Reload the page to read them again.
@@ -162,10 +172,23 @@ export default function RecordsPage() {
 
       {/* The document scrolls; from 640px up the filters stay pinned to the top (on a phone they would take a quarter of the screen). */}
       <div className="z-20 mt-3 flex sm:sticky sm:top-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule bg-background pt-3 pb-4">
-        <div className="max-w-full overflow-x-auto">
+        {/* Five joined buttons do not fit a phone; below 640px the same choice is a select. */}
+        <div className="hidden sm:block">
           <Segmented label="Outcome" options={OUTCOMES} value={outcome} onChange={setOutcome} />
         </div>
-        <select aria-label="Agent" className={`${INPUT} w-full sm:w-auto`} value={agent} onChange={(e) => setAgent(e.target.value)}>
+        <select
+          aria-label="Outcome"
+          className={`${INPUT} w-full sm:hidden`}
+          value={outcome}
+          onChange={(e) => setOutcome(e.target.value as typeof outcome)}
+        >
+          {OUTCOMES.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Agent" className={`${INPUT} w-full sm:w-[260px]`} value={agent} onChange={(e) => setAgent(e.target.value)}>
           <option value="">Every agent</option>
           {agents.map((a) => (
             <option key={a} value={a}>
@@ -199,15 +222,18 @@ export default function RecordsPage() {
               >
                 <div className="text-[12px] leading-5 text-muted">{KIND[r.kind] ?? r.kind}</div>
                 <div className="min-w-0">
-                  <div className="font-medium text-foreground">{sentence(r.headline)}</div>
-                  {r.reason && <div className="text-muted">{sentence(r.reason)}</div>}
+                  <div className="font-medium text-foreground">{sentence(moneyCopy(r.headline))}</div>
+                  {r.reason && <div className="text-muted">{sentence(moneyCopy(r.reason))}</div>}
                   {r.subject && <div className={`mt-0.5 break-all text-muted ${MONO}`}>{shortAgent(r.subject)}</div>}
                 </div>
                 <div>
                   <div className="font-medium" style={{ color: tone }}>
                     {outcomeLabel(r)}
                   </div>
-                  <div className={`text-[12px] leading-4 ${sigBad ? "text-bad" : "text-muted"}`}>
+                  <div
+                    className={`text-[12px] leading-4 ${sigBad ? "text-bad" : "text-muted"}`}
+                    title={sigBad ? "Red here because money moved on a record whose signature could not be verified" : undefined}
+                  >
                     {r.verified ? "Signature verified" : "Signature not verified"}
                   </div>
                 </div>

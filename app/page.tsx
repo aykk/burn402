@@ -127,7 +127,8 @@ export default function Page() {
               : "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
         }`}
       >
-        <div className="lg:pr-4 lg:pb-6">
+        {/* Below lg a current job puts the run column first, so the result is not under a blank form. */}
+        <div className={`lg:pr-4 lg:pb-6 ${job ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
           <JobForm
             resetSignal={resetSignal}
             snap={snap}
@@ -140,7 +141,11 @@ export default function Page() {
           />
         </div>
 
-        <div className="border-t border-rule pt-8 lg:sticky lg:top-6 lg:self-start lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
+        <div
+          className={`border-rule lg:sticky lg:top-6 lg:self-start lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10 ${
+            job ? "order-first lg:order-none" : "border-t pt-8 lg:border-t-0"
+          }`}
+        >
           <RunPanel snap={snap} job={job} current={current} previous={previous} previousModel={previousModel} post={post} />
         </div>
       </section>

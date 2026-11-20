@@ -82,8 +82,17 @@ export function RunPanel({
         <TryIt title="The model from the last run" job={previous} model={previousModel} models={snap?.models} />
       ) : !job || settled ? (
         <div className={job ? "border-t border-rule pt-6" : ""}>
-          <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">Nothing trained yet</h2>
-          <p className="mt-1.5 max-w-[44ch] text-muted">{HELP.empty}</p>
+          {job?.phase === "failed" ? (
+            <>
+              <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">No model from this run</h2>
+              <p className="mt-1.5 max-w-[44ch] text-muted">It stopped before a model was trained. The next finished run puts its model here.</p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">Nothing trained yet</h2>
+              <p className="mt-1.5 max-w-[44ch] text-muted">{HELP.empty}</p>
+            </>
+          )}
         </div>
       ) : null}
 

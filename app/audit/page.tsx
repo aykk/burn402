@@ -3,36 +3,33 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Nav } from "@/app/nav";
+import { AttemptLedger } from "@/app/components/AttemptLedger";
+import { Swatch } from "@/app/components/BudgetMeter";
+import { clock, money, usd4 } from "@/app/components/format";
 import { BTN_PRIMARY, INPUT, MONO } from "@/app/components/ui";
 import type { Snapshot } from "@/lib/demo/snapshot";
-
-function clock(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 19);
-}
-
-function money(n: number | null): string {
-  if (n === null) return "-";
-  return n >= 1 ? `$${n.toFixed(2)}` : `$${parseFloat(n.toFixed(6))}`;
-}
 
 function shortName(ans: string): string {
   return ans.replace(/^ans:\/\/v[\d.]+\./, "");
 }
 
 function plainReason(reason: string): string {
-  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "the budget was signed by a key that does not belong to the agent named on it";
+  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "The budget was signed by a key that does not belong to the agent named on it.";
   const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
-  if (rate) return `the server costs $${rate[1]} an hour and the budget allows $${rate[2]}`;
-  if (/BUDGET_EXCEEDED/.test(reason)) return "the budget has no money left in it";
-  if (/WINDOW_EXPIRED/.test(reason)) return "the budget expired before this was asked for";
-  if (/SCOPE_ESCALATION/.test(reason)) return "the budget does not cover renting servers";
-  if (/IDENTITY_UNANCHORED/.test(reason)) return "the agent is not registered in ANS";
-  return reason.replace(/^[A-Z_]+: /, "");
+  if (rate) return `The server costs $${rate[1]} an hour and the budget allows $${rate[2]}.`;
+  if (/BUDGET_EXCEEDED/.test(reason)) return "The budget has no money left in it.";
+  if (/WINDOW_EXPIRED/.test(reason)) return "The budget expired before this was asked for.";
+  if (/SCOPE_ESCALATION/.test(reason)) return "The budget does not cover renting servers.";
+  if (/IDENTITY_UNANCHORED/.test(reason)) return "The agent is not registered in ANS.";
+  const rest = reason.replace(/^[A-Z_]+: /, "");
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
-function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
-  if (a.blocked === null) return a.ok ? "var(--ok)" : "var(--bad)";
-  return a.blocked ? "var(--bad)" : "var(--ok)";
+/** "Allowed" is the one green; a refusal is the broker doing its job, so it is ink. */
+function txOutcome(outcome: string): { word: string; className: string } {
+  if (outcome === "accepted") return { word: "Allowed", className: "text-ok" };
+  if (outcome === "failed") return { word: "Failed", className: "text-bad" };
+  return { word: outcome.charAt(0).toUpperCase() + outcome.slice(1), className: "text-foreground" };
 }
 
 const H2 = "text-[16px] leading-[22px] font-semibold text-foreground";
@@ -81,6 +78,13 @@ export default function AuditPage() {
   const target = runs.find((r) => r.id === picked) ?? runs[0] ?? null;
   const stress = snap?.stress;
   const running = snap?.busy ?? false;
+  const attempts = (stress?.attempts ?? []).filter((a) => !a.quiet);
+  // A broker record carries the mark of the limit-test attempt that produced it; name that step.
+  const stepOf = (mark: number | null) => {
+    if (typeof mark !== "number") return null;
+    const i = attempts.findIndex((a) => a.mark === mark);
+    return i >= 0 ? i + 1 : null;
+  };
 
   const start = async () => {
     if (!target) return;
@@ -99,7 +103,8 @@ export default function AuditPage() {
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
+    // The document scrolls, as on the Run and Records pages.
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/audit" />
 
       <div className="shrink-0 pt-2">
@@ -117,16 +122,16 @@ export default function AuditPage() {
           No agent has run a job yet. <Link href="/" className="font-semibold">Run one on the Run page</Link> and it will appear here.
         </p>
       ) : (
-        <section className="mt-6 grid gap-10 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-14">
-          <div className="space-y-9 lg:min-h-0 lg:overflow-y-auto lg:pr-4 lg:pb-6">
+        <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-14">
+          <div className="min-w-0 space-y-9 lg:pr-4 lg:pb-6">
             <div className="space-y-2">
               <label htmlFor="audit-agent" className="block font-medium">
                 Agent to test
               </label>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-3">
                 <select
                   id="audit-agent"
-                  className={`${INPUT} flex-1`}
+                  className={`${INPUT} min-w-0 flex-1 basis-0`}
                   value={target?.id ?? ""}
                   disabled={running}
                   onChange={(e) => setPicked(e.target.value)}
@@ -137,12 +142,9 @@ export default function AuditPage() {
                     </option>
                   ))}
                 </select>
-                <button
-                  className={BTN_PRIMARY}
-                  disabled={running}
-                  onClick={start}
-                >
-                  {stress?.status === "running" ? "Running…" : "Limit test"}
+                {/* The only filled button on this page. Same name as on the Run page. */}
+                <button className={BTN_PRIMARY} disabled={running} onClick={start}>
+                  {stress?.status === "running" ? "Trying…" : "Try to overspend"}
                 </button>
               </div>
               {target && (
@@ -153,25 +155,14 @@ export default function AuditPage() {
               )}
             </div>
 
-            {stress && stress.attempts.length > 0 && (
-              <div className="space-y-3 border-t border-rule pt-6">
+            {attempts.length > 0 && (
+              <div className="space-y-4 border-t border-rule pt-6">
                 <h2 className={H2}>
-                  Limit test for <span className="font-mono text-[12px] font-normal break-all">{stress.job ? stress.job.agent : "this agent"}</span>
+                  Limit test for <span className="font-mono text-[12px] font-normal break-all">{stress?.job ? stress.job.agent : "this agent"}</span>
                 </h2>
-                {stress.attempts
-                  .filter((a) => !a.quiet)
-                  .map((a, i) => (
-                    <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
-                      <div>
-                        {typeof a.mark === "number" && <span className="text-muted">[{a.mark}] </span>}
-                        {a.what}
-                      </div>
-                      <div style={{ color: toneOf(a) }}>{a.result}</div>
-                      <div className="text-muted">{a.proves}</div>
-                    </div>
-                  ))}
-                {stress.verdictUrl && (
-                  <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
+                <AttemptLedger attempts={attempts} />
+                {stress?.verdictUrl && (
+                  <a href={stress.verdictUrl} target="_blank" rel="noreferrer" className="inline-block">
                     The verdict against it, permanently on Arweave
                   </a>
                 )}
@@ -181,44 +172,59 @@ export default function AuditPage() {
 
             <div className="border-t border-rule pt-6">
               <h2 className={H2}>Every request to rent a server</h2>
-              <div className="mb-3 text-muted">Allowed or refused, each one signed by the broker and written to Arweave.</div>
+              <div className="mt-1 text-muted">Allowed or refused, each one signed by the broker and written to Arweave.</div>
               {snap && snap.transactions.length > 0 ? (
-                <div className="space-y-3">
-                  {[...snap.transactions].reverse().map((t, i) => (
-                    <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.outcome === "accepted" ? "var(--ok)" : "var(--bad)" }}>
-                      <div className="flex flex-wrap items-baseline gap-x-3">
-                        {typeof t.mark === "number" && <span className="text-muted">[{t.mark}]</span>}
-                        <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "Allowed" : t.outcome.charAt(0).toUpperCase() + t.outcome.slice(1)}</span>
-                        <span className={MONO}>{shortName(t.subject)}</span>
-                        <span>{t.plan}</span>
-                        {t.usd !== null && t.outcome === "accepted" && <span className="tabular-nums">{t.usd.toFixed(6)} USDC</span>}
-                        <span className="text-[12px] text-muted tabular-nums">{clock(t.at * 1000)}</span>
+                <div className="mt-3">
+                  {[...snap.transactions].reverse().map((t, i) => {
+                    const o = txOutcome(t.outcome);
+                    const step = stepOf(t.mark);
+                    return (
+                      // Below 640px the amount and time move under the details, so the plan and agent keep the width.
+                      <div
+                        key={i}
+                        className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-4 gap-y-1 border-b border-rule py-3 last:border-b-0 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:gap-y-0 lg:last:border-b"
+                      >
+                        <div className={`font-semibold ${o.className}`}>{o.word}</div>
+                        <div className="min-w-0 break-words">
+                          <div className="text-foreground">{t.plan}</div>
+                          <div className={`text-muted ${MONO} [overflow-wrap:anywhere]`}>{shortName(t.subject)}</div>
+                          {t.reason && <div className="mt-0.5 text-muted">{plainReason(t.reason)}</div>}
+                          <div className="mt-1 flex flex-wrap gap-x-4 text-[12px] leading-4">
+                            {step !== null && <span className="text-muted">Limit test, step {step}</span>}
+                            {t.solscan && (
+                              <a href={t.solscan} target="_blank" rel="noreferrer">
+                                Payment on Solscan
+                              </a>
+                            )}
+                            {t.arweaveUrl ? (
+                              <a href={t.arweaveUrl} target="_blank" rel="noreferrer">
+                                Record on Arweave
+                              </a>
+                            ) : (
+                              <span className="text-muted">{t.storage === "failed" ? "Not stored" : "Storing…"}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="col-start-2 flex flex-wrap items-baseline gap-x-4 sm:col-start-3 sm:block sm:text-right">
+                          {t.usd !== null && t.outcome === "accepted" && (
+                            <div className="flex items-center gap-x-2 whitespace-nowrap sm:justify-end">
+                              <Swatch />
+                              <span className="font-semibold tabular-nums">{usd4(t.usd)} USDC</span>
+                            </div>
+                          )}
+                          <div className="text-[12px] leading-5 text-muted tabular-nums">{clock(t.at * 1000)}</div>
+                        </div>
                       </div>
-                      {t.reason && <div className="text-muted">{plainReason(t.reason)}</div>}
-                      <div className="flex flex-wrap gap-x-4 text-[12px] leading-4">
-                        {t.solscan && (
-                          <a href={t.solscan} target="_blank" rel="noreferrer">
-                            Payment on Solscan
-                          </a>
-                        )}
-                        {t.arweaveUrl ? (
-                          <a href={t.arweaveUrl} target="_blank" rel="noreferrer">
-                            Record on Arweave
-                          </a>
-                        ) : (
-                          <span className="text-muted">{t.storage === "failed" ? "Not stored" : "Storing…"}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="text-muted">Nothing yet.</div>
+                <div className="mt-3 text-muted">Nothing yet.</div>
               )}
             </div>
           </div>
 
-          <aside className="space-y-8 border-t border-rule pt-8 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
+          <aside className="min-w-0 space-y-8 border-t border-rule pt-8 lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
             <div>
               <h2 className={H2}>Registered agents</h2>
               <div className="mb-3 text-muted">Each name resolves to keys sealed in the transparency log. A signature that does not match is refused.</div>
@@ -243,20 +249,21 @@ export default function AuditPage() {
                   <a href={w.explorer} target="_blank" rel="noreferrer">
                     {w.role === "you (receive)" ? "Broker's wallet" : "Agents' wallet"}
                   </a>
-                  <span className="tabular-nums">{w.usdc === null ? "…" : `${w.usdc.toFixed(6)} USDC`}</span>
+                  <span className="tabular-nums">{w.usdc === null ? "…" : `${w.usdc.toFixed(2)} USDC`}</span>
                 </div>
               ))}
             </div>
 
             <div>
               <h2 className={H2}>Log</h2>
+              {/* The log is a real log viewer, so it keeps its own scroll box. Refusals are the guard working, so only errors and breaches are red. */}
               <div ref={logRef} className="mt-2 max-h-[280px] overflow-y-auto rounded-[3px] border border-rule bg-surface p-3 text-[12px] leading-4">
                 {snap?.log.map((l) => (
                   <div
                     key={l.seq}
-                    className={`${l.kind === "error" || l.kind === "refused" || l.kind === "breach" ? "text-bad" : l.kind === "step" ? "mt-2 font-semibold" : ""} whitespace-pre-wrap break-all`}
+                    className={`${l.kind === "error" || l.kind === "breach" ? "text-bad" : l.kind === "step" ? "mt-2 font-semibold" : ""} whitespace-pre-wrap break-words`}
                   >
-                    <span className="text-muted">{clock(l.at)} </span>
+                    <span className="text-muted tabular-nums">{clock(l.at)} </span>
                     {l.code} {l.text}
                     {l.link && (
                       <>

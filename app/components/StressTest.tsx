@@ -1,13 +1,15 @@
 "use client";
 
 import type { Snapshot } from "@/lib/demo/snapshot";
-import { money, toneOf } from "./format";
+import { AttemptLedger } from "./AttemptLedger";
+import { money } from "./format";
 import { BTN } from "./ui";
 
 export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string, body?: unknown) => Promise<void> }) {
   const stress = snap?.stress;
   const target = stress?.target;
-  const attempts = stress?.attempts.length ?? 0;
+  // Count the steps the ledger shows, so "It tries 4 ways" matches Step 1 to Step 4.
+  const attempts = stress?.attempts.filter((a) => !a.quiet).length ?? 0;
   const tries = attempts > 0 ? `${attempts} ways` : "every way it can";
   const before = stress?.trustBefore?.behavior ?? null;
   const after = stress?.trustAfter?.behavior ?? null;
@@ -27,16 +29,8 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path:
       </button>
       {stress?.error && <div className="text-bad">{stress.error}</div>}
       {stress && stress.attempts.length > 0 && (
-        <div className="space-y-2">
-          {stress.attempts
-            .filter((a) => !a.quiet)
-            .map((a, i) => (
-            <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
-              <div>{a.what}</div>
-              <div style={{ color: toneOf(a) }}>{a.result}</div>
-              <div className="text-muted">{a.proves}</div>
-            </div>
-          ))}
+        <div className="space-y-3">
+          <AttemptLedger attempts={stress.attempts.filter((a) => !a.quiet)} />
           {after !== null && (
             <div className="flex flex-wrap items-center gap-x-4 pt-1">
               <span className="inline-block h-1.5 w-40 shrink-0 border border-rule-strong">

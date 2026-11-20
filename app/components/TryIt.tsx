@@ -205,8 +205,8 @@ export function TryIt({
             (result && result.type === "labels" ? (
               <div className="space-y-1">
                 <div>
-                  <span className="font-semibold">{result.label}</span>{" "}
-                  <span className="text-muted">{(result.scores.find((s) => s.label === result.label)!.probability * 100).toFixed(1)}% sure</span>
+                  {/* The percentage is on the bar right below; the label alone leads. */}
+                  <span className="font-semibold">{result.label}</span>
                 </div>
                 {result.scores
                   .slice()

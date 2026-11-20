@@ -38,7 +38,7 @@ export function ModelPicker({
         {selected.modelName}
       </button>
       {missingKey && (
-        <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={() => setOpen(true)}>
+        <button className={TEXT_BTN} onClick={() => setOpen(true)}>
           Add key
         </button>
       )}
