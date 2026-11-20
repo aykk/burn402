@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Nav } from "@/app/nav";
+import { BTN_PRIMARY, INPUT, MONO } from "@/app/components/ui";
 import type { Snapshot } from "@/lib/demo/snapshot";
 
 function clock(ms: number): string {
@@ -34,7 +35,7 @@ function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
   return a.blocked ? "var(--bad)" : "var(--ok)";
 }
 
-const H2 = "text-[15px] font-semibold text-foreground";
+const H2 = "text-[16px] leading-[22px] font-semibold text-foreground";
 
 const BUILT_IN: Record<string, string> = {
   stresstester: "built in, limit tester",
@@ -101,20 +102,20 @@ export default function AuditPage() {
     <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
       <Nav current="/audit" />
 
-      <p className="max-w-[72ch] shrink-0 text-muted">
-        Pick an agent that has run a job. A second agent is handed part of its budget and tries to spend more than that budget allows. Every attempt,
-        refused or not, is signed and written to Arweave.
-      </p>
+      <div className="shrink-0 pt-2">
+        <h1 className="text-[20px] leading-[26px] font-semibold">Try to overspend an agent&apos;s budget</h1>
+        <p className="mt-3 max-w-[64ch] text-muted">
+          Pick an agent that has run a job. A second agent is handed part of its budget and tries to spend more than that budget allows. Every attempt,
+          refused or not, is signed and written to Arweave.
+        </p>
+      </div>
 
       {error && <div className="mt-3 shrink-0 text-bad">{error}</div>}
 
       {runs.length === 0 ? (
-        <div className="mt-6 border-t border-rule pt-5">
-          <h2 className={H2}>No agent has run a job yet</h2>
-          <p className="mt-1.5 text-muted">
-            <Link href="/">Run one on the Run page</Link> and it will appear here.
-          </p>
-        </div>
+        <p className="mt-6 text-foreground">
+          No agent has run a job yet. <Link href="/" className="font-semibold">Run one on the Run page</Link> and it will appear here.
+        </p>
       ) : (
         <section className="mt-6 grid gap-10 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-14">
           <div className="space-y-9 lg:min-h-0 lg:overflow-y-auto lg:pr-4 lg:pb-6">
@@ -125,19 +126,19 @@ export default function AuditPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <select
                   id="audit-agent"
-                  className="min-w-0 flex-1 rounded-[3px] border border-rule bg-surface px-2.5 py-1.5 disabled:opacity-60"
+                  className={`${INPUT} flex-1`}
                   value={target?.id ?? ""}
                   disabled={running}
                   onChange={(e) => setPicked(e.target.value)}
                 >
                   {runs.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {shortName(r.agent.ansName)} — {r.request.slice(0, 48)}
+                      {shortName(r.agent.ansName)}, {r.request.slice(0, 48)}
                     </option>
                   ))}
                 </select>
                 <button
-                  className="rounded-[3px] border border-foreground bg-foreground px-3.5 py-1.5 font-medium text-surface hover:opacity-85 disabled:opacity-30"
+                  className={BTN_PRIMARY}
                   disabled={running}
                   onClick={start}
                 >
@@ -145,8 +146,8 @@ export default function AuditPage() {
                 </button>
               </div>
               {target && (
-                <div className="text-muted">
-                  <span className="font-mono text-[12.5px]">{target.agent.ansName}</span>, <span className="tabular-nums">{money(target.budgetUsd)}</span> in total,{" "}
+                <div className="text-[12px] leading-4 text-muted">
+                  <span className={`break-all ${MONO}`}>{target.agent.ansName}</span>, <span className="tabular-nums">{money(target.budgetUsd)}</span> in total,{" "}
                   <span className="tabular-nums">{money(target.rateUsdHr)}</span> an hour at most, expires {target.deadlineMinutes} minutes after it started
                 </div>
               )}
@@ -155,7 +156,7 @@ export default function AuditPage() {
             {stress && stress.attempts.length > 0 && (
               <div className="space-y-3 border-t border-rule pt-6">
                 <h2 className={H2}>
-                  Limit test for <span className="font-mono text-[12.5px] font-normal break-all">{stress.job ? stress.job.agent : "this agent"}</span>
+                  Limit test for <span className="font-mono text-[12px] font-normal break-all">{stress.job ? stress.job.agent : "this agent"}</span>
                 </h2>
                 {stress.attempts
                   .filter((a) => !a.quiet)
@@ -171,7 +172,7 @@ export default function AuditPage() {
                   ))}
                 {stress.verdictUrl && (
                   <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
-                    the verdict against it, permanently on Arweave
+                    The verdict against it, permanently on Arweave
                   </a>
                 )}
               </div>
@@ -187,25 +188,25 @@ export default function AuditPage() {
                     <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.outcome === "accepted" ? "var(--ok)" : "var(--bad)" }}>
                       <div className="flex flex-wrap items-baseline gap-x-3">
                         {typeof t.mark === "number" && <span className="text-muted">[{t.mark}]</span>}
-                        <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "allowed" : t.outcome}</span>
-                        <span className="font-mono text-[12.5px]">{shortName(t.subject)}</span>
+                        <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "Allowed" : t.outcome.charAt(0).toUpperCase() + t.outcome.slice(1)}</span>
+                        <span className={MONO}>{shortName(t.subject)}</span>
                         <span>{t.plan}</span>
                         {t.usd !== null && t.outcome === "accepted" && <span className="tabular-nums">{t.usd.toFixed(6)} USDC</span>}
-                        <span className="text-muted tabular-nums">{clock(t.at * 1000)}</span>
+                        <span className="text-[12px] text-muted tabular-nums">{clock(t.at * 1000)}</span>
                       </div>
                       {t.reason && <div className="text-muted">{plainReason(t.reason)}</div>}
-                      <div className="flex flex-wrap gap-x-4">
+                      <div className="flex flex-wrap gap-x-4 text-[12px] leading-4">
                         {t.solscan && (
                           <a href={t.solscan} target="_blank" rel="noreferrer">
-                            the payment on Solscan
+                            Payment on Solscan
                           </a>
                         )}
                         {t.arweaveUrl ? (
                           <a href={t.arweaveUrl} target="_blank" rel="noreferrer">
-                            the record on Arweave
+                            Record on Arweave
                           </a>
                         ) : (
-                          <span className="text-muted">{t.storage === "failed" ? "not stored" : "storing…"}</span>
+                          <span className="text-muted">{t.storage === "failed" ? "Not stored" : "Storing…"}</span>
                         )}
                       </div>
                     </div>
@@ -226,7 +227,7 @@ export default function AuditPage() {
                   const role = BUILT_IN[/^ans:\/\/v[\d.]+\.([^.]+)\./.exec(name)?.[1] ?? ""];
                   return (
                     <div key={name}>
-                      <span className="font-mono text-[12.5px] break-all">{name}</span>
+                      <span className={`break-all ${MONO}`}>{name}</span>
                       {role && <span className="text-muted">, {role}</span>}
                     </div>
                   );
@@ -240,7 +241,7 @@ export default function AuditPage() {
               {snap?.wallets.map((w) => (
                 <div key={w.address} className="flex justify-between gap-3 border-b border-rule py-1.5">
                   <a href={w.explorer} target="_blank" rel="noreferrer">
-                    {w.role === "you (receive)" ? "the broker's wallet" : "the agents' wallet"}
+                    {w.role === "you (receive)" ? "Broker's wallet" : "Agents' wallet"}
                   </a>
                   <span className="tabular-nums">{w.usdc === null ? "…" : `${w.usdc.toFixed(6)} USDC`}</span>
                 </div>
@@ -249,11 +250,11 @@ export default function AuditPage() {
 
             <div>
               <h2 className={H2}>Log</h2>
-              <div ref={logRef} className="mt-2 max-h-[280px] overflow-y-auto rounded-[3px] border border-rule bg-surface p-3 text-[12px]">
+              <div ref={logRef} className="mt-2 max-h-[280px] overflow-y-auto rounded-[3px] border border-rule bg-surface p-3 text-[12px] leading-4">
                 {snap?.log.map((l) => (
                   <div
                     key={l.seq}
-                    className={`${l.kind === "error" || l.kind === "refused" || l.kind === "breach" ? "text-bad" : l.kind === "step" ? "mt-2 font-bold" : ""} whitespace-pre-wrap break-all`}
+                    className={`${l.kind === "error" || l.kind === "refused" || l.kind === "breach" ? "text-bad" : l.kind === "step" ? "mt-2 font-semibold" : ""} whitespace-pre-wrap break-all`}
                   >
                     <span className="text-muted">{clock(l.at)} </span>
                     {l.code} {l.text}

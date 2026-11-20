@@ -2,6 +2,7 @@
 
 import type { Snapshot } from "@/lib/demo/snapshot";
 import { money, toneOf } from "./format";
+import { BTN_PRIMARY } from "./ui";
 
 export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string, body?: unknown) => Promise<void> }) {
   const stress = snap?.stress;
@@ -11,18 +12,18 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path:
   const before = stress?.trustBefore?.behavior ?? null;
   const after = stress?.trustAfter?.behavior ?? null;
   return (
-    <div className="space-y-3 border-t border-rule pt-8">
-      <div className="flex flex-wrap items-baseline gap-x-4">
-        <h2 className="text-[15px] font-bold">Limit testing</h2>
+    <div className="space-y-3 border-t border-rule pt-6">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 className="text-[16px] leading-[22px] font-semibold">Limit testing</h2>
         <button
-          className="border border-foreground bg-foreground px-3.5 py-1.5 text-surface hover:opacity-85 disabled:opacity-40"
+          className={BTN_PRIMARY}
           disabled={stress?.status === "running" || snap?.busy}
           onClick={() => post("/api/demo/stress")}
         >
           {stress?.status === "running" ? "Trying…" : "Start"}
         </button>
       </div>
-      <div className="text-muted">
+      <div className="max-w-[64ch] text-muted">
         {target
           ? `A second agent is handed a slice of the same budget: ${money(target.budgetUsd)} at up to ${money(target.rateUsdHr)} an hour. It tries ${tries} to spend more than that.`
           : "A second agent is handed a slice of the budget this job used, then tries to spend more than it was allowed."}
@@ -50,11 +51,11 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path:
                   }}
                 />
               </span>
-              <span className="text-muted">
+              <span className="text-[12px] leading-4 text-muted">
                 {stress.trustAfter?.profile}, {before !== null && before !== after ? `from ${before} to ${after}` : after}
               </span>
               {(stress.trustAfter?.riskFactors ?? []).length > 0 && (
-                <span className="text-muted">{stress.trustAfter!.riskFactors.join(", ")}</span>
+                <span className="text-[12px] leading-4 text-muted">{stress.trustAfter!.riskFactors.join(", ")}</span>
               )}
             </div>
           )}

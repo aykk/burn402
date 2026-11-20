@@ -1,4 +1,4 @@
-// Long explanations shown behind the "?" help affordances. Sentence case, plain verbs.
+// Long explanations shown behind the dotted-underline help labels. Sentence case, plain verbs.
 export const HELP: Record<string, string> = {
   agent:
     "Carries the budget and timeframe for this instance. Negotiates with the broker and pays it. Name it to get its own registered identity, so that all transactions and records can be attributed to it. Not to be confused with the model you are training.",

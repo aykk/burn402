@@ -7,6 +7,8 @@ import { DatasetCard, type Detected } from "./DatasetCard";
 import { HELP } from "./copy";
 import { size } from "./format";
 import { Help } from "./Help";
+import { Segmented } from "./Segmented";
+import { BTN, INPUT, MONO, TEXT_BTN, TEXTAREA } from "./ui";
 
 export type JobDraft = { budgetUsd: number; rateUsdHr: number };
 
@@ -19,24 +21,33 @@ type JobBody = {
   preference: number;
 };
 
-const INPUT = "min-w-0 rounded-[3px] border border-rule bg-surface px-2.5 py-1 disabled:opacity-60";
-const BTN = "rounded-[3px] border border-rule-strong px-3 py-1 hover:border-foreground disabled:opacity-40";
-const BTN_PRIMARY = "rounded-[3px] border border-foreground bg-foreground px-3 py-1 text-surface hover:opacity-85 disabled:opacity-30";
+const START =
+  "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-foreground bg-foreground px-5 text-[13.5px] leading-5 font-semibold text-surface enabled:hover:bg-[#2B3644] disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
 
-function Label({ children, help, id, helpLabel, htmlFor }: { children: React.ReactNode; help: keyof typeof HELP; id: string; helpLabel: string; htmlFor?: string }) {
+/**
+ * A form label whose text is the help trigger (dotted underline). Inputs keep a real <label> for
+ * their accessible name; it is visually hidden because a button cannot sit inside a label.
+ */
+function Label({ children, help, id, htmlFor }: { children: string; help: keyof typeof HELP; id: string; htmlFor?: string }) {
   return (
-    <span className="flex items-center gap-2">
-      {htmlFor ? (
-        <label htmlFor={htmlFor} className="font-medium text-foreground">
+    <span className="block font-medium text-foreground">
+      {htmlFor && (
+        <label htmlFor={htmlFor} className="sr-only">
           {children}
         </label>
-      ) : (
-        <span className="font-medium text-foreground">{children}</span>
       )}
-      <Help id={`help-${id}`} label={helpLabel} text={HELP[help]} />
+      <Help id={`help-${id}`} text={HELP[help]}>
+        {children}
+      </Help>
     </span>
   );
 }
+
+const PLAN_OPTIONS = [
+  { value: 0, label: "Cheapest" },
+  { value: 0.5, label: "Balanced" },
+  { value: 1, label: "Fastest" },
+] as const;
 
 export function JobForm(props: {
   snap: Snapshot | null;
@@ -177,9 +188,9 @@ export function JobForm(props: {
     const b = j ? j.budgetUsd : budget;
     const r = j ? j.rateUsdHr : rate;
     const rows: [string, string][] = [
-      ["Agent", j?.agent.ansName ?? snap?.company?.ansName ?? (agentName.trim() || "not registered")],
-      ["Data", j ? j.dataset.name : sources.length > 0 ? sources.map((x) => x.name).join(", ") : "none"],
-      ["Task", (j ? j.request : request).trim() || "none"],
+      ["Agent", j?.agent.ansName ?? snap?.company?.ansName ?? (agentName.trim() || "Not registered")],
+      ["Data", j ? j.dataset.name : sources.length > 0 ? sources.map((x) => x.name).join(", ") : "None"],
+      ["Task", (j ? j.request : request).trim() || "None"],
       ["Budget", `${usd(b)}, limit ${usd(r)} an hour`],
     ];
     return (
@@ -187,19 +198,43 @@ export function JobForm(props: {
         {rows.map(([k, v]) => (
           <div key={k} className="flex gap-3">
             <dt className="w-16 shrink-0 text-muted">{k}</dt>
-            <dd className="min-w-0 break-words tabular-nums">{v}</dd>
+            <dd className={`min-w-0 tabular-nums ${k === "Agent" && v.startsWith("ans://") ? `break-all ${MONO} pt-0.5` : "break-words"}`}>{v}</dd>
           </div>
         ))}
       </dl>
     );
   }
 
+  const blocked = running || !hasKey || !detected || !snap?.company;
+  const reason = !hasKey
+    ? "Add a model key first, top right."
+    : !snap?.company
+      ? "Name and register your agent first."
+      : !detected
+        ? "Add the data it should learn from."
+        : null;
+
   return (
-    <div className="@container space-y-8">
-      <div className="space-y-2">
-        <Label help="agent" id="agent" helpLabel="About your agent">
+    <div className="@container space-y-6">
+      <div className="space-y-1.5">
+        <Label help="agent" id="agent">
           Your agent
         </Label>
+        {snap?.company && (
+          <div className="pb-1">
+            <div className="text-[16px] leading-[22px] font-semibold text-foreground">{snap.company.name}</div>
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <span className={`break-all text-muted ${MONO}`}>{snap.company.ansName}</span>
+              <span className="text-[12px] leading-4 font-medium text-ok">Registered</span>
+            </div>
+            <div className="mt-0.5 text-[12px] leading-4 text-muted">Its key is sealed in the transparency log.</div>
+          </div>
+        )}
+        {snap?.company && (
+          <label htmlFor="agent-name" className="block pt-1.5 text-[12px] leading-4 text-muted">
+            Register a different agent
+          </label>
+        )}
         <form
           className="flex flex-wrap items-center gap-2"
           onSubmit={(e) => {
@@ -208,8 +243,9 @@ export function JobForm(props: {
           }}
         >
           <input
-            aria-label="Agent name"
-            className={`${INPUT} flex-1`}
+            id="agent-name"
+            aria-label={snap?.company ? undefined : "Agent name"}
+            className={`${INPUT} flex-1 basis-40`}
             placeholder="agent-name"
             value={agentName}
             disabled={running || registering}
@@ -220,20 +256,25 @@ export function JobForm(props: {
           </button>
         </form>
         {registerError && <div className="text-bad">{registerError}</div>}
-        {snap?.company && (
-          <div>
-            <span className="text-ok">registered</span> <span className="break-all">{snap.company.ansName}</span>
-            <div className="text-muted">its key is sealed in the transparency log</div>
-          </div>
-        )}
       </div>
 
-      <div className="space-y-2">
-        <Label help="data" id="data" helpLabel="About training data">
+      <div className="space-y-1.5">
+        <Label help="data" id="data">
           Training data
         </Label>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            if (files.length > 0) readFiles(files);
+            e.target.value = "";
+          }}
+        />
         <div
-          className={`flex flex-wrap items-center gap-3 rounded-[3px] border border-dashed p-4 transition-colors ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
+          className={`flex h-16 items-center rounded-[3px] border border-dashed px-4 text-muted transition-colors ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
           onDragOver={(e) => {
             e.preventDefault();
             if (!running && !dragging) setDragging(true);
@@ -250,25 +291,22 @@ export function JobForm(props: {
             if (files.length > 0) readFiles(files);
           }}
         >
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) readFiles(files);
-              e.target.value = "";
-            }}
-          />
-          <button className={BTN_PRIMARY} disabled={running || reading} onClick={() => fileRef.current?.click()}>
-            {sources.length > 0 ? "Add more files" : "Choose files"}
-          </button>
-          <span className="text-muted">{dragging ? "drop them here" : "or drop them here, or"}</span>
+          {dragging ? (
+            <span className="text-foreground">Drop them here</span>
+          ) : (
+            <span>
+              {sources.length > 0 ? "Drop more files here or " : "Drop files here or "}
+              <button type="button" className={TEXT_BTN} disabled={running || reading} onClick={() => fileRef.current?.click()}>
+                choose files
+              </button>
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2 pt-0.5">
           <input
             aria-label="Data URL"
-            className={`${INPUT} flex-1 basis-40`}
-            placeholder="paste a URL"
+            className={`${INPUT} flex-1`}
+            placeholder="Or paste a URL"
             value={url}
             disabled={running}
             onChange={(e) => setUrl(e.target.value)}
@@ -282,17 +320,13 @@ export function JobForm(props: {
         </div>
 
         {sources.length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-1 pt-1">
             {sources.map((src, i) => (
               <div key={`${src.uploadId ?? src.url}-${i}`} className="flex items-baseline gap-3">
                 <span className="truncate">{src.name}</span>
-                <span className="shrink-0 text-muted">{size(src)}</span>
-                <button
-                  className="ml-auto shrink-0 text-muted underline underline-offset-2 hover:text-foreground disabled:opacity-40"
-                  disabled={running}
-                  onClick={() => void dropSource(i)}
-                >
-                  remove
+                <span className="shrink-0 text-[12px] text-muted">{size(src)}</span>
+                <button className={`ml-auto shrink-0 text-[12px] ${TEXT_BTN}`} disabled={running} onClick={() => void dropSource(i)}>
+                  Remove
                 </button>
               </div>
             ))}
@@ -304,13 +338,13 @@ export function JobForm(props: {
         {detected && <DatasetCard detected={detected} />}
       </div>
 
-      <div className="space-y-2">
-        <Label help="task" id="task" helpLabel="About the task">
+      <div className="space-y-1.5">
+        <Label help="task" id="task" htmlFor="task-input">
           What should the custom model learn to do?
         </Label>
         <textarea
-          aria-label="Task"
-          className={`${INPUT} w-full resize-none py-2.5 leading-relaxed`}
+          id="task-input"
+          className={`${TEXTAREA} w-full resize-none`}
           rows={3}
           placeholder="Take our company documentation and datasets and spin up a custom chatbot that attributes our documentation and data for relevant responses, and refuses questions that are not about our company."
           value={request}
@@ -319,13 +353,13 @@ export function JobForm(props: {
         />
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="grid gap-4 @lg:grid-cols-3">
-          <div className="space-y-1">
-            <Label help="budget" id="form-budget" htmlFor="budget-input" helpLabel="About the budget">
+          <div className="space-y-1.5">
+            <Label help="budget" id="form-budget" htmlFor="budget-input">
               Total budget
             </Label>
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-center gap-1.5">
               <span className="shrink-0 text-muted">$</span>
               <input
                 id="budget-input"
@@ -335,7 +369,7 @@ export function JobForm(props: {
                 step={0.25}
                 value={budget}
                 disabled={running}
-                className={`${INPUT} flex-1 tabular-nums`}
+                className={`${INPUT} w-full flex-1 tabular-nums`}
                 onChange={(e) => {
                   const next = Number(e.target.value);
                   setBudget(next);
@@ -344,11 +378,11 @@ export function JobForm(props: {
               />
             </div>
           </div>
-          <div className="space-y-1">
-            <Label help="rate" id="rate" htmlFor="rate-input" helpLabel="About the hourly limit">
+          <div className="space-y-1.5">
+            <Label help="rate" id="rate" htmlFor="rate-input">
               Hourly limit
             </Label>
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-center gap-1.5">
               <span className="shrink-0 text-muted">$</span>
               <input
                 id="rate-input"
@@ -358,17 +392,17 @@ export function JobForm(props: {
                 step={0.005}
                 value={rate}
                 disabled={running}
-                className={`${INPUT} flex-1 tabular-nums`}
+                className={`${INPUT} w-full flex-1 tabular-nums`}
                 onChange={(e) => setRate(Number(e.target.value))}
               />
               <span className="shrink-0 text-muted">an hour</span>
             </div>
           </div>
-          <div className="space-y-1">
-            <Label help="deadline" id="deadline" htmlFor="deadline-input" helpLabel="About the time limit">
+          <div className="space-y-1.5">
+            <Label help="deadline" id="deadline" htmlFor="deadline-input">
               Time limit
             </Label>
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-center gap-1.5">
               <input
                 id="deadline-input"
                 type="number"
@@ -377,7 +411,7 @@ export function JobForm(props: {
                 step={1}
                 value={deadline}
                 disabled={running}
-                className={`${INPUT} flex-1 tabular-nums`}
+                className={`${INPUT} w-full flex-1 tabular-nums`}
                 onChange={(e) => setDeadline(Number(e.target.value))}
               />
               <span className="shrink-0 text-muted">minutes</span>
@@ -385,64 +419,47 @@ export function JobForm(props: {
           </div>
         </div>
 
-        <div className="space-y-1">
-          <Label help="preference" id="preference" helpLabel="About plan preference">
+        <div className="space-y-1.5">
+          <Label help="preference" id="preference">
             Pick a plan that is
           </Label>
-          <div className="flex gap-2">
-            {(
-              [
-                ["cheapest", 0],
-                ["balanced", 0.5],
-                ["fastest", 1],
-              ] as const
-            ).map(([label, value]) => (
-              <button
-                key={label}
-                aria-pressed={preference === value}
-                className={`rounded-[3px] border px-4 py-1.5 ${preference === value ? "border-foreground bg-foreground text-surface" : "border-rule-strong text-muted hover:border-foreground hover:text-foreground"} disabled:opacity-40`}
-                disabled={running}
-                onClick={() => setPreference(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Segmented label="Plan preference" options={PLAN_OPTIONS} value={preference} onChange={setPreference} disabled={running} />
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <button
-          className="rounded-[3px] border border-foreground bg-foreground px-6 py-2.5 font-semibold text-surface hover:opacity-85 disabled:opacity-30"
-          disabled={running || !hasKey || !detected || !snap?.company}
-          onClick={() =>
-            void onStart({
-              request,
-              dataset: detected!.dataset,
-              budgetUsd: budget,
-              rateUsdHr: rate,
-              deadlineMinutes: deadline,
-              preference,
-            })
-          }
-        >
-          Start run
-        </button>
-        <span className="flex items-center gap-2 text-muted">
-          <label className="flex items-center gap-2">
+      <div className="space-y-2 pt-1">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <button
+            className={START}
+            disabled={blocked}
+            onClick={() =>
+              void onStart({
+                request,
+                dataset: detected!.dataset,
+                budgetUsd: budget,
+                rateUsdHr: rate,
+                deadlineMinutes: deadline,
+                preference,
+              })
+            }
+          >
+            Start run
+          </button>
+          <span className="flex items-center gap-2">
             <input
+              id="publish-input"
               type="checkbox"
+              aria-label="Publish my side of the negotiation"
               checked={snap?.disclosure === "full"}
               disabled={running}
               onChange={(e) => post("/api/demo/network", { disclosure: e.target.checked ? "full" : "desk-only" })}
             />
-            Publish my side of the negotiation
-          </label>
-          <Help id="help-publish" label="About publishing" text={HELP.publish} />
-        </span>
-        {!hasKey && <span className="text-muted">pick a model and add its key, top right</span>}
-        {hasKey && !snap?.company && <span className="text-muted">name and register your agent first</span>}
-        {hasKey && snap?.company && !detected && <span className="text-muted">add the data it should learn from</span>}
+            <Help id="help-publish" text={HELP.publish} className="text-muted">
+              Publish my side of the negotiation
+            </Help>
+          </span>
+        </div>
+        {reason && <p className="text-[12px] leading-4 text-foreground">{reason}</p>}
       </div>
     </div>
   );

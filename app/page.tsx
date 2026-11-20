@@ -84,14 +84,15 @@ export default function Page() {
   const nowSec = running ? Math.max(tick, snap?.now ?? 0) : (snap?.now ?? 0);
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/">
         {snap && <ModelPicker models={snap.models} disabled={running} onSave={(provider, key) => post("/api/demo/model", { provider, key })} />}
-        <button className="underline underline-offset-2" onClick={() => setDrawer(true)}>
+        <button className="underline decoration-1 underline-offset-[3px] hover:decoration-2" onClick={() => setDrawer(true)}>
           Log
         </button>
+        {/* Reset is destructive, so it sits 40px from Log instead of 24. */}
         <button
-          className="text-muted underline underline-offset-2"
+          className="ml-4 text-muted underline decoration-1 underline-offset-[3px] hover:text-foreground"
           title="Forget this session: destroys any running server, clears the jobs and the log"
           onClick={async () => {
             await post("/api/demo/reset");
@@ -118,7 +119,7 @@ export default function Page() {
           table fits; it gives the space back to the form after Reset. A finished job leaves the form
           expanded in a slightly wider column so the next run can be set up. */}
       <section
-        className={`mt-6 grid gap-8 lg:min-h-0 lg:flex-1 lg:gap-10 ${
+        className={`mt-8 grid gap-8 lg:gap-10 ${
           running
             ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
             : job
@@ -126,7 +127,7 @@ export default function Page() {
               : "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
         }`}
       >
-        <div className="lg:min-h-0 lg:overflow-y-auto lg:pr-4 lg:pb-6">
+        <div className="lg:pr-4 lg:pb-6">
           <JobForm
             resetSignal={resetSignal}
             snap={snap}
@@ -139,7 +140,7 @@ export default function Page() {
           />
         </div>
 
-        <div className="border-t border-rule pt-8 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
+        <div className="border-t border-rule pt-8 lg:sticky lg:top-6 lg:self-start lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
           <RunPanel snap={snap} job={job} current={current} previous={previous} previousModel={previousModel} post={post} />
         </div>
       </section>

@@ -5,8 +5,8 @@ export type Detected = { dataset: DatasetSource; labels: string[]; sampleRows: s
 export function DatasetCard({ detected }: { detected: Detected }) {
   const d = detected.dataset;
   return (
-    <div className="text-muted">
-      {d.kind === "classifier" ? "sorts text" : d.kind === "retrieval" ? "answers from documents" : "writes more text"}, {d.note}
+    <div className="text-[12px] leading-4 text-muted">
+      {d.kind === "classifier" ? "Sorts text" : d.kind === "retrieval" ? "Answers from documents" : "Writes more text"}, {d.note}
     </div>
   );
 }
