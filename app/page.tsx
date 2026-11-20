@@ -42,7 +42,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [draft, setDraft] = useState<JobDraft>({ budgetUsd: 5, rateUsdHr: 1.25 });
-  const [formKey, setFormKey] = useState(0);
+  const [resetSignal, setResetSignal] = useState(0);
   const [models, setModels] = useState<Record<string, TrainedModel>>({});
 
   const load = useCallback(async () => {
@@ -110,7 +110,7 @@ export default function Page() {
           title="Forget this session: destroys any running server, clears the jobs and the log"
           onClick={async () => {
             await post("/api/demo/reset");
-            setFormKey((k) => k + 1);
+            setResetSignal((k) => k + 1);
           }}
         >
           Reset
@@ -124,7 +124,7 @@ export default function Page() {
       <section className="mt-6 grid min-h-0 flex-1 gap-10 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div className="min-h-0 space-y-12 overflow-y-auto pb-6 pr-4">
           <JobForm
-            key={formKey}
+            resetSignal={resetSignal}
             snap={snap}
             running={running}
             collapsed={running}

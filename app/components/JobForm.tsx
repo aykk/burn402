@@ -23,11 +23,17 @@ const INPUT = "min-w-0 rounded-[3px] border border-rule bg-surface px-2.5 py-1 d
 const BTN = "rounded-[3px] border border-rule-strong px-3 py-1 hover:border-foreground disabled:opacity-40";
 const BTN_PRIMARY = "rounded-[3px] border border-foreground bg-foreground px-3 py-1 text-surface hover:opacity-85 disabled:opacity-30";
 
-function Label({ children, help, id }: { children: React.ReactNode; help: keyof typeof HELP; id: string }) {
+function Label({ children, help, id, helpLabel, htmlFor }: { children: React.ReactNode; help: keyof typeof HELP; id: string; helpLabel: string; htmlFor?: string }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="font-medium text-foreground">{children}</span>
-      <Help id={`help-${id}`} label={`About ${String(children).toLowerCase()}`} text={HELP[help]} />
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="font-medium text-foreground">
+          {children}
+        </label>
+      ) : (
+        <span className="font-medium text-foreground">{children}</span>
+      )}
+      <Help id={`help-${id}`} label={helpLabel} text={HELP[help]} />
     </span>
   );
 }
@@ -40,8 +46,9 @@ export function JobForm(props: {
   onStart: (body: JobBody) => Promise<void>;
   reload: () => Promise<void>;
   post: (path: string, body?: unknown) => Promise<void>;
+  resetSignal: number;
 }) {
-  const { snap, running, collapsed, onDraftChange, onStart, reload, post } = props;
+  const { resetSignal, snap, running, collapsed, onDraftChange, onStart, reload, post } = props;
   const [request, setRequest] = useState("");
   const [url, setUrl] = useState("");
   const [sources, setSources] = useState<DatasetSource[]>([]);
@@ -57,6 +64,22 @@ export function JobForm(props: {
   const [deadline, setDeadline] = useState(30);
   const [preference, setPreference] = useState(0.5);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Page Reset: clear only what the old inline form cleared; budget, rate, deadline and preference stay.
+  const gen = useRef(0);
+  const lastReset = useRef(resetSignal);
+  useEffect(() => {
+    if (lastReset.current === resetSignal) return;
+    lastReset.current = resetSignal;
+    gen.current += 1; // an upload still in flight must not re-add its file
+    setSources([]);
+    setDetected(null);
+    setDatasetError(null);
+    setUrl("");
+    setRequest("");
+    setAgentName("");
+    setRegisterError(null);
+  }, [resetSignal]);
 
   useEffect(() => {
     onDraftChange({ budgetUsd: budget, rateUsdHr: rate });
@@ -82,10 +105,12 @@ export function JobForm(props: {
   const addSources = async (init: RequestInit) => {
     setDatasetError(null);
     setReading(true);
+    const mine = gen.current;
     try {
       const res = await fetch("/api/demo/dataset", init);
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      if (gen.current !== mine) return;
       const next = [...sources, (body as Detected).dataset];
       setSources(next);
       await combineSources(next);
@@ -139,11 +164,20 @@ export function JobForm(props: {
   };
 
   if (collapsed) {
+    const j = snap?.job ?? null;
+    // Up to 4 decimals, trailing zeros trimmed, never fewer than 2.
+    const usd = (n: number) => {
+      const t = String(parseFloat(n.toFixed(4)));
+      const dec = t.includes(".") ? t.split(".")[1].length : 0;
+      return `$${dec >= 2 ? t : n.toFixed(2)}`;
+    };
+    const b = j ? j.budgetUsd : budget;
+    const r = j ? j.rateUsdHr : rate;
     const rows: [string, string][] = [
-      ["Agent", snap?.company?.ansName ?? (agentName.trim() || "not registered")],
-      ["Data", sources.length > 0 ? sources.map((s) => s.name).join(", ") : "none"],
-      ["Task", request.trim() || "none"],
-      ["Budget", `$${budget.toFixed(2)}, limit $${rate.toFixed(2)} an hour`],
+      ["Agent", j?.agent.ansName ?? snap?.company?.ansName ?? (agentName.trim() || "not registered")],
+      ["Data", j ? j.dataset.name : sources.length > 0 ? sources.map((x) => x.name).join(", ") : "none"],
+      ["Task", (j ? j.request : request).trim() || "none"],
+      ["Budget", `${usd(b)}, limit ${usd(r)} an hour`],
     ];
     return (
       <dl className="space-y-1.5">
@@ -160,7 +194,7 @@ export function JobForm(props: {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <Label help="agent" id="agent">
+        <Label help="agent" id="agent" helpLabel="About your agent">
           Your agent
         </Label>
         <form
@@ -192,7 +226,7 @@ export function JobForm(props: {
       </div>
 
       <div className="space-y-2">
-        <Label help="data" id="data">
+        <Label help="data" id="data" helpLabel="About training data">
           Training data
         </Label>
         <div
@@ -268,7 +302,7 @@ export function JobForm(props: {
       </div>
 
       <div className="space-y-2">
-        <Label help="task" id="task">
+        <Label help="task" id="task" helpLabel="About the task">
           What should the custom model learn to do?
         </Label>
         <textarea
@@ -285,13 +319,13 @@ export function JobForm(props: {
       <div className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-1">
-            <Label help="budget" id="form-budget">
+            <Label help="budget" id="form-budget" htmlFor="budget-input" helpLabel="About the budget">
               Total budget
             </Label>
             <div className="flex items-baseline gap-1.5">
               <span className="shrink-0 text-muted">$</span>
               <input
-                aria-label="Total budget in dollars"
+                id="budget-input"
                 type="number"
                 min={0.05}
                 max={20}
@@ -308,13 +342,13 @@ export function JobForm(props: {
             </div>
           </div>
           <div className="space-y-1">
-            <Label help="rate" id="rate">
+            <Label help="rate" id="rate" htmlFor="rate-input" helpLabel="About the hourly limit">
               Hourly limit
             </Label>
             <div className="flex items-baseline gap-1.5">
               <span className="shrink-0 text-muted">$</span>
               <input
-                aria-label="Hourly limit in dollars"
+                id="rate-input"
                 type="number"
                 min={0.003}
                 max={budget}
@@ -328,12 +362,12 @@ export function JobForm(props: {
             </div>
           </div>
           <div className="space-y-1">
-            <Label help="deadline" id="deadline">
+            <Label help="deadline" id="deadline" htmlFor="deadline-input" helpLabel="About the time limit">
               Time limit
             </Label>
             <div className="flex items-baseline gap-1.5">
               <input
-                aria-label="Time limit in minutes"
+                id="deadline-input"
                 type="number"
                 min={3}
                 max={120}
@@ -349,7 +383,7 @@ export function JobForm(props: {
         </div>
 
         <div className="space-y-1">
-          <Label help="preference" id="preference">
+          <Label help="preference" id="preference" helpLabel="About plan preference">
             Pick a plan that is
           </Label>
           <div className="flex gap-2">
