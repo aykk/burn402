@@ -38,9 +38,9 @@ export function kb(bytes: number | null): string {
   return bytes === null ? "-" : bytes > 900000 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
-export function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
-  if (a.blocked === null) return a.ok ? "var(--ok)" : "var(--bad)";
-  return a.blocked ? "var(--bad)" : "var(--ok)";
+/** A payment as the run column shows it: "$0.0026". */
+export function usd4(n: number): string {
+  return `$${(Number.isFinite(n) ? Math.max(0, n) : 0).toFixed(4)}`;
 }
 
 export function collapseLog(log: { at: number; text: string }[]): { at: number; text: string }[] {

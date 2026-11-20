@@ -193,7 +193,7 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
       <h3 className={SUB}>Rented and paid</h3>
       <div>
         {job.plan} in {REGIONS[job.region] ?? job.region}
-        {job.boxUrl && job.phase !== "done" && (
+        {job.boxUrl && job.phase !== "done" && job.phase !== "failed" && (
           <>
             {", "}
             <a href={job.boxUrl} target="_blank" rel="noreferrer">
@@ -238,7 +238,7 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
   const training = (onBox || job.phase === "done") && (
     <section key="training" className="space-y-2">
       <div>
-        <h3 className={SUB}>Training</h3>
+        <h3 className={SUB}>Progress</h3>
         <p className="text-[12px] leading-4 text-muted tabular-nums">
           {timing}
           {status?.vcpus ? `, ${status.vcpus} workers` : ""}
