@@ -24,6 +24,16 @@ const hourly = (text: string) => text.replace(/\/(hour|hr)\b/g, " an hour");
  * "Refused by the broker" is on /records); only an attempt that got through is red.
  */
 export function attemptOutcome(a: Attempt): { word: string; reason: string; color: string } {
+  // The trust-index step: a score change, not a listing.
+  if (/^the trust index/i.test(a.what) || /→/.test(a.result)) {
+    const dir = /\b(lowered|raised)\b/i.exec(a.what)?.[1].toLowerCase();
+    const word = dir ? `Score ${dir}` : "Score kept";
+    const m = /^(.*?)\s*,?\s*from (\d+) anchored violation\(s\)(.*)$/i.exec(a.result);
+    const reason = m
+      ? `Behaviour score ${m[1].trim()}, from ${m[2]} anchored violation${m[2] === "1" ? "" : "s"}${m[3]}.`
+      : period(`Behaviour score ${a.result}`);
+    return { word, reason, color: a.ok ? "var(--ok)" : "var(--foreground)" };
+  }
   const color = a.blocked === true ? "var(--foreground)" : a.blocked === false ? "var(--bad)" : a.ok ? "var(--ok)" : "var(--bad)";
   const split = /^(refused|not stopped|caught it|unexpected):?\s*(.*)$/i.exec(a.result);
   if (split) {
@@ -39,7 +49,7 @@ export function attemptOutcome(a: Attempt): { word: string; reason: string; colo
 
 /** ANS names inside the prose render in mono and may break anywhere; the prose itself only breaks at spaces. */
 function Prose({ text }: { text: string }) {
-  const parts = text.split(/(ans:\/\/[^\s,;]+)/g);
+  const parts = text.split(/(ans:\/\/[^\s,;]+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.burn402\.xyz)/g);
   return (
     <>
       {parts.map((part, i) =>

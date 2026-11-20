@@ -123,13 +123,13 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
         ) : null}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px] border-collapse text-[13.5px] leading-5">
+        <table className="w-full sm:min-w-[680px] border-collapse text-[13.5px] leading-5">
           <thead>
             <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
               <th className="py-2 pr-4 pl-2.5 font-medium">Plan</th>
-              <th className="py-2 pr-4 text-right font-medium">Cores</th>
-              <th className="py-2 pr-4 font-medium">Type</th>
-              <th className="py-2 pr-4 font-medium">RAM</th>
+              <th className="hidden py-2 pr-4 sm:table-cell text-right font-medium">Cores</th>
+              <th className="hidden py-2 pr-4 sm:table-cell font-medium">Type</th>
+              <th className="hidden py-2 pr-4 sm:table-cell font-medium">RAM</th>
               <th className="py-2 pr-4 text-right font-medium">$/hour</th>
               <th className="py-2 pr-4 text-right font-medium">Ready in</th>
               <th className="py-2 pr-4 text-right font-medium">This run ($)</th>
@@ -149,9 +149,9 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
                     {q.plan}
                     {chosen && <span className="sr-only"> (chosen)</span>}
                   </td>
-                  <td className="py-2 pr-4 text-right">{q.vcpus}</td>
-                  <td className="py-2 pr-4 font-normal text-muted">{q.familyLabel}</td>
-                  <td className="py-2 pr-4">
+                  <td className="hidden py-2 pr-4 text-right sm:table-cell">{q.vcpus}</td>
+                  <td className="hidden py-2 pr-4 font-normal text-muted sm:table-cell">{q.familyLabel}</td>
+                  <td className="hidden py-2 pr-4 sm:table-cell">
                     {q.ramGb} GB{q.enoughRam ? "" : " (too small)"}
                   </td>
                   <td className="py-2 pr-4 text-right">{q.hourlyUsd.toFixed(4)}</td>

@@ -168,7 +168,7 @@ export default function AuditPage() {
                 )}
               </div>
             )}
-            {stress?.error && <div className="text-bad">{stress.error}</div>}
+            {stress?.error && <div className="text-bad">{/[.!?]$/.test(stress.error) ? stress.error.charAt(0).toUpperCase() + stress.error.slice(1) : `${stress.error.charAt(0).toUpperCase()}${stress.error.slice(1)}.`}</div>}
 
             <div className="border-t border-rule pt-6">
               <h2 className={H2}>Every request to rent a server</h2>
@@ -249,7 +249,7 @@ export default function AuditPage() {
                   <a href={w.explorer} target="_blank" rel="noreferrer">
                     {w.role === "you (receive)" ? "Broker's wallet" : "Agents' wallet"}
                   </a>
-                  <span className="tabular-nums">{w.usdc === null ? "…" : `${w.usdc.toFixed(2)} USDC`}</span>
+                  <span className="tabular-nums">{w.usdc === null ? "…" : `${usd4(w.usdc)} USDC`}</span>
                 </div>
               ))}
             </div>
