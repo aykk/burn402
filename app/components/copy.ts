@@ -13,3 +13,9 @@ export const HELP: Record<string, string> = {
   empty:
     "When a job finishes, the model produced lands here and can run in your browser. You can also download the model directly.",
 };
+
+// What to do after a failed run, by the stage it stopped in. `kept` is what is left of the budget.
+export const NEXT_STEP = {
+  deal: "Raise the hourly limit or pick a cheaper plan, then start the run again.",
+  later: (kept: string) => `Your budget kept ${kept}. Start the run again; nothing more is charged until a new plan is rented.`,
+};

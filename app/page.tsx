@@ -119,7 +119,7 @@ export default function Page() {
           table fits; it gives the space back to the form after Reset. A finished job leaves the form
           expanded in a slightly wider column so the next run can be set up. */}
       <section
-        className={`mt-8 grid gap-8 lg:gap-10 ${
+        className={`mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 lg:gap-10 ${
           running
             ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
             : job
