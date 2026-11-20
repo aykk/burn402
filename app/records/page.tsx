@@ -37,7 +37,7 @@ const OUTCOMES = [
   { value: "negotiation", label: "Negotiations" },
 ] as const;
 
-// Mainnet is permanent, so selecting it fills the toggle with the bad red instead of ink.
+// Mainnet is permanent, so its button carries a red dot (and a red outline on hover and focus).
 const NETWORKS = [
   { value: "testnet", label: "Testnet" },
   { value: "production", label: "Mainnet", danger: true },
@@ -45,6 +45,41 @@ const NETWORKS = [
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const shortAgent = (ans: string) => ans.replace(/^ans:\/\/v[\d.]+\./, "");
+
+/** "JFbqlL…G9Iw": enough to recognise a record; the full id goes in the title. */
+const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
+
+/** Sentence-case step names ("arweave item" becomes "Arweave item"; "ans proof" becomes "ANS proof"). */
+const stepName = (name: string) => sentence(name.replace(/\bans\b/gi, "ANS"));
+
+/** Machine tokens inside a check's detail: ANS names, hashes, key ids, constants. They render in mono. */
+const MACHINE = /(ans:\/\/[^\s,;]+|sha256:[0-9a-f]+|\b[A-Z]{2,}(?:[ _][A-Z0-9]+)*_[A-Z0-9]+\b|[A-Za-z0-9_-]{24,})/g;
+
+function Detail({ text }: { text: string }) {
+  const parts = text.split(MACHINE);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="font-mono break-all">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
+/** The outcome in a few words so it never wraps the column: "signatures verified, some held back" is the long one. */
+function outcomeLabel(r: Record): string {
+  if (/^signatures verified, some held back$/i.test(r.outcome.label)) {
+    const held = r.steps.map((s) => /(\d+) held back/.exec(s.detail)?.[1]).find(Boolean);
+    return held ? `Verified, ${held} kept private` : "Verified, some kept private";
+  }
+  return sentence(r.outcome.label);
+}
 
 function when(seconds: number | null): string | null {
   if (seconds === null || !Number.isFinite(seconds)) return null;
@@ -102,7 +137,7 @@ export default function RecordsPage() {
     : "Records";
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/records">
         <span className="flex items-center gap-3">
           <span className="text-muted">Arweave</span>
@@ -125,7 +160,8 @@ export default function RecordsPage() {
         </p>
       </div>
 
-      <div className="mt-6 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule pb-4">
+      {/* The document scrolls; from 640px up the filters stay pinned to the top (on a phone they would take a quarter of the screen). */}
+      <div className="z-20 mt-3 flex sm:sticky sm:top-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule bg-background pt-3 pb-4">
         <div className="max-w-full overflow-x-auto">
           <Segmented label="Outcome" options={OUTCOMES} value={outcome} onChange={setOutcome} />
         </div>
@@ -150,7 +186,7 @@ export default function RecordsPage() {
       {loading && <div className="mt-4 shrink-0 text-muted">Reading from Arweave and checking each record…</div>}
       {data?.error && <div className="mt-4 shrink-0 text-bad">{data.error}</div>}
       {data?.records && !loading && (
-        <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        <div className="pb-4">
           {shown.length === 0 && <div className="pt-4 text-muted">Nothing matches those filters.</div>}
           {shown.map((r) => {
             const tone = TONE[r.outcome.tone];
@@ -159,7 +195,7 @@ export default function RecordsPage() {
             return (
               <article
                 key={r.id}
-                className="grid gap-y-1.5 border-b border-rule py-4 lg:grid-cols-[96px_minmax(0,1fr)_180px_150px] lg:gap-x-6 lg:gap-y-2"
+                className="grid gap-y-1.5 border-b border-rule py-[14px] lg:grid-cols-[96px_minmax(0,1fr)_180px_150px] lg:gap-x-6 lg:gap-y-2"
               >
                 <div className="text-[12px] leading-5 text-muted">{KIND[r.kind] ?? r.kind}</div>
                 <div className="min-w-0">
@@ -169,7 +205,7 @@ export default function RecordsPage() {
                 </div>
                 <div>
                   <div className="font-medium" style={{ color: tone }}>
-                    {sentence(r.outcome.label)}
+                    {outcomeLabel(r)}
                   </div>
                   <div className={`text-[12px] leading-4 ${sigBad ? "text-bad" : "text-muted"}`}>
                     {r.verified ? "Signature verified" : "Signature not verified"}
@@ -179,9 +215,9 @@ export default function RecordsPage() {
                   {when(r.issuedAt) ?? when(r.anchoredAt) ?? "Date not on record"}
                 </div>
                 <div className="min-w-0 space-y-1.5 text-[12px] leading-4 lg:col-span-3 lg:col-start-2">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 break-all">
-                    <a href={r.rawUrl} target="_blank" rel="noreferrer">
-                      Raw record <span className="font-mono">{r.id}</span>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <a href={r.rawUrl} target="_blank" rel="noreferrer" title={r.id}>
+                      Raw record <span className="font-mono">{shortId(r.id)}</span>
                     </a>
                     {r.explorerUrl && (
                       <a href={r.explorerUrl} target="_blank" rel="noreferrer">
@@ -189,20 +225,31 @@ export default function RecordsPage() {
                       </a>
                     )}
                   </div>
-                  <details>
-                    <summary className="w-fit cursor-pointer text-muted hover:text-foreground">What was checked</summary>
-                    <div className="mt-1.5 space-y-0.5 border-l-2 border-rule pl-3">
+                  <details className="group">
+                    <summary className="flex w-fit cursor-pointer list-none items-baseline gap-1.5 text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+                      <span aria-hidden className="inline-block w-3 text-center text-foreground">
+                        <span className="group-open:hidden">+</span>
+                        <span className="hidden group-open:inline">−</span>
+                      </span>
+                      <span>
+                        <span className="group-open:hidden">Show</span>
+                        <span className="hidden group-open:inline">Hide</span> what was checked
+                      </span>
+                    </summary>
+                    <div className="mt-2 grid grid-cols-1 gap-y-1 border-l-2 border-rule pl-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:gap-x-4">
                       {r.steps.map((s) => (
-                        <div key={s.name} className={s.ok ? "text-ok" : "text-bad"}>
-                          {s.ok ? "✓" : "✗"} {s.name}: <span className="break-all text-muted">{s.detail}</span>
+                        <div key={s.name} className="contents">
+                          <div className="text-foreground">{stepName(s.name)}</div>
+                          <div className="mb-1 min-w-0 break-words text-muted sm:mb-0">
+                            {!s.ok && <span className="mr-2 font-medium text-bad">Failed</span>}
+                            <Detail text={s.detail} />
+                          </div>
                         </div>
                       ))}
-                      <div className="mt-1 text-muted">
-                        Run it yourself:{" "}
-                        <span className="font-mono text-foreground">
-                          npm run burn402 -- verify {r.id}
-                          {data.network === "production" ? " --network production" : ""}
-                        </span>
+                      <div className="mt-1 text-foreground">Run it yourself</div>
+                      <div className="min-w-0 break-all font-mono text-muted sm:mt-1">
+                        npm run burn402 -- verify {r.id}
+                        {data.network === "production" ? " --network production" : ""}
                       </div>
                     </div>
                   </details>

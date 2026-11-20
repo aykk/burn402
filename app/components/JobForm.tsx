@@ -43,6 +43,9 @@ function Label({ children, help, id, htmlFor }: { children: string; help: keyof 
   );
 }
 
+/** Number fields with the unit inside: no spinner arrows to collide with the suffix (arrow keys still step). */
+const NUMBER = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
 const PLAN_OPTIONS = [
   { value: 0, label: "Cheapest" },
   { value: 0.5, label: "Balanced" },
@@ -70,6 +73,8 @@ export function JobForm(props: {
   const [agentName, setAgentName] = useState("");
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  // "Use a different agent" is rarely needed, so its form stays closed until asked for.
+  const [otherAgent, setOtherAgent] = useState(false);
   const [budget, setBudget] = useState(5);
   const [rate, setRate] = useState(1.25);
   const [deadline, setDeadline] = useState(30);
@@ -90,6 +95,7 @@ export function JobForm(props: {
     setRequest("");
     setAgentName("");
     setRegisterError(null);
+    setOtherAgent(false);
   }, [resetSignal]);
 
   useEffect(() => {
@@ -187,18 +193,21 @@ export function JobForm(props: {
     };
     const b = j ? j.budgetUsd : budget;
     const r = j ? j.rateUsdHr : rate;
-    const rows: [string, string][] = [
-      ["Agent", j?.agent.ansName ?? snap?.company?.ansName ?? (agentName.trim() || "Not registered")],
+    const ans = j?.agent.ansName ?? snap?.company?.ansName ?? undefined;
+    const rows: [string, string, string?][] = [
+      ["Agent", j?.agent.name ?? snap?.company?.name ?? (agentName.trim() || "Not registered"), ans],
       ["Data", j ? j.dataset.name : sources.length > 0 ? sources.map((x) => x.name).join(", ") : "None"],
       ["Task", (j ? j.request : request).trim() || "None"],
       ["Budget", `${usd(b)}, limit ${usd(r)} an hour`],
     ];
     return (
       <dl className="space-y-1.5">
-        {rows.map(([k, v]) => (
+        {rows.map(([k, v, title]) => (
           <div key={k} className="flex gap-3">
             <dt className="w-16 shrink-0 text-muted">{k}</dt>
-            <dd className={`min-w-0 tabular-nums ${k === "Agent" && v.startsWith("ans://") ? `break-all ${MONO} pt-0.5` : "break-words"}`}>{v}</dd>
+            <dd className="min-w-0 break-words tabular-nums" title={title}>
+              {v}
+            </dd>
           </div>
         ))}
       </dl>
@@ -221,40 +230,55 @@ export function JobForm(props: {
           Your agent
         </Label>
         {snap?.company && (
-          <div className="pb-1">
+          <div>
             <div className="text-[16px] leading-[22px] font-semibold text-foreground">{snap.company.name}</div>
             <div className="flex flex-wrap items-baseline gap-x-3">
               <span className={`break-all text-muted ${MONO}`}>{snap.company.ansName}</span>
               <span className="text-[12px] leading-4 font-medium text-ok">Registered</span>
             </div>
             <div className="mt-0.5 text-[12px] leading-4 text-muted">Its key is sealed in the transparency log.</div>
+            {!otherAgent && (
+              <button
+                type="button"
+                className={`mt-1.5 text-[12px] leading-4 ${TEXT_BTN}`}
+                aria-expanded={false}
+                aria-controls="agent-name-form"
+                disabled={running}
+                onClick={() => setOtherAgent(true)}
+              >
+                Use a different agent
+              </button>
+            )}
           </div>
         )}
-        {snap?.company && (
+        {snap?.company && otherAgent && (
           <label htmlFor="agent-name" className="block pt-1.5 text-[12px] leading-4 text-muted">
             Register a different agent
           </label>
         )}
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void registerAgent();
-          }}
-        >
-          <input
-            id="agent-name"
-            aria-label={snap?.company ? undefined : "Agent name"}
-            className={`${INPUT} flex-1 basis-40`}
-            placeholder="agent-name"
-            value={agentName}
-            disabled={running || registering}
-            onChange={(e) => setAgentName(e.target.value)}
-          />
-          <button className={BTN} disabled={running || registering || !agentName.trim()}>
-            {registering ? "Registering…" : "Register agent"}
-          </button>
-        </form>
+        {(!snap?.company || otherAgent) && (
+          <form
+            id="agent-name-form"
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void registerAgent();
+            }}
+          >
+            <input
+              id="agent-name"
+              aria-label={snap?.company ? undefined : "Agent name"}
+              className={`${INPUT} flex-1 basis-40`}
+              placeholder="agent-name"
+              value={agentName}
+              disabled={running || registering}
+              onChange={(e) => setAgentName(e.target.value)}
+            />
+            <button className={BTN} disabled={running || registering || !agentName.trim()}>
+              {registering ? "Registering…" : "Register agent"}
+            </button>
+          </form>
+        )}
         {registerError && <div className="text-bad">{registerError}</div>}
       </div>
 
@@ -344,23 +368,27 @@ export function JobForm(props: {
         </Label>
         <textarea
           id="task-input"
-          className={`${TEXTAREA} w-full resize-none`}
-          rows={3}
-          placeholder="Take our company documentation and datasets and spin up a custom chatbot that attributes our documentation and data for relevant responses, and refuses questions that are not about our company."
+          className={`${TEXTAREA} block w-full resize-none`}
+          rows={4}
+          placeholder="Sort product reviews into positive, negative and mixed"
           value={request}
           disabled={running}
           onChange={(e) => setRequest(e.target.value)}
         />
       </div>
 
-      <div className="space-y-3">
-        <div className="grid gap-4 @lg:grid-cols-3">
-          <div className="space-y-1.5">
+      {/* On a wide form the plan picker joins the budget row, which keeps Start run above the fold. */}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-6 @min-[36rem]:grid-cols-[minmax(0,1fr)_auto]">
+        {/* Units sit inside the fields; three equal columns, two (time limit on the second row) at 20rem and below. */}
+        <div className="grid grid-cols-2 gap-4 @min-[20.0625rem]:grid-cols-3">
+          <div className="min-w-0 space-y-1.5">
             <Label help="budget" id="form-budget" htmlFor="budget-input">
               Total budget
             </Label>
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-muted">$</span>
+            <div className="relative">
+              <span aria-hidden className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">
+                $
+              </span>
               <input
                 id="budget-input"
                 type="number"
@@ -369,7 +397,7 @@ export function JobForm(props: {
                 step={0.25}
                 value={budget}
                 disabled={running}
-                className={`${INPUT} w-full flex-1 tabular-nums`}
+                className={`${INPUT} ${NUMBER} w-full pl-[25px] tabular-nums`}
                 onChange={(e) => {
                   const next = Number(e.target.value);
                   setBudget(next);
@@ -378,12 +406,14 @@ export function JobForm(props: {
               />
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label help="rate" id="rate" htmlFor="rate-input">
               Hourly limit
             </Label>
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-muted">$</span>
+            <div className="relative">
+              <span aria-hidden className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">
+                $
+              </span>
               <input
                 id="rate-input"
                 type="number"
@@ -392,17 +422,21 @@ export function JobForm(props: {
                 step={0.005}
                 value={rate}
                 disabled={running}
-                className={`${INPUT} w-full flex-1 tabular-nums`}
+                aria-describedby="rate-unit"
+                className={`${INPUT} ${NUMBER} w-full pr-9 pl-[25px] tabular-nums`}
                 onChange={(e) => setRate(Number(e.target.value))}
               />
-              <span className="shrink-0 text-muted">an hour</span>
+              <span id="rate-unit" className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted">
+                <span aria-hidden>/h</span>
+                <span className="sr-only">an hour</span>
+              </span>
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label help="deadline" id="deadline" htmlFor="deadline-input">
               Time limit
             </Label>
-            <div className="flex items-center gap-1.5">
+            <div className="relative">
               <input
                 id="deadline-input"
                 type="number"
@@ -411,10 +445,14 @@ export function JobForm(props: {
                 step={1}
                 value={deadline}
                 disabled={running}
-                className={`${INPUT} w-full flex-1 tabular-nums`}
+                aria-describedby="deadline-unit"
+                className={`${INPUT} ${NUMBER} w-full pr-11 tabular-nums`}
                 onChange={(e) => setDeadline(Number(e.target.value))}
               />
-              <span className="shrink-0 text-muted">minutes</span>
+              <span id="deadline-unit" className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted">
+                <span aria-hidden>min</span>
+                <span className="sr-only">minutes</span>
+              </span>
             </div>
           </div>
         </div>
@@ -427,7 +465,7 @@ export function JobForm(props: {
         </div>
       </div>
 
-      <div className="space-y-2 pt-1">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <button
             className={START}

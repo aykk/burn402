@@ -2,46 +2,18 @@ import type { Snapshot } from "@/lib/demo/snapshot";
 import type { TrainingRunView } from "@/lib/demo/train";
 import type { TrainedModel } from "@/lib/train";
 import { HELP } from "./copy";
+import { STAGES, stageIndex } from "./stages";
 import { StressTest } from "./StressTest";
 import { Timeline } from "./Timeline";
 import { TryIt } from "./TryIt";
 
-const STAGES = ["Deal", "Payment", "Training", "Receipt"] as const;
-const DEAL = 0;
-const PAYMENT = 1;
-const TRAINING = 2;
-const RECEIPT = 3;
-
 type StageState = "done" | "now" | "next" | "failed";
 
 /**
- * Which of the four stages the run is in. The backend never reports "paying" (the agent pays inside
- * the negotiation), so Payment is derived: a plan is picked or money has moved, but the server is not
- * yet both rented and paid for. A failed run is pinned to the stage it stopped in, from what happened.
+ * With no job every stage is upcoming, so the row previews what Start run will do. Upcoming stages are
+ * thin strong-rule bars, finished ones thin ink bars, and the current (or failed) stage a thick bar, so
+ * a finished run reads as a completed ink track.
  */
-function stageIndex(job: TrainingRunView): number {
-  const planned = job.plan !== null;
-  const paid = job.paidUsd !== null;
-  switch (job.phase) {
-    case "negotiating":
-      return planned || paid ? PAYMENT : DEAL;
-    case "paying":
-      return PAYMENT;
-    case "booting":
-      return planned && !paid ? PAYMENT : TRAINING;
-    case "training":
-      return TRAINING;
-    case "publishing":
-      return RECEIPT;
-    case "done":
-      return STAGES.length;
-    case "failed":
-      if (!planned && !paid) return DEAL;
-      return planned && paid ? TRAINING : PAYMENT;
-  }
-}
-
-/** With no job every stage is upcoming, so the row previews what Start run will do. */
 function StageRow({ job }: { job: TrainingRunView | null }) {
   const at = job ? stageIndex(job) : -1;
   const failed = job?.phase === "failed";
@@ -52,17 +24,22 @@ function StageRow({ job }: { job: TrainingRunView | null }) {
         const s = state(i);
         return (
           <li key={label} aria-current={s === "now" ? "step" : undefined} className="min-w-0">
-            {/* Current: thick ink bar. Finished: thin muted bar. Upcoming: empty segment. */}
             <span className="flex h-[5px] items-end" aria-hidden>
               <span
                 className={`block w-full ${
-                  s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-muted" : "h-[2px] bg-segment"
+                  s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-foreground" : "h-[2px] bg-rule-strong"
                 }`}
               />
             </span>
             <span
               className={`mt-1.5 block truncate text-[12px] leading-4 ${
-                s === "now" ? "font-semibold text-foreground" : s === "failed" ? "font-semibold text-bad" : "font-medium text-muted"
+                s === "now"
+                  ? "font-semibold text-foreground"
+                  : s === "failed"
+                    ? "font-semibold text-bad"
+                    : s === "done"
+                      ? "font-medium text-foreground"
+                      : "font-medium text-muted"
               }`}
             >
               {label}
@@ -91,24 +68,26 @@ export function RunPanel({
   previousModel: TrainedModel | null;
   post: (path: string, body?: unknown) => Promise<void>;
 }) {
+  const done = job?.phase === "done";
+  const settled = done || job?.phase === "failed";
+  // The finished run's model sits directly under the result heading, inside the timeline.
+  const result = done && current && job ? <TryIt title="Your model" job={job} model={current} models={snap?.models} bare /> : null;
   return (
     <div className="space-y-8">
       <StageRow job={job} />
 
-      {job && <Timeline job={job} model={current} />}
+      {job && <Timeline job={job} model={current} result={result} />}
 
-      {job?.phase === "done" && current ? (
-        <TryIt title="Your model" job={job} model={current} models={snap?.models} />
-      ) : previousModel && previous ? (
+      {result ? null : previousModel && previous ? (
         <TryIt title="The model from the last run" job={previous} model={previousModel} models={snap?.models} />
-      ) : (
+      ) : !job || settled ? (
         <div className={job ? "border-t border-rule pt-6" : ""}>
           <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">Nothing trained yet</h2>
           <p className="mt-1.5 max-w-[44ch] text-muted">{HELP.empty}</p>
         </div>
-      )}
+      ) : null}
 
-      {job?.phase === "done" && <StressTest snap={snap} post={post} />}
+      {done && <StressTest snap={snap} post={post} />}
     </div>
   );
 }

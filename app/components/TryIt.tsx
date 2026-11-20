@@ -7,9 +7,22 @@ import type { TrainedModel } from "@/lib/train";
 import { formatMetric, headlineMetric, run as runModel, runnerFor } from "@/lib/train/infer";
 import { MetricList } from "./MetricList";
 import { kb, money } from "./format";
-import { BTN_PRIMARY, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
+import { BTN, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
 
-export function TryIt({ title, job, model, models }: { title: string; job: TrainingRunView; model: TrainedModel; models: Snapshot["models"] | undefined }) {
+/** `bare` drops the top rule when the panel sits directly under the result heading. */
+export function TryIt({
+  title,
+  job,
+  model,
+  models,
+  bare = false,
+}: {
+  title: string;
+  job: TrainingRunView;
+  model: TrainedModel;
+  models: Snapshot["models"] | undefined;
+  bare?: boolean;
+}) {
   const [input, setInput] = useState("");
   const [controls, setControls] = useState<Record<string, number>>(() =>
     Object.fromEntries((model.interface.output.controls ?? []).map((c) => [c.key, c.value])),
@@ -39,15 +52,21 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
   };
 
   return (
-    <div className="space-y-5 border-t border-rule pt-6">
+    <div className={`space-y-5 ${bare ? "" : "border-t border-rule pt-6"}`}>
       <div className="space-y-1">
         <h2 className="text-[16px] leading-[22px] font-semibold">{title}</h2>
         {headline && (
-          <div>
-            <div>
-              {formatMetric(headline.value, headline.format)} <span className="text-muted">{headline.label}</span>
+          <div className="pt-1">
+            <div className="flex flex-wrap items-baseline gap-x-2.5">
+              <span
+                className="text-[40px] leading-none font-semibold tabular-nums text-foreground"
+                style={{ fontStretch: "68%", fontVariationSettings: '"wdth" 68' }}
+              >
+                {formatMetric(headline.value, headline.format)}
+              </span>
+              <span className="text-[16px] leading-[22px] text-muted">{headline.label}</span>
             </div>
-            {headline.detail && <div className="text-muted">{headline.detail}</div>}
+            {headline.detail && <div className="mt-1 text-[12px] leading-4 text-muted">{headline.detail}</div>}
           </div>
         )}
         <div className="text-[12px] leading-4 text-muted">
@@ -93,7 +112,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
 
           {!live && (
             <button
-              className={BTN_PRIMARY}
+              className={BTN}
               onClick={() => {
                 const out = runModel(model, input, controls);
                 setProduced(out && out.type === "text" ? out.text : null);
@@ -107,7 +126,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className={BTN_PRIMARY}
+                  className={BTN}
                   disabled={asking || !input.trim() || !result || result.type !== "passages" || !runner}
                   onClick={async () => {
                     if (!result || result.type !== "passages") return;
@@ -224,9 +243,14 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
       )}
 
       <div className="border-t border-rule pt-3">
-        <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={() => setExpanded(!expanded)}>
-          {expanded ? "Hide the details" : "How it scored and what it chose"}
-        </button>
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-[12px] leading-4">
+          <button className={TEXT_BTN} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            {expanded ? "Hide the details" : "How it scored and what it chose"}
+          </button>
+          <button className={TEXT_BTN} onClick={download}>
+            Download the model
+          </button>
+        </div>
         {expanded && (
           <div className="mt-2 space-y-3">
             <MetricList metrics={model.metrics} />
@@ -265,12 +289,6 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             )}
           </div>
         )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-4 border-t border-rule pt-3">
-        <button className={TEXT_BTN} onClick={download}>
-          Download the model
-        </button>
       </div>
     </div>
   );

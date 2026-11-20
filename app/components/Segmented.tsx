@@ -1,6 +1,7 @@
 /**
  * A joined segmented control: buttons share borders, outer corners 3px, inner corners square.
- * Selected is ink-filled; an option can ask for the bad fill instead (Arweave mainnet).
+ * Selected is ink-filled. A `danger` option (Arweave mainnet) carries a 6px bad-red dot before its label
+ * and shows a red outline only on hover and focus.
  */
 export function Segmented<T extends string | number>({
   label,
@@ -22,10 +23,9 @@ export function Segmented<T extends string | number>({
       {options.map((o, i) => {
         const on = o.value === value;
         const tone = on
-          ? o.danger
-            ? "z-10 border-bad bg-bad text-surface"
-            : "z-10 border-foreground bg-foreground text-surface"
+          ? "z-10 border-foreground bg-foreground text-surface"
           : "border-rule-strong bg-transparent text-foreground hover:z-[5] hover:border-foreground";
+        const danger = o.danger ? "hover:z-[11] hover:border-bad focus-visible:z-[11] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-bad" : "";
         return (
           <button
             key={String(o.value)}
@@ -33,10 +33,11 @@ export function Segmented<T extends string | number>({
             aria-pressed={on}
             disabled={disabled}
             onClick={() => onChange(o.value)}
-            className={`relative h-9 shrink-0 border px-4 text-[13.5px] leading-5 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${tone} ${
+            className={`relative inline-flex h-9 shrink-0 items-center gap-2 border px-4 text-[13.5px] leading-5 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${tone} ${danger} ${
               i === 0 ? "rounded-l-[3px] rounded-r-none" : "-ml-px rounded-none"
             } ${i === options.length - 1 ? "rounded-r-[3px]" : ""}`}
           >
+            {o.danger && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-bad" />}
             {o.label}
           </button>
         );
