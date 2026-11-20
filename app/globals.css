@@ -1,19 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #16181d;
-  --muted: #71757e;
-  --rule: #e6e8ec;
-  --rule-strong: #c9cdd4;
-  --surface: #fafbfc;
-  --charcoal: #2c3037;
-  --burn: #c2410c;
-  --mark: #f97316;
-  --ok: #1a7f37;
+  --background: #E7EAEC;
+  --foreground: #1B2430;
+  --muted: #5B6672;
+  --rule: #B9C0C7;
+  --rule-strong: #8F98A2;
+  --surface: #F7F8F9;
+  --charcoal: #1B2430;
+  --burn: #1B2430;
+  --mark: #1B2430;
+  --ok: #2F6B3F;
   --bad: #cf222e;
-  --paid: #0969da;
-  --warn: #9a6700;
+  --amber: #E3A21A;
+  --segment: #D5DADF;
+  --paid: #1B2430;
+  --warn: #5B6672;
 }
 
 @theme inline {
@@ -30,7 +32,9 @@
   --color-bad: var(--bad);
   --color-paid: var(--paid);
   --color-warn: var(--warn);
-  --font-sans: var(--font-geist-mono);
+  --color-amber: var(--amber);
+  --color-segment: var(--segment);
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
@@ -38,11 +42,10 @@
   body {
     background: var(--background);
     color: var(--foreground);
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
-    font-size: 13.5px;
+    font-family: var(--font-sans);
+    font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
-    letter-spacing: -0.005em;
   }
 
   h1,
@@ -51,16 +54,16 @@
   }
 
   a {
-    color: var(--paid);
+    color: var(--foreground);
     text-decoration: underline;
     text-underline-offset: 3px;
     text-decoration-thickness: 1px;
-    text-decoration-color: color-mix(in srgb, var(--paid) 35%, transparent);
+    text-decoration-color: var(--foreground);
     transition: text-decoration-color 120ms ease;
   }
 
   a:hover {
-    text-decoration-color: var(--paid);
+    text-decoration-thickness: 2px;
   }
 
   input,
@@ -68,7 +71,7 @@
   select,
   button {
     font: inherit;
-    border-radius: 6px;
+    border-radius: 3px;
   }
 
   input[type="text"],
@@ -77,6 +80,7 @@
   textarea,
   select {
     background: var(--surface);
+    border-color: var(--rule);
     transition:
       border-color 120ms ease,
       background 120ms ease;
@@ -87,10 +91,10 @@
   input[type="number"]:focus-visible,
   textarea:focus-visible,
   select:focus-visible {
-    outline: none;
     border-color: var(--rule-strong);
-    background: var(--background);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--rule) 60%, transparent);
+    background: var(--surface);
+    outline: 2px solid var(--foreground);
+    outline-offset: 1px;
   }
 
   input::placeholder,
@@ -111,6 +115,10 @@
 
   input[type="range"] {
     accent-color: var(--foreground);
+  }
+
+  :where(body) {
+    font-variant-numeric: tabular-nums;
   }
 
   table {
