@@ -35,7 +35,6 @@ export function Timeline({ job, model }: { job: TrainingRunView; model: TrainedM
           <span className="font-mono">{job.agent.ansName}</span>, running on {job.model.name}, mandate <span className="font-mono">{job.mandateJti}</span>, {money(job.rateUsdHr)}/hour cap, expires in {job.deadlineMinutes} min
         </span>
       </div>
-      {job.error && <div className="text-bad">{job.error}</div>}
       <div className="text-muted">
         what you asked for: <span className="text-foreground">{job.request}</span>
       </div>
@@ -46,7 +45,7 @@ export function Timeline({ job, model }: { job: TrainingRunView; model: TrainedM
             <span className="text-muted">Agents have signed both ways, ANS keys verified.</span>
             {settled && (
               <span className="ml-auto">
-                <Fold label={`read the full exchange (${job.messages.length} messages)`} open={openTalk} onToggle={() => setOpenTalk(!openTalk)} />
+                <Fold label={`the full exchange (${job.messages.length} messages)`} open={openTalk} onToggle={() => setOpenTalk(!openTalk)} />
               </span>
             )}
           </div>
@@ -193,11 +192,8 @@ export function Timeline({ job, model }: { job: TrainingRunView; model: TrainedM
           </div>
           <div className="h-2 w-full max-w-[520px] border border-foreground">
             <div
-              className="h-full transition-all"
-              style={{
-                width: `${Math.round(progress * 100)}%`,
-                background: job.phase === "done" ? "var(--ok)" : "var(--foreground)",
-              }}
+              className="h-full bg-foreground transition-all"
+              style={{ width: `${Math.round(progress * 100)}%` }}
             />
           </div>
           <div className="space-y-0.5 text-muted">

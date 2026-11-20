@@ -1,5 +1,3 @@
-"use client";
-
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { TrainingRunView } from "@/lib/demo/train";
 import type { TrainedModel } from "@/lib/train";
@@ -9,26 +7,37 @@ import { Timeline } from "./Timeline";
 import { TryIt } from "./TryIt";
 
 const STAGES = ["Deal", "Payment", "Training", "Receipt"] as const;
+const DEAL = 0;
+const PAYMENT = 1;
+const TRAINING = 2;
+const RECEIPT = 3;
 
 type StageState = "done" | "now" | "next" | "failed";
 
-/** Which of the four stages the run is in, from `job.phase`. A failed run is pinned to the stage it stopped in. */
+/**
+ * Which of the four stages the run is in. The backend never reports "paying" (the agent pays inside
+ * the negotiation), so Payment is derived: a plan is picked or money has moved, but the server is not
+ * yet both rented and paid for. A failed run is pinned to the stage it stopped in, from what happened.
+ */
 function stageIndex(job: TrainingRunView): number {
+  const planned = job.plan !== null;
+  const paid = job.paidUsd !== null;
   switch (job.phase) {
     case "negotiating":
-      return 0;
+      return planned || paid ? PAYMENT : DEAL;
     case "paying":
-      return 1;
+      return PAYMENT;
     case "booting":
+      return planned && !paid ? PAYMENT : TRAINING;
     case "training":
-      return 2;
+      return TRAINING;
     case "publishing":
-      return 3;
+      return RECEIPT;
     case "done":
       return STAGES.length;
     case "failed":
-      if (job.paidUsd === null && job.handle === null) return job.plan === null ? 0 : 1;
-      return job.doneAt === null ? 2 : 3;
+      if (!planned && !paid) return DEAL;
+      return planned && paid ? TRAINING : PAYMENT;
   }
 }
 
@@ -42,13 +51,17 @@ function StageRow({ job }: { job: TrainingRunView }) {
         const s = state(i);
         return (
           <li key={label} aria-current={s === "now" ? "step" : undefined} className="min-w-0">
-            <span
-              aria-hidden
-              className={`block h-[3px] ${s === "failed" ? "bg-bad" : s === "next" ? "bg-segment" : "bg-foreground"}`}
-            />
+            {/* Current: thick ink bar. Finished: thin muted bar. Upcoming: empty segment. */}
+            <span className="flex h-[5px] items-end" aria-hidden>
+              <span
+                className={`block w-full ${
+                  s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-muted" : "h-[2px] bg-segment"
+                }`}
+              />
+            </span>
             <span
               className={`mt-1.5 block truncate text-[12.5px] ${
-                s === "now" ? "font-semibold text-foreground" : s === "failed" ? "text-bad" : s === "done" ? "text-foreground" : "text-muted"
+                s === "now" ? "font-bold text-foreground" : s === "failed" ? "font-bold text-bad" : "text-muted"
               }`}
             >
               {label}

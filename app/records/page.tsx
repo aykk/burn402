@@ -23,9 +23,14 @@ type Record = {
 };
 type Response = { network: string; fqdn: string | null; gatewayUrl?: string; records?: Record[]; error?: string };
 
+const TONE: { [K in Outcome["tone"]]: string } = { good: "var(--ok)", bad: "var(--bad)", warn: "var(--muted)" };
 
+const KIND: { [K in Record["kind"]]: string } = { verdict: "Verdict", transaction: "Transaction", conversation: "Negotiation" };
 
-const TONE: { [K in Outcome["tone"]]: string } = { good: "var(--ok)", bad: "var(--bad)", warn: "var(--warn)" };
+const TOGGLE = "rounded-[3px] border px-3 py-1";
+const TOGGLE_ON = "border-foreground bg-foreground text-surface";
+const TOGGLE_OFF = "border-rule-strong text-muted hover:border-foreground hover:text-foreground";
+const FIELD = "min-w-0 rounded-[3px] border border-rule bg-surface px-2.5 py-1.5";
 
 function when(seconds: number | null): string | null {
   if (seconds === null || !Number.isFinite(seconds)) return null;
@@ -74,120 +79,119 @@ export default function RecordsPage() {
       (needle === "" ||
         `${r.headline} ${r.outcome.label} ${r.reason ?? ""} ${r.subject ?? ""} ${r.kind} ${r.id} ${when(r.issuedAt) ?? ""}`.toLowerCase().includes(needle.toLowerCase())),
   );
+  const mainnet = data?.network === "production";
 
   return (
-    <main className="mx-auto flex h-screen w-full max-w-[1280px] flex-col overflow-hidden px-10 py-6">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
       <Nav current="/records">
         <span className="flex items-center gap-2">
           <span className="text-muted">Arweave</span>
-          {(["testnet", "production"] as const).map((n) => (
-            <button
-              key={n}
-              className={`border px-3 py-1 ${network === n ? "border-charcoal bg-charcoal text-background" : "border-rule-strong text-muted hover:border-charcoal"}`}
-              onClick={() => setNetwork(n)}
-            >
-              {n === "production" ? "mainnet" : "testnet"}
-            </button>
-          ))}
+          {(["testnet", "production"] as const).map((n) => {
+            const on = network === n;
+            // Mainnet is permanent, so it is marked with the bad red outline rather than the ink fill.
+            const style = n === "production" ? (on ? "border-bad bg-surface font-medium text-bad" : "border-rule-strong text-muted hover:border-bad hover:text-bad") : on ? TOGGLE_ON : TOGGLE_OFF;
+            return (
+              <button key={n} aria-pressed={on} className={`${TOGGLE} ${style}`} onClick={() => setNetwork(n)}>
+                {n === "production" ? "Mainnet" : "Testnet"}
+              </button>
+            );
+          })}
         </span>
       </Nav>
 
-      <p className="mt-4 max-w-[80ch] shrink-0">
-        All records (successful handshakes, transactions, failures) are written to Arweave. You can toggle between
-        Testnet and Mainnet (Mainnet is truly permanent and public). Refresh page to reload.
+      <p className="max-w-[72ch] shrink-0 text-muted">
+        Every handshake, transaction and failure is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
+        Reload the page to read them again.
       </p>
 
-      <div className="mt-4 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-rule pb-4">
-        <span className="flex items-center gap-2">
+      <div className="mt-5 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3 border-b border-rule pb-4">
+        <span className="flex flex-wrap items-center gap-2">
           {(
             [
-              ["all", "everything"],
-              ["good", "allowed"],
-              ["warn", "refused"],
-              ["bad", "broken rules"],
-              ["negotiation", "negotiations"],
+              ["all", "Everything"],
+              ["good", "Allowed"],
+              ["warn", "Refused"],
+              ["bad", "Broken rules"],
+              ["negotiation", "Negotiations"],
             ] as const
           ).map(([key, label]) => (
-            <button
-              key={key}
-              className={`border px-3 py-1 ${outcome === key ? "border-charcoal bg-charcoal text-background" : "border-rule-strong text-muted hover:border-charcoal"}`}
-              onClick={() => setOutcome(key)}
-            >
+            <button key={key} aria-pressed={outcome === key} className={`${TOGGLE} ${outcome === key ? TOGGLE_ON : TOGGLE_OFF}`} onClick={() => setOutcome(key)}>
               {label}
             </button>
           ))}
         </span>
-        <select className="min-w-0 border border-rule px-2.5 py-1.5" value={agent} onChange={(e) => setAgent(e.target.value)}>
-          <option value="">every agent</option>
+        <select aria-label="Agent" className={FIELD} value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <option value="">Every agent</option>
           {agents.map((a) => (
             <option key={a} value={a}>
               {a.replace(/^ans:\/\/v[\d.]+\./, "")}
             </option>
           ))}
         </select>
-        <input
-          className="min-w-0 flex-1 border border-rule px-2.5 py-1.5"
-          placeholder="search"
-          value={needle}
-          onChange={(e) => setNeedle(e.target.value)}
-        />
+        <input type="text" aria-label="Search records" className={`${FIELD} flex-1`} placeholder="Search" value={needle} onChange={(e) => setNeedle(e.target.value)} />
       </div>
 
       {loading && <div className="mt-4 shrink-0 text-muted">Reading from Arweave and checking each record…</div>}
       {data?.error && <div className="mt-4 shrink-0 text-bad">{data.error}</div>}
       {data?.records && !loading && (
-        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3">
-          <div className="shrink-0">
-            {shown.length === records.length
-              ? `${records.length} record${records.length === 1 ? "" : "s"}`
-              : `${shown.length} of ${records.length} records`}{" "}
-            on Arweave {data.network === "production" ? "mainnet" : "testnet"}. <span className="text-muted">Gateway: {data.gatewayUrl}</span>
+        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex shrink-0 flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="font-medium">
+              {shown.length === records.length
+                ? `${records.length} record${records.length === 1 ? "" : "s"}`
+                : `${shown.length} of ${records.length} records`}{" "}
+              on Arweave <span className={mainnet ? "text-bad" : ""}>{mainnet ? "mainnet" : "testnet"}</span>
+            </span>
+            <span className="text-muted">
+              Gateway <span className="font-mono text-[12.5px]">{data.gatewayUrl}</span>
+            </span>
           </div>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-4 pr-3">
-          {shown.length === 0 && <div className="text-muted">Nothing matches those filters.</div>}
-          {shown.map((r) => (
-            <div
-              key={r.id}
-              className="space-y-1.5 rounded-lg border border-rule p-4"
-              style={{ borderLeftWidth: "2px", borderLeftColor: data.network === "production" ? "var(--mark)" : "var(--rule-strong)" }}
-            >
-              <div className="flex flex-wrap items-baseline gap-x-4">
-                <span className="text-muted">{r.kind}</span>
-                <span>{r.headline}</span>
-                <span className="text-muted">{when(r.issuedAt) ?? when(r.anchoredAt) ?? "date not on record"}</span>
-                <span className="text-muted">{(r.subject ?? "").replace(/^ans:\/\/v[\d.]+\./, "")}</span>
-                <span className="ml-auto flex items-baseline gap-3">
-                  <span className="font-bold" style={{ color: TONE[r.outcome.tone] }}>
-                    {r.outcome.tone === "good" ? "✓" : r.outcome.tone === "bad" ? "✗" : "!"} {r.outcome.label}
+          <div className="min-h-0 flex-1 overflow-y-auto pr-3 pb-4">
+            {shown.length === 0 && <div className="pt-3 text-muted">Nothing matches those filters.</div>}
+            {shown.map((r) => (
+              <article key={r.id} className="space-y-1.5 border-b border-rule py-4">
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span className="text-muted">{KIND[r.kind] ?? r.kind}</span>
+                  <span className="font-medium">{r.headline}</span>
+                  <span className="text-muted">{when(r.issuedAt) ?? when(r.anchoredAt) ?? "date not on record"}</span>
+                  {r.subject && <span className="font-mono text-[12.5px] text-muted">{r.subject.replace(/^ans:\/\/v[\d.]+\./, "")}</span>}
+                  <span className="flex items-baseline gap-4 sm:ml-auto">
+                    <span className="font-semibold" style={{ color: TONE[r.outcome.tone] }}>
+                      {r.outcome.tone === "good" ? "✓" : r.outcome.tone === "bad" ? "✗" : "!"} {r.outcome.label}
+                    </span>
+                    <span className={r.verified ? "text-muted" : "text-bad"}>{r.verified ? "signature verified" : "signature not verified"}</span>
                   </span>
-                  <span className={r.verified ? "text-muted" : "text-bad"}>{r.verified ? "signature verified" : "signature not verified"}</span>
-                </span>
-              </div>
-              {r.reason && <div className="text-muted">{r.reason}</div>}
-              <div className="break-all">
-                <a href={r.rawUrl} target="_blank" rel="noreferrer">
-                  raw record {r.id}
-                </a>
-                {r.explorerUrl && (
-                  <>
-                    {" · "}
+                </div>
+                {r.reason && <div className="text-muted">{r.reason}</div>}
+                <div className="flex flex-wrap gap-x-4 break-all">
+                  <a href={r.rawUrl} target="_blank" rel="noreferrer">
+                    raw record <span className="font-mono text-[12.5px]">{r.id}</span>
+                  </a>
+                  {r.explorerUrl && (
                     <a href={r.explorerUrl} target="_blank" rel="noreferrer">
                       explorer
                     </a>
-                  </>
-                )}
-              </div>
-              <details>
-                <summary className="cursor-pointer text-muted">What was checked</summary>
-                {r.steps.map((s) => (
-                  <div key={s.name} className={s.ok ? "text-ok" : "text-bad"}>
-                    {s.ok ? "✓" : "✗"} {s.name}: <span className="text-muted break-all">{s.detail}</span>
+                  )}
+                </div>
+                <details>
+                  <summary className="cursor-pointer text-muted hover:text-foreground">What was checked</summary>
+                  <div className="mt-1.5 space-y-0.5 border-l-2 border-rule pl-3">
+                    {r.steps.map((s) => (
+                      <div key={s.name} className={s.ok ? "text-ok" : "text-bad"}>
+                        {s.ok ? "✓" : "✗"} {s.name}: <span className="break-all text-muted">{s.detail}</span>
+                      </div>
+                    ))}
+                    <div className="mt-1 text-muted">
+                      Run it yourself:{" "}
+                      <span className="font-mono text-[12.5px] text-foreground">
+                        npm run burn402 -- verify {r.id}
+                        {data.network === "production" ? " --network production" : ""}
+                      </span>
+                    </div>
                   </div>
-                ))}
-                <div className="text-muted mt-1">Run it yourself: npm run burn402 -- verify {r.id}{data.network === "production" ? " --network production" : ""}</div>
-              </details>
-            </div>
-          ))}
+                </details>
+              </article>
+            ))}
           </div>
         </div>
       )}

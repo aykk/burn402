@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -11,10 +9,11 @@ const PAGES = [
 
 export function Nav({ current, children }: { current: "/" | "/audit" | "/records"; children?: ReactNode }) {
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-3 pb-5">
+    // min-h-13 keeps the header the same height on pages with nothing on the right (32px row + 20px padding).
+    <header className="flex min-h-13 shrink-0 flex-wrap items-center gap-x-8 gap-y-3 pb-5">
       <Link href="/" className="text-[18px] leading-none font-semibold tracking-[-0.01em] text-foreground no-underline">
         burn
-        <span className="font-extrabold tabular-nums" style={{ fontStretch: "68%", fontVariationSettings: '"wdth" 68' }}>
+        <span className="font-extrabold" style={{ fontStretch: "68%" }}>
           402
         </span>
       </Link>
@@ -35,7 +34,7 @@ export function Nav({ current, children }: { current: "/" | "/audit" | "/records
           );
         })}
       </nav>
-      <span className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:ml-auto">{children}</span>
+      {children && <span className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:ml-auto">{children}</span>}
     </header>
   );
 }

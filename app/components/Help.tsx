@@ -1,5 +1,3 @@
-"use client";
-
 /** A keyboard-focusable "?" control that reveals a longer explanation on hover or focus. */
 export function Help({ id, label, text }: { id: string; label: string; text: string }) {
   return (
