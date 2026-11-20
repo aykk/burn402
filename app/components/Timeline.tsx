@@ -1,41 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { Snapshot } from "@/lib/demo/snapshot";
 import type { TrainingRunView } from "@/lib/demo/train";
 import type { TrainedModel } from "@/lib/train";
 import { Fold } from "./Fold";
 import { PHASE_TEXT, REGIONS, collapseLog, duration, kb, money } from "./format";
-import { StressTest } from "./StressTest";
 
-function BurnMeter({ spent, budget }: { spent: number | null; budget: number }) {
-  const used = spent === null || budget <= 0 ? 0 : Math.min(1, spent / budget);
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className="inline-block h-1.5 w-24 shrink-0 border border-rule-strong align-middle">
-        <span
-          className="block h-full transition-all"
-          style={{ width: `${Math.max(used > 0 ? 3 : 0, Math.round(used * 100))}%`, background: "var(--amber)" }}
-        />
-      </span>
-      <span className="text-muted">
-        {money(spent ?? 0)} of {money(budget)} spent
-      </span>
-    </span>
-  );
-}
+/** Backend copy still says "Vultr desk"; the UI calls it the broker. */
+const brokerCopy = (text: string) => text.replace(/Vultr desk/gi, "broker");
 
-export function Timeline({
-  job,
-  model,
-  snap,
-  post,
-}: {
-  job: TrainingRunView;
-  model: TrainedModel | null;
-  snap: Snapshot | null;
-  post: (path: string, body?: unknown) => Promise<void>;
-}) {
+export function Timeline({ job, model }: { job: TrainingRunView; model: TrainedModel | null }) {
   const status = job.status;
   const progress = status?.progress ?? 0;
   const elapsed = status?.elapsed ?? null;
@@ -59,9 +33,6 @@ export function Timeline({
         <h2 className="text-[15px] font-bold">{PHASE_TEXT[job.phase]}</h2>
         <span className="text-muted">
           <span className="font-mono">{job.agent.ansName}</span>, running on {job.model.name}, mandate <span className="font-mono">{job.mandateJti}</span>, {money(job.rateUsdHr)}/hour cap, expires in {job.deadlineMinutes} min
-        </span>
-        <span className="ml-auto">
-          <BurnMeter spent={job.paidUsd} budget={job.budgetUsd} />
         </span>
       </div>
       {job.error && <div className="text-bad">{job.error}</div>}
@@ -125,51 +96,53 @@ export function Timeline({
               </span>
             ) : null}
           </div>
-          <table className="w-full border-collapse">
-            <thead className="text-muted">
-              <tr className="border-b border-rule-strong text-left">
-                <th className="py-2 pr-4 font-normal">plan</th>
-                <th className="py-2 pr-4 font-normal">cores</th>
-                <th className="py-2 pr-4 font-normal">RAM</th>
-                <th className="py-2 pr-4 text-right font-normal">$/hour</th>
-                <th className="py-2 pr-4 text-right font-normal">model ready in</th>
-                <th className="py-2 pr-4 text-right font-normal">cost of this run</th>
-                <th className="py-2 text-right font-normal">hours your budget covers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shownQuotes.map((q) => {
-                const chosen = q.plan === marked;
-                return (
-                  <tr key={q.plan} className={`border-b border-rule ${chosen ? "font-bold" : q.enoughRam && q.withinDeadline ? "" : "text-muted"}`}>
-                    <td className="py-1.5 pr-4">
-                      {chosen ? <span className="font-normal text-muted">chosen </span> : ""}
-                      {q.plan}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      {q.vcpus} {q.familyLabel}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      {q.ramGb} GB{q.enoughRam ? "" : " (too small)"}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right">{q.hourlyUsd.toFixed(4)}</td>
-                    <td className="py-1.5 pr-4 text-right">
-                      {duration(q.totalSeconds)}
-                      {q.withinDeadline ? "" : " (over the limit)"}
-                    </td>
-                    <td className="py-1.5 pr-4 text-right">{q.jobUsd.toFixed(4)}</td>
-                    <td className="py-1.5 text-right">{q.budgetHours} h</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse">
+              <thead className="text-muted">
+                <tr className="border-b border-rule-strong text-left">
+                  <th className="py-2 pr-4 font-normal">plan</th>
+                  <th className="py-2 pr-4 font-normal">cores</th>
+                  <th className="py-2 pr-4 font-normal">RAM</th>
+                  <th className="py-2 pr-4 text-right font-normal">$/hour</th>
+                  <th className="py-2 pr-4 text-right font-normal">model ready in</th>
+                  <th className="py-2 pr-4 text-right font-normal">cost of this run</th>
+                  <th className="py-2 text-right font-normal">hours your budget covers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownQuotes.map((q) => {
+                  const chosen = q.plan === marked;
+                  return (
+                    <tr key={q.plan} className={`border-b border-rule ${chosen ? "font-bold" : q.enoughRam && q.withinDeadline ? "" : "text-muted"}`}>
+                      <td className="py-1.5 pr-4">
+                        {chosen ? <span className="font-normal text-muted">chosen </span> : ""}
+                        {q.plan}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        {q.vcpus} {q.familyLabel}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        {q.ramGb} GB{q.enoughRam ? "" : " (too small)"}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right">{q.hourlyUsd.toFixed(4)}</td>
+                      <td className="py-1.5 pr-4 text-right">
+                        {duration(q.totalSeconds)}
+                        {q.withinDeadline ? "" : " (over the limit)"}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right">{q.jobUsd.toFixed(4)}</td>
+                      <td className="py-1.5 text-right">{q.budgetHours} h</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {job.plan && job.chosen && job.plan !== job.chosen.plan ? (
             <div>
               {job.chosen.plan} is what the broker recommended; your agent rented {job.plan}
             </div>
           ) : (
-            job.chosenReason && <div>{job.chosenReason}</div>
+            job.chosenReason && <div>{brokerCopy(job.chosenReason)}</div>
           )}
         </div>
       )}
@@ -240,10 +213,8 @@ export function Timeline({
         </div>
       )}
 
-      {job.phase === "done" && <StressTest snap={snap} post={post} />}
-
       {job.phase === "done" && model && (
-        <div className="text-ok">The model is {kb(job.modelBytes)} and the server was shut down. It is on the right, running in your browser.</div>
+        <div className="text-ok">The model is {kb(job.modelBytes)} and the server was shut down. It is below, running in your browser.</div>
       )}
     </div>
   );
