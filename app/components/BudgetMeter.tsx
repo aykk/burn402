@@ -1,6 +1,7 @@
 "use client";
 
 import { HELP } from "./copy";
+import { Help } from "./Help";
 import { meterView, type MeterJob, type MeterView } from "./meter-model";
 
 const SEGMENTS = 40;
@@ -74,24 +75,7 @@ export function BudgetMeter(props: {
           {usd4(v.remainingUsd)}
         </span>
         <span className="text-[16px] text-muted tabular-nums">of {usd2(v.budgetUsd)}</span>
-        <span className="group relative">
-          <button
-            type="button"
-            aria-label="About the budget"
-            aria-describedby="meter-help-budget"
-            title={HELP.budget}
-            className="h-[18px] w-[18px] rounded-[3px] border border-rule text-[12px] leading-none text-muted hover:text-foreground focus-visible:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-foreground"
-          >
-            ?
-          </button>
-          <span
-            id="meter-help-budget"
-            role="tooltip"
-            className="pointer-events-none absolute top-full left-0 z-10 mt-1 hidden w-64 max-w-[80vw] rounded-[3px] border border-rule bg-surface px-3 py-2 text-[12px] leading-snug text-foreground group-focus-within:block group-hover:block"
-          >
-            {HELP.budget}
-          </span>
-        </span>
+        <Help id="meter-help-budget" label="About the budget" text={HELP.budget} />
       </p>
 
       <div
