@@ -114,9 +114,16 @@ export default function Page() {
 
       {error && <div className="mt-4 shrink-0 text-bad">Can&apos;t reach the demo server ({error}). Start it with: npm run dev</div>}
 
+      {/* The run column is wide while there is a current job (live, finished or failed) so the plan
+          table fits; it gives the space back to the form after Reset. A finished job leaves the form
+          expanded in a slightly wider column so the next run can be set up. */}
       <section
         className={`mt-6 grid gap-8 lg:min-h-0 lg:flex-1 lg:gap-10 ${
-          running ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
+          running
+            ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
+            : job
+              ? "lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]"
+              : "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
         }`}
       >
         <div className="lg:min-h-0 lg:overflow-y-auto lg:pr-4 lg:pb-6">

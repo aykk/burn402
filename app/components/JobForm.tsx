@@ -92,12 +92,15 @@ export function JobForm(props: {
       setDetected(null);
       return;
     }
+    const mine = gen.current;
     const res = await fetch("/api/demo/dataset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sources: list }),
     });
     const body = await res.json();
+    // A Reset while this was in flight must not bring the old dataset card back.
+    if (gen.current !== mine) return;
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     setDetected(body as Detected);
   };
@@ -192,7 +195,7 @@ export function JobForm(props: {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="@container space-y-8">
       <div className="space-y-2">
         <Label help="agent" id="agent" helpLabel="About your agent">
           Your agent
@@ -264,7 +267,7 @@ export function JobForm(props: {
           <span className="text-muted">{dragging ? "drop them here" : "or drop them here, or"}</span>
           <input
             aria-label="Data URL"
-            className={`${INPUT} flex-1`}
+            className={`${INPUT} flex-1 basis-40`}
             placeholder="paste a URL"
             value={url}
             disabled={running}
@@ -317,7 +320,7 @@ export function JobForm(props: {
       </div>
 
       <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 @lg:grid-cols-3">
           <div className="space-y-1">
             <Label help="budget" id="form-budget" htmlFor="budget-input" helpLabel="About the budget">
               Total budget

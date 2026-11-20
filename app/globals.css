@@ -7,15 +7,10 @@
   --rule: #B9C0C7;
   --rule-strong: #8F98A2;
   --surface: #F7F8F9;
-  --charcoal: #1B2430;
-  --burn: #1B2430;
-  --mark: #1B2430;
   --ok: #2F6B3F;
   --bad: #cf222e;
   --amber: #E3A21A;
   --segment: #D5DADF;
-  --paid: #1B2430;
-  --warn: #5B6672;
 }
 
 @theme inline {
@@ -25,13 +20,8 @@
   --color-rule: var(--rule);
   --color-rule-strong: var(--rule-strong);
   --color-surface: var(--surface);
-  --color-charcoal: var(--charcoal);
-  --color-burn: var(--burn);
-  --color-mark: var(--mark);
   --color-ok: var(--ok);
   --color-bad: var(--bad);
-  --color-paid: var(--paid);
-  --color-warn: var(--warn);
   --color-amber: var(--amber);
   --color-segment: var(--segment);
   --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;

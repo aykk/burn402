@@ -1,19 +1,19 @@
-"use client";
-
 import { HELP } from "./copy";
 import { Help } from "./Help";
 import { meterView, type MeterJob, type MeterView } from "./meter-model";
 
 const SEGMENTS = 40;
 
-const usd4 = (n: number) => `$${n.toFixed(4)}`;
-const usd2 = (n: number) => `$${n.toFixed(2)}`;
+/** Displayed amounts never go below zero or show NaN. */
+const safe = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
+const usd4 = (n: number) => `$${safe(n).toFixed(4)}`;
+const usd2 = (n: number) => `$${safe(n).toFixed(2)}`;
 
 /** Split the gauge into ink and amber segment counts; the rest are empty. Proportions only. */
 function gauge(v: MeterView): { ink: number; amber: number } {
   const budget = v.budgetUsd;
   if (!(budget > 0)) return { ink: 0, amber: 0 };
-  const share = (usd: number) => Math.min(1, Math.max(0, usd / budget));
+  const share = (usd: number) => (Number.isFinite(usd) ? Math.min(1, Math.max(0, usd / budget)) : 0);
   const remainingN = Math.round(share(v.remainingUsd) * SEGMENTS);
 
   // Amber = what was paid, or what the quote says this job will use before payment.
@@ -39,7 +39,8 @@ function footerRight(v: MeterView): string | null {
     case "done":
       return v.paidUsd !== null ? `Spent ${usd4(v.paidUsd)}` : null;
     case "failed":
-      return null;
+      // A run that failed after paying still spent the money.
+      return v.paidUsd !== null ? `Spent ${usd4(v.paidUsd)}` : null;
   }
 }
 
@@ -99,9 +100,10 @@ export function BudgetMeter(props: {
       </div>
 
       {v.phase === "failed" && (
-        <p role="alert" className="mt-3 text-[13.5px] text-bad">
-          {v.error?.trim() || "The run failed."} Check the job details, then start the run again.
-        </p>
+        <div role="alert" className="mt-3 space-y-0.5 text-[13.5px]">
+          <p className="text-bad">{v.error?.trim() || "The run failed."}</p>
+          <p className="text-foreground">Check the job details, then start the run again.</p>
+        </div>
       )}
     </section>
   );

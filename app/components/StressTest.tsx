@@ -15,7 +15,7 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path:
       <div className="flex flex-wrap items-baseline gap-x-4">
         <h2 className="text-[15px] font-bold">Limit testing</h2>
         <button
-          className="border border-foreground bg-foreground px-3.5 py-1.5 text-background hover:opacity-85 disabled:opacity-40"
+          className="border border-foreground bg-foreground px-3.5 py-1.5 text-surface hover:opacity-85 disabled:opacity-40"
           disabled={stress?.status === "running" || snap?.busy}
           onClick={() => post("/api/demo/stress")}
         >
