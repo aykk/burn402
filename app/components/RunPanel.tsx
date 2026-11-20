@@ -41,9 +41,10 @@ function stageIndex(job: TrainingRunView): number {
   }
 }
 
-function StageRow({ job }: { job: TrainingRunView }) {
-  const at = stageIndex(job);
-  const failed = job.phase === "failed";
+/** With no job every stage is upcoming, so the row previews what Start run will do. */
+function StageRow({ job }: { job: TrainingRunView | null }) {
+  const at = job ? stageIndex(job) : -1;
+  const failed = job?.phase === "failed";
   const state = (i: number): StageState => (i < at ? "done" : i > at ? "next" : failed ? "failed" : "now");
   return (
     <ol aria-label="Run stages" className="grid grid-cols-4 gap-[3px]">
@@ -60,8 +61,8 @@ function StageRow({ job }: { job: TrainingRunView }) {
               />
             </span>
             <span
-              className={`mt-1.5 block truncate text-[12.5px] ${
-                s === "now" ? "font-bold text-foreground" : s === "failed" ? "font-bold text-bad" : "text-muted"
+              className={`mt-1.5 block truncate text-[12px] leading-4 ${
+                s === "now" ? "font-semibold text-foreground" : s === "failed" ? "font-semibold text-bad" : "font-medium text-muted"
               }`}
             >
               {label}
@@ -92,7 +93,7 @@ export function RunPanel({
 }) {
   return (
     <div className="space-y-8">
-      {job && <StageRow job={job} />}
+      <StageRow job={job} />
 
       {job && <Timeline job={job} model={current} />}
 
@@ -101,9 +102,9 @@ export function RunPanel({
       ) : previousModel && previous ? (
         <TryIt title="The model from the last run" job={previous} model={previousModel} models={snap?.models} />
       ) : (
-        <div className={job ? "border-t border-rule pt-5" : ""}>
-          <h2 className="text-[15px] font-semibold text-foreground">Nothing trained yet</h2>
-          <p className="mt-1.5 max-w-[46ch] text-muted">{HELP.empty}</p>
+        <div className={job ? "border-t border-rule pt-6" : ""}>
+          <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">Nothing trained yet</h2>
+          <p className="mt-1.5 max-w-[44ch] text-muted">{HELP.empty}</p>
         </div>
       )}
 

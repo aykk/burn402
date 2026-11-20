@@ -27,7 +27,7 @@ The page also needs to be split into components now, because the next piece of w
 
 ## Anti-goals (fails even if it technically works)
 
-- Looking like an AI template: no pill badges, no identical rounded cards with soft shadows, no gradients, no emoji in the UI chrome (the 🔥 in the wordmark goes), no all-caps eyebrow labels, no indigo/violet accent, no arrows appended to button text, no "A · B · C" middle-dot meta strings.
+- Looking like an AI template: no pill badges, no identical rounded cards with soft shadows, no gradients, no emoji in the UI chrome (the 🔥 in the wordmark is the one exception, by owner override), no all-caps eyebrow labels, no indigo/violet accent, no arrows appended to button text, no "A · B · C" middle-dot meta strings.
 - Breaking the working run flow (job form, negotiation, payment, training, model try-out, stress test).
 
 ## Visual system
@@ -135,6 +135,6 @@ The owner asked the designer to choose. These are the designer's calls:
 - Meter shows the real payment drop plus a live, labelled drain of the paid amount at the rented plan's hourly rate.
 - Explanations become short labels with hover details. Keep the long explanation strings together in one copy module so they can be restored easily.
 - "Vultr desk" becomes "broker" in UI copy now.
-- The 🔥 emoji leaves the wordmark.
+- The 🔥 emoji stays in the wordmark (owner override, 2026-11-20). It is the only emoji allowed in the UI and is `aria-hidden`.
 - Records and audit pages get the new look but keep their layouts.
 - Nav, column behavior, amber source and dropped colors as described above.

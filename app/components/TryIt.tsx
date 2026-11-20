@@ -7,6 +7,7 @@ import type { TrainedModel } from "@/lib/train";
 import { formatMetric, headlineMetric, run as runModel, runnerFor } from "@/lib/train/infer";
 import { MetricList } from "./MetricList";
 import { kb, money } from "./format";
+import { BTN_PRIMARY, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
 
 export function TryIt({ title, job, model, models }: { title: string; job: TrainingRunView; model: TrainedModel; models: Snapshot["models"] | undefined }) {
   const [input, setInput] = useState("");
@@ -38,9 +39,9 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
   };
 
   return (
-    <div className="space-y-5 border-t border-rule pt-5">
-      <div>
-        <div className="font-bold">{title}</div>
+    <div className="space-y-5 border-t border-rule pt-6">
+      <div className="space-y-1">
+        <h2 className="text-[16px] leading-[22px] font-semibold">{title}</h2>
         {headline && (
           <div>
             <div>
@@ -49,17 +50,17 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             {headline.detail && <div className="text-muted">{headline.detail}</div>}
           </div>
         )}
-        <div className="text-muted">
-          trained on {job.dataset.name}, {job.plan}, {money(job.paidUsd)}, {kb(job.modelBytes)}
+        <div className="text-[12px] leading-4 text-muted">
+          Trained on {job.dataset.name}, {job.plan}, {money(job.paidUsd)}, {kb(job.modelBytes)}
         </div>
       </div>
 
       {runner ? (
         <div className="space-y-2">
-          <div className="text-muted">{model.interface.input.label}</div>
+          <div className="font-medium">{model.interface.input.label}</div>
           {model.interface.input.lines && model.interface.input.lines > 1 ? (
             <textarea
-              className="w-full resize-none border border-rule bg-surface px-2 py-1"
+              className={`${TEXTAREA} w-full resize-none`}
               rows={model.interface.input.lines}
               placeholder={model.interface.input.placeholder}
               value={input}
@@ -67,7 +68,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             />
           ) : (
             <input
-              className="w-full border border-rule bg-surface px-2 py-1"
+              className={`${INPUT} w-full`}
               placeholder={model.interface.input.placeholder}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -92,7 +93,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
 
           {!live && (
             <button
-              className="border border-foreground bg-foreground px-3.5 py-1.5 text-background hover:opacity-85"
+              className={BTN_PRIMARY}
               onClick={() => {
                 const out = runModel(model, input, controls);
                 setProduced(out && out.type === "text" ? out.text : null);
@@ -106,7 +107,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="border border-foreground bg-foreground px-3 py-1 text-background hover:opacity-85 disabled:cursor-not-allowed disabled:border-rule-strong disabled:bg-surface disabled:text-muted"
+                  className={BTN_PRIMARY}
                   disabled={asking || !input.trim() || !result || result.type !== "passages" || !runner}
                   onClick={async () => {
                     if (!result || result.type !== "passages") return;
@@ -131,10 +132,10 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
                 >
                   {asking ? "Asking…" : "Submit"}
                 </button>
-                <span className="text-muted">
-                  answered by{" "}
+                <span className="flex items-center gap-2 text-muted">
+                  Answered by
                   <select
-                    className="border border-rule bg-surface px-1.5 py-0.5"
+                    className={INPUT}
                     value={answerWith || (models?.selected ?? "")}
                     onChange={(e) => setAnswerWith(e.target.value)}
                   >
@@ -163,7 +164,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
                 <div key={i} className="border-l-2 border-rule pl-3">
                   <div className="flex items-baseline gap-2">
                     <span className="text-muted">[{i + 1}]</span>
-                    <a href={p.url} target="_blank" rel="noreferrer" className="font-bold">
+                    <a href={p.url} target="_blank" rel="noreferrer" className="font-semibold">
                       {p.title || p.url}
                     </a>
                     <span className="text-muted">{(p.score * 100).toFixed(0)}% match</span>
@@ -176,7 +177,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
 
           {live && model.interface.output.type === "passages" && !result && (
             <div className="text-muted">
-              {input.trim() ? "none of those words appear in your file, so it found no passage to answer from" : model.interface.output.label}
+              {input.trim() ? "None of those words appear in your file, so it found no passage to answer from." : model.interface.output.label}
             </div>
           )}
 
@@ -185,7 +186,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             (result && result.type === "labels" ? (
               <div className="space-y-1">
                 <div>
-                  <b>{result.label}</b>{" "}
+                  <span className="font-semibold">{result.label}</span>{" "}
                   <span className="text-muted">{(result.scores.find((s) => s.label === result.label)!.probability * 100).toFixed(1)}% sure</span>
                 </div>
                 {result.scores
@@ -209,7 +210,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
               </div>
             ) : (
               <div className="text-muted">
-                {input.trim() ? "none of those words appear in your data, so it has nothing to go on" : model.interface.output.label}
+                {input.trim() ? "None of those words appear in your data, so it has nothing to go on." : model.interface.output.label}
               </div>
             ))}
 
@@ -223,7 +224,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
       )}
 
       <div className="border-t border-rule pt-3">
-        <button className="text-muted underline underline-offset-2" onClick={() => setExpanded(!expanded)}>
+        <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={() => setExpanded(!expanded)}>
           {expanded ? "Hide the details" : "How it scored and what it chose"}
         </button>
         {expanded && (
@@ -231,18 +232,18 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
             <MetricList metrics={model.metrics} />
             {model.settings && model.settings.length > 0 && (
               <div>
-                <div className="text-muted">the settings it landed on</div>
+                <div className="text-[12px] leading-4 font-medium text-muted">The settings it landed on</div>
                 <MetricList metrics={model.settings} />
               </div>
             )}
             {model.candidates && model.candidates.rows.length > 0 && (
               <div>
-                <div className="text-muted">every setting it tried, and how each scored</div>
+                <div className="text-[12px] leading-4 font-medium text-muted">Every setting it tried, and how each scored</div>
                 <table className="w-full border-collapse">
-                  <thead className="text-muted">
-                    <tr className="border-b border-rule-strong text-left">
+                  <thead>
+                    <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
                       {model.candidates.columns.map((c) => (
-                        <th key={c.key} className="py-2 pr-4 font-normal">
+                        <th key={c.key} className="py-2 pr-4 font-medium">
                           {c.label}
                         </th>
                       ))}
@@ -252,7 +253,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
                     {model.candidates.rows.map((row, i) => (
                       <tr key={i} className="border-b border-rule">
                         {model.candidates!.columns.map((c) => (
-                          <td key={c.key} className="py-1.5 pr-4">
+                          <td key={c.key} className="py-2 pr-4">
                             {formatMetric(row[c.key], c.format)}
                           </td>
                         ))}
@@ -267,7 +268,7 @@ export function TryIt({ title, job, model, models }: { title: string; job: Train
       </div>
 
       <div className="flex flex-wrap items-center gap-4 border-t border-rule pt-3">
-        <button className="underline underline-offset-2" onClick={download}>
+        <button className={TEXT_BTN} onClick={download}>
           Download the model
         </button>
       </div>

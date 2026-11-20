@@ -4,13 +4,13 @@ import type { DatasetSource } from "@/lib/train";
 export const REGIONS: Record<string, string> = { ewr: "New Jersey", ord: "Chicago", atl: "Atlanta", lax: "Los Angeles", sjc: "Silicon Valley" };
 
 export const PHASE_TEXT: Record<TrainingRunView["phase"], string> = {
-  negotiating: "your agent is talking to the broker",
-  paying: "paying for the server over x402",
-  booting: "the server is booting",
-  training: "training on the rented server",
-  publishing: "collecting the model",
-  done: "done",
-  failed: "stopped",
+  negotiating: "Your agent is talking to the broker",
+  paying: "Paying for the server over x402",
+  booting: "The server is booting",
+  training: "Training on the rented server",
+  publishing: "Collecting the model",
+  done: "Done",
+  failed: "Stopped",
 };
 
 export function clock(ms: number): string {
