@@ -1,41 +1,41 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 const PAGES = [
-  { href: "/audit", label: "ANS, mandates, receipts" },
-  { href: "/records", label: "Arweave records" },
+  { href: "/", label: "Run" },
+  { href: "/records", label: "Records" },
+  { href: "/audit", label: "Audit" },
 ] as const;
 
 export function Nav({ current, children }: { current: "/" | "/audit" | "/records"; children?: ReactNode }) {
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-7 gap-y-2 pb-4">
-      <Link href="/" className="flex items-center gap-2 text-lg font-bold text-foreground no-underline hover:opacity-70" style={{ textDecoration: "none" }}>
-        <Image src="/mark.png" alt="" width={13} height={20} priority className="shrink-0" />
-        <span>
-          burn<span style={{ color: "var(--mark)" }}>402</span>
+    <header className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-3 pb-5">
+      <Link href="/" className="text-[18px] leading-none font-semibold tracking-[-0.01em] text-foreground no-underline">
+        burn
+        <span className="font-extrabold tabular-nums" style={{ fontStretch: "68%", fontVariationSettings: '"wdth" 68' }}>
+          402
         </span>
       </Link>
-      <nav className="flex items-center gap-7">
-        {PAGES.map((page) =>
-          page.href === current ? (
-            <span
+      <nav aria-label="Pages" className="flex items-center gap-6">
+        {PAGES.map((page) => {
+          const here = page.href === current;
+          return (
+            <Link
               key={page.href}
-              className="font-bold"
-              style={{ boxShadow: "inset 0 -2px 0 0 var(--mark)", paddingBottom: "2px" }}
+              href={page.href}
+              aria-current={here ? "page" : undefined}
+              className={`border-b-2 pb-0.5 no-underline transition-colors ${
+                here ? "border-foreground font-medium text-foreground" : "border-transparent text-muted hover:text-foreground"
+              }`}
             >
               {page.label}
-            </span>
-          ) : (
-            <Link key={page.href} href={page.href}>
-              {page.label}
             </Link>
-          ),
-        )}
+          );
+        })}
       </nav>
-      <span className="ml-auto flex items-center gap-7">{children}</span>
+      <span className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:ml-auto">{children}</span>
     </header>
   );
 }

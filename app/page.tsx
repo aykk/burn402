@@ -1,41 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Nav } from "@/app/nav";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { TrainedModel } from "@/lib/train";
+import { BudgetMeter } from "@/app/components/BudgetMeter";
 import { JobForm, type JobDraft } from "@/app/components/JobForm";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import { ModelPicker } from "@/app/components/ModelPicker";
-import { Timeline } from "@/app/components/Timeline";
-import { TryIt } from "@/app/components/TryIt";
-
-
-const PIPELINE = [
-  { step: "your agent", detail: "ANS" },
-  { step: "Vultr desk", detail: "A2A" },
-  { step: "mandate", detail: "budget, rate, deadline" },
-  { step: "x402", detail: "Solana" },
-  { step: "Vultr box", detail: "trains, then dies" },
-  { step: "Arweave", detail: "receipt" },
-];
-
-
-
-function Pipeline() {
-  return (
-    <div className="flex shrink-0 items-baseline gap-2.5 overflow-x-auto whitespace-nowrap border-b border-rule pb-4 text-[12.5px]">
-      {PIPELINE.map((p, i) => (
-        <span key={p.step} className="flex items-baseline gap-2">
-          <span>
-            {p.step} <span className="text-muted">{p.detail}</span>
-          </span>
-          {i < PIPELINE.length - 1 && <span className="text-muted">-&gt;</span>}
-        </span>
-      ))}
-    </div>
-  );
-}
+import { RunPanel } from "@/app/components/RunPanel";
 
 export default function Page() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -44,12 +17,16 @@ export default function Page() {
   const [draft, setDraft] = useState<JobDraft>({ budgetUsd: 5, rateUsdHr: 1.25 });
   const [resetSignal, setResetSignal] = useState(0);
   const [models, setModels] = useState<Record<string, TrainedModel>>({});
+  // Server clock minus client clock, refreshed on every poll, so the meter ticks in server seconds.
+  const clockOffset = useRef(0);
+  const [tick, setTick] = useState(0);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/demo/state", { cache: "no-store" });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      if (typeof body.now === "number") clockOffset.current = body.now - Date.now() / 1000;
       setSnap(body);
       setError(null);
     } catch (e) {
@@ -98,8 +75,16 @@ export default function Page() {
   const previous = snap?.previous ?? null;
   const previousModel = previous && models[previous.id] ? models[previous.id] : null;
 
+  // While a run is live (and the server answers), tick once a second so the meter drains between polls.
+  useEffect(() => {
+    if (!running || error) return;
+    const id = setInterval(() => setTick(Date.now() / 1000 + clockOffset.current), 1000);
+    return () => clearInterval(id);
+  }, [running, error]);
+  const nowSec = running ? Math.max(tick, snap?.now ?? 0) : (snap?.now ?? 0);
+
   return (
-    <main className="mx-auto flex h-screen w-full max-w-[1280px] flex-col overflow-hidden px-10 py-6">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:h-screen lg:overflow-hidden lg:px-10 lg:py-6">
       <Nav current="/">
         {snap && <ModelPicker models={snap.models} disabled={running} onSave={(provider, key) => post("/api/demo/model", { provider, key })} />}
         <button className="underline underline-offset-2" onClick={() => setDrawer(true)}>
@@ -117,12 +102,24 @@ export default function Page() {
         </button>
       </Nav>
 
-      <Pipeline />
+      <div className="shrink-0">
+        <BudgetMeter
+          agentName={snap?.company?.name ?? null}
+          formBudgetUsd={draft.budgetUsd}
+          formRateUsdHr={draft.rateUsdHr}
+          job={job}
+          nowSec={nowSec}
+        />
+      </div>
 
       {error && <div className="mt-4 shrink-0 text-bad">Can&apos;t reach the demo server ({error}). Start it with: npm run dev</div>}
 
-      <section className="mt-6 grid min-h-0 flex-1 gap-10 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <div className="min-h-0 space-y-12 overflow-y-auto pb-6 pr-4">
+      <section
+        className={`mt-6 grid gap-8 lg:min-h-0 lg:flex-1 lg:gap-10 ${
+          running ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
+        }`}
+      >
+        <div className="lg:min-h-0 lg:overflow-y-auto lg:pr-4 lg:pb-6">
           <JobForm
             resetSignal={resetSignal}
             snap={snap}
@@ -133,24 +130,11 @@ export default function Page() {
             reload={load}
             post={post}
           />
-
-          {job && <Timeline job={job} model={current} snap={snap} post={post} />}
         </div>
 
-        <aside className="min-h-0 space-y-8 overflow-y-auto border-l border-rule pb-6 pl-10 pr-2">
-          {job?.phase === "done" && current ? (
-            <TryIt title="Your model" job={job} model={current} models={snap?.models} />
-          ) : previousModel && previous ? (
-            <TryIt title="The model from the last run" job={previous} model={previousModel} models={snap?.models} />
-          ) : (
-            <div className="rounded-lg border border-rule bg-surface p-5 text-muted">
-              <div className="font-bold text-foreground">Nothing trained yet</div>
-              <p className="mt-2 max-w-[46ch]">
-                When a job finishes, the model produced lands here and can run in your browser. You can also download the model directly.
-              </p>
-            </div>
-          )}
-        </aside>
+        <div className="border-t border-rule pt-8 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l lg:pt-0 lg:pr-2 lg:pb-6 lg:pl-10">
+          <RunPanel snap={snap} job={job} current={current} previous={previous} previousModel={previousModel} post={post} />
+        </div>
       </section>
 
       <LogDrawer open={drawer} onClose={() => setDrawer(false)} log={snap?.log ?? []} />
