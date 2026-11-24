@@ -28,8 +28,22 @@ const START =
 /**
  * A form label whose text is the help trigger (dotted underline). Inputs keep a real <label> for
  * their accessible name; it is visually hidden because a button cannot sit inside a label.
+ * With `forId` the help rides on that field (its aria-describedby is `help-<id>`) instead of being a
+ * second tab stop in front of it.
  */
-function Label({ children, help, id, htmlFor }: { children: string; help: keyof typeof HELP; id: string; htmlFor?: string }) {
+function Label({
+  children,
+  help,
+  id,
+  htmlFor,
+  forId = htmlFor,
+}: {
+  children: string;
+  help: keyof typeof HELP;
+  id: string;
+  htmlFor?: string;
+  forId?: string;
+}) {
   return (
     <span className="block font-medium text-foreground">
       {htmlFor && (
@@ -37,7 +51,7 @@ function Label({ children, help, id, htmlFor }: { children: string; help: keyof 
           {children}
         </label>
       )}
-      <Help id={`help-${id}`} text={HELP[help]}>
+      <Help id={`help-${id}`} text={HELP[help]} forId={forId}>
         {children}
       </Help>
     </span>
@@ -293,7 +307,8 @@ export function JobForm(props: {
   return (
     <div className="@container space-y-5">
       <div className="space-y-1.5">
-        <Label help="agent" id="agent">
+        {/* With a name field showing, the help rides on it; with an agent registered it is the section's one stop. */}
+        <Label help="agent" id="agent" forId={!snap?.company || otherAgent ? "agent-name" : undefined}>
           Your agent
         </Label>
         {snap?.company && (
@@ -336,6 +351,7 @@ export function JobForm(props: {
             <input
               id="agent-name"
               aria-label={snap?.company ? undefined : "Agent name"}
+              aria-describedby="help-agent"
               className={`${INPUT} flex-1 basis-40`}
               placeholder="agent-name"
               value={agentName}
@@ -441,6 +457,7 @@ export function JobForm(props: {
         </Label>
         <textarea
           id="task-input"
+          aria-describedby="help-task"
           className={`${TEXTAREA} block w-full resize-none`}
           rows={2}
           placeholder="Sort product reviews into positive, negative and mixed"
@@ -464,6 +481,7 @@ export function JobForm(props: {
               </span>
               <input
                 id="budget-input"
+                aria-describedby="help-form-budget"
                 type="number"
                 min={0.05}
                 max={20}
@@ -495,7 +513,7 @@ export function JobForm(props: {
                 step={0.005}
                 value={rate}
                 disabled={running}
-                aria-describedby="rate-unit"
+                aria-describedby="rate-unit help-rate"
                 className={`${INPUT} ${NUMBER} w-full pr-9 pl-[25px] tabular-nums`}
                 onChange={(e) => setRate(Number(e.target.value))}
               />
@@ -518,7 +536,7 @@ export function JobForm(props: {
                 step={1}
                 value={deadline}
                 disabled={running}
-                aria-describedby="deadline-unit"
+                aria-describedby="deadline-unit help-deadline"
                 className={`${INPUT} ${NUMBER} w-full pr-11 tabular-nums`}
                 onChange={(e) => setDeadline(Number(e.target.value))}
               />
@@ -531,10 +549,10 @@ export function JobForm(props: {
         </div>
 
         <div className="space-y-1.5">
-          <Label help="preference" id="preference">
+          <Label help="preference" id="preference" forId="plan-preference">
             Pick a plan that is
           </Label>
-          <Segmented label="Plan preference" options={PLAN_OPTIONS} value={preference} onChange={setPreference} disabled={running} />
+          <Segmented id="plan-preference" describedBy="help-preference" label="Plan preference" options={PLAN_OPTIONS} value={preference} onChange={setPreference} disabled={running} />
         </div>
       </div>
 
@@ -561,11 +579,12 @@ export function JobForm(props: {
               id="publish-input"
               type="checkbox"
               aria-label="Publish my side of the negotiation"
+              aria-describedby="help-publish"
               checked={snap?.disclosure === "full"}
               disabled={running}
               onChange={(e) => void setPublish(e.target.checked)}
             />
-            <Help id="help-publish" text={HELP.publish} className="text-muted">
+            <Help id="help-publish" text={HELP.publish} forId="publish-input" className="text-muted">
               Publish my side of the negotiation
             </Help>
           </span>

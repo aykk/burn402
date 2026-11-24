@@ -2,10 +2,10 @@
 // only larger control (40px). Radius 3px everywhere. Exactly one filled ink button per view.
 
 export const INPUT =
-  "h-9 min-w-0 rounded-[3px] border border-rule bg-surface px-3 py-[7px] text-[13.5px] leading-5 text-foreground disabled:opacity-60";
+  "h-9 min-w-0 rounded-[3px] border border-rule-strong bg-surface px-3 py-[7px] text-[13.5px] leading-5 text-foreground disabled:opacity-60";
 
 export const TEXTAREA =
-  "min-w-0 rounded-[3px] border border-rule bg-surface px-3 py-2 text-[13.5px] leading-5 text-foreground disabled:opacity-60";
+  "min-w-0 rounded-[3px] border border-rule-strong bg-surface px-3 py-2 text-[13.5px] leading-5 text-foreground disabled:opacity-60";
 
 export const BTN =
   "inline-flex h-9 shrink-0 items-center justify-center rounded-[3px] border border-rule-strong bg-transparent px-4 text-[13.5px] leading-5 text-foreground hover:border-foreground disabled:cursor-not-allowed disabled:border-rule disabled:text-muted disabled:hover:border-rule";

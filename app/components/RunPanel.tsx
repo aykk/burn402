@@ -12,9 +12,19 @@ type StageState = "done" | "now" | "next" | "failed";
 
 /**
  * With no job every stage is upcoming, so the row previews what Start run will do. Upcoming stages are
- * thin strong-rule bars, finished ones thin ink bars, and the current (or failed) stage a thick bar, so
- * a finished run reads as a completed ink track.
+ * thin dashed strong-rule bars, finished ones thin solid ink bars with a check before the label, and the
+ * current (or failed) stage a thick bar, so state never rests on the colour difference alone and a
+ * finished run reads as a completed ink track.
  */
+/** A 10px drawn check for finished stages, in the label's ink. */
+function Check() {
+  return (
+    <svg aria-hidden width="10" height="10" viewBox="0 0 10 10" className="shrink-0" fill="none">
+      <path d="M1.5 5.2 4 7.6 8.5 2.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function StageRow({ job }: { job: TrainingRunView | null }) {
   const at = job ? stageIndex(job) : -1;
   const failed = job?.phase === "failed";
@@ -35,12 +45,18 @@ function StageRow({ job }: { job: TrainingRunView | null }) {
               <span className="flex h-[5px] items-end" aria-hidden>
                 <span
                   className={`block w-full ${
-                    s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-foreground" : "h-[2px] bg-rule-strong"
+                    s === "now"
+                      ? "h-[5px] bg-foreground"
+                      : s === "failed"
+                        ? "h-[5px] bg-bad"
+                        : s === "done"
+                          ? "h-[2px] bg-foreground"
+                          : "h-0 border-t-2 border-dashed border-rule-strong"
                   }`}
                 />
               </span>
               <span
-                className={`mt-1.5 block truncate text-[12px] leading-4 ${
+                className={`mt-1.5 flex items-center gap-1 truncate text-[12px] leading-4 ${
                   s === "now"
                     ? "font-semibold text-foreground"
                     : s === "failed"
@@ -50,7 +66,8 @@ function StageRow({ job }: { job: TrainingRunView | null }) {
                         : "font-medium text-muted"
                 }`}
               >
-                {label}
+                {s === "done" && <Check />}
+                <span className="truncate">{label}</span>
                 {s === "failed" && <span className="sr-only">, stopped here</span>}
                 {s === "done" && <span className="sr-only">, finished</span>}
               </span>

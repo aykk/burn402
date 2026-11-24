@@ -5,10 +5,12 @@
   --foreground: #1B2430;
   --muted: #5B6672;
   --rule: #B9C0C7;
-  --rule-strong: #8F98A2;
+  /* Control edges (inputs, buttons, toggles): 3.05:1 on the page background, 3.46:1 on the surface (WCAG 1.4.11). */
+  --rule-strong: #7E8690;
   --surface: #F7F8F9;
   --ok: #2F6B3F;
-  --bad: #cf222e;
+  /* Nudged from #cf222e so 12px red text clears 4.5:1 on the page background (4.61:1). */
+  --bad: #CA212D;
   --amber: #E3A21A;
   --segment: #D5DADF;
 }
@@ -71,7 +73,7 @@
   textarea,
   select {
     background: var(--surface);
-    border-color: var(--rule);
+    border-color: var(--rule-strong);
     transition:
       border-color 120ms ease,
       background 120ms ease;
@@ -90,7 +92,9 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: color-mix(in srgb, var(--muted) 80%, transparent);
+    /* Secondary ink at full strength: 5.5:1 on the field surface. Still clearly lighter than typed text. */
+    color: var(--muted);
+    opacity: 1;
   }
 
   button {

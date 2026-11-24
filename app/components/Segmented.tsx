@@ -10,6 +10,8 @@ export function Segmented<T extends string | number>({
   onChange,
   disabled,
   className = "",
+  id,
+  describedBy,
 }: {
   label: string;
   options: readonly { value: T; label: string; danger?: boolean }[];
@@ -17,9 +19,11 @@ export function Segmented<T extends string | number>({
   onChange: (value: T) => void;
   disabled?: boolean;
   className?: string;
+  id?: string;
+  describedBy?: string;
 }) {
   return (
-    <div role="group" aria-label={label} className={`flex ${className}`}>
+    <div id={id} role="group" aria-label={label} aria-describedby={describedBy} className={`flex ${className}`}>
       {options.map((o, i) => {
         const on = o.value === value;
         const tone = on
