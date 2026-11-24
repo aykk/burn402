@@ -6,7 +6,7 @@ import type { DatasetSource } from "@/lib/train";
 import { ActionError, failureMessage, type Post } from "./ActionError";
 import { DatasetCard, type Detected } from "./DatasetCard";
 import { HELP } from "./copy";
-import { size } from "./format";
+import { size, usd2 } from "./format";
 import { Help } from "./Help";
 import { Segmented } from "./Segmented";
 import { BTN, INPUT, MONO, TEXT_BTN, TEXTAREA } from "./ui";
@@ -228,12 +228,8 @@ export function JobForm(props: {
 
   if (collapsed) {
     const j = snap?.job ?? null;
-    // Up to 4 decimals, trailing zeros trimmed, never fewer than 2.
-    const usd = (n: number) => {
-      const t = String(parseFloat(n.toFixed(4)));
-      const dec = t.includes(".") ? t.split(".")[1].length : 0;
-      return `$${dec >= 2 ? t : n.toFixed(2)}`;
-    };
+    // Budgets and limits in the site's format ("$0.50"), as on the meter.
+    const usd = usd2;
     const b = j ? j.budgetUsd : budget;
     const r = j ? j.rateUsdHr : rate;
     const ans = j?.agent.ansName ?? snap?.company?.ansName ?? undefined;

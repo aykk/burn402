@@ -1,14 +1,14 @@
-import { duration } from "./format";
+"use client";
+
+import { useState } from "react";
+import type { TrainingRunView } from "@/lib/demo/train";
+import { duration, usd2, usd4 } from "./format";
 import { budgetShare, jobGauge, leadingZeros, meterView, shareText, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 /** 40 segments from 640px up, 24 below so each segment stays a readable width. */
 const SEGMENTS_WIDE = 40;
 const SEGMENTS_NARROW = 24;
 
-/** Displayed amounts never go below zero or show NaN. */
-const safe = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
-const usd4 = (n: number) => `$${safe(n).toFixed(4)}`;
-const usd2 = (n: number) => `$${safe(n).toFixed(2)}`;
 const CONDENSED = { fontStretch: "68%", fontVariationSettings: '"wdth" 68' } as const;
 
 type Readout = { label: string; value: string; quiet?: boolean };
@@ -92,6 +92,29 @@ function JobGaugeBar({ j, segments, className }: { j: JobGauge; segments: number
   );
 }
 
+/**
+ * The payment moment: once x402 settles, the meter says where the money in the gauge came from and links
+ * the transaction. When this page watched the job go from unpaid to paid, the line is written on from the
+ * left (a clip-path wipe, like a receipt printing); reloading on a paid job shows it still. Reduced motion
+ * gets a short fade instead.
+ */
+function PaymentLine({ usd, solscan, fresh }: { usd: number; solscan: string | null; fresh: boolean }) {
+  const chain = solscan && /cluster=devnet/.test(solscan) ? "Solana devnet" : "Solana";
+  return (
+    <p className={`text-[12px] leading-4 text-muted tabular-nums ${fresh ? "settle-in" : ""}`}>
+      Paid <span className="font-medium text-foreground">{usd4(usd)}</span> over x402, settled on {chain}.
+      {solscan && (
+        <>
+          {" "}
+          <a href={solscan} target="_blank" rel="noreferrer">
+            See it on Solscan
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
+
 function ReadoutBlock({ r }: { r: Readout }) {
   return (
     <div className="mt-3 sm:mt-0 sm:text-right">
@@ -110,9 +133,15 @@ export function BudgetMeter(props: {
   agentName: string | null;
   formBudgetUsd: number;
   formRateUsdHr: number;
-  job: MeterJob | null;
+  job: (MeterJob & Partial<Pick<TrainingRunView, "id" | "solscan">>) | null;
   nowSec: number;
 }) {
+  // Remember a job this meter saw before it was paid, so the payment line animates only when it settles here.
+  const [unpaidId, setUnpaidId] = useState<string | null>(null);
+  const jobId = props.job?.id ?? null;
+  if (jobId !== null && props.job?.paidUsd === null && unpaidId !== jobId) setUnpaidId(jobId);
+  const freshPayment = jobId !== null && unpaidId === jobId;
+
   const v = meterView({
     formBudgetUsd: props.formBudgetUsd,
     formRateUsdHr: props.formRateUsdHr,
@@ -165,10 +194,13 @@ export function BudgetMeter(props: {
 
   return (
     <section aria-label="Budget meter" className="rounded-[6px] bg-surface px-5 py-5 sm:px-7 sm:py-6">
-      <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
-        {!shut && <Swatch />}
-        {j.state === "quoted" ? "This job will use" : "Server time left"}
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
+          {!shut && <Swatch />}
+          {j.state === "quoted" ? "This job will use" : "Server time left"}
+        </p>
+        {v.paidUsd !== null && v.paidUsd > 0 && <PaymentLine usd={v.paidUsd} solscan={props.job?.solscan ?? null} fresh={freshPayment} />}
+      </div>
       <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
         <p className="flex flex-wrap items-baseline gap-x-3">
           <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] tabular-nums" style={CONDENSED}>
@@ -179,7 +211,8 @@ export function BudgetMeter(props: {
             </span>
           </span>
           <span className="text-[20px] leading-[26px] text-muted tabular-nums">
-            {j.state === "quoted" ? "quoted, not paid yet" : `of ${usd4(jobUsd)} paid`}
+            {/* The payment line above names the amount paid; here it is only the scale. */}
+            {j.state === "quoted" ? "quoted, not paid yet" : `of ${usd4(jobUsd)}`}
           </span>
         </p>
         <ReadoutBlock r={r} />

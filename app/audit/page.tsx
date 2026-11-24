@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Nav } from "@/app/nav";
-import { AttemptLedger } from "@/app/components/AttemptLedger";
+import { ActionError, failureMessage } from "@/app/components/ActionError";
+import { AttemptLedger, testCopy } from "@/app/components/AttemptLedger";
 import { Swatch } from "@/app/components/BudgetMeter";
-import { clock, money, usd4 } from "@/app/components/format";
+import { clock, usd2, usd4 } from "@/app/components/format";
 import { BTN_PRIMARY, INPUT, MONO } from "@/app/components/ui";
 import type { Snapshot } from "@/lib/demo/snapshot";
 
@@ -16,7 +17,7 @@ function shortName(ans: string): string {
 function plainReason(reason: string): string {
   if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "The budget was signed by a key that does not belong to the agent named on it.";
   const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
-  if (rate) return `The server costs $${rate[1]} an hour and the budget allows $${rate[2]}.`;
+  if (rate) return `The server costs ${usd4(Number(rate[1]))} an hour and the budget allows ${usd2(Number(rate[2]))}.`;
   if (/BUDGET_EXCEEDED/.test(reason)) return "The budget has no money left in it.";
   if (/WINDOW_EXPIRED/.test(reason)) return "The budget expired before this was asked for.";
   if (/SCOPE_ESCALATION/.test(reason)) return "The budget does not cover renting servers.";
@@ -35,8 +36,8 @@ function txOutcome(outcome: string): { word: string; className: string } {
 const H2 = "text-[16px] leading-[22px] font-semibold text-foreground";
 
 const BUILT_IN: Record<string, string> = {
-  stresstester: "built in, limit tester",
-  helper: "built in, limit tester",
+  stresstester: "built in, the second agent in the overspend test",
+  helper: "built in, the second agent in the overspend test",
   broker: "built in, holds the provider key",
   auditor: "built in, signs the verdicts",
   vultr: "built in, the broker",
@@ -45,7 +46,9 @@ const BUILT_IN: Record<string, string> = {
 
 export default function AuditPage() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  // Only the 1.5s state poll writes this: the page has lost the server. A refused start lives by its button.
   const [error, setError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string>("");
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -78,28 +81,30 @@ export default function AuditPage() {
   const target = runs.find((r) => r.id === picked) ?? runs[0] ?? null;
   const stress = snap?.stress;
   const running = snap?.busy ?? false;
-  const allAttempts = stress?.attempts ?? [];
-  const attempts = allAttempts.filter((a) => !a.quiet);
-  // A broker record carries the mark of the limit-test attempt that produced it; name that step.
+  const attempts = stress?.attempts ?? [];
+  // A broker record carries the mark of the overspend-test attempt that produced it; name that step,
+  // numbered as the ledger numbers it (every row, the one that went around the broker included).
   const stepOf = (mark: number | null) => {
     if (typeof mark !== "number") return null;
     const i = attempts.findIndex((a) => a.mark === mark);
     return i >= 0 ? i + 1 : null;
   };
 
+  // A refused start stays by the button until it is dismissed or tried again; the poll never clears it.
   const start = async () => {
     if (!target) return;
+    setStartError(null);
     try {
       const res = await fetch("/api/demo/stress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: target.id }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `The server answered HTTP ${res.status}`);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setStartError(failureMessage(e));
     }
   };
 
@@ -109,14 +114,19 @@ export default function AuditPage() {
       <Nav current="/audit" />
 
       <div className="shrink-0 pt-2">
-        <h1 className="text-[20px] leading-[26px] font-semibold">Try to overspend an agent&apos;s budget</h1>
+        <h1 className="text-[20px] leading-[26px] font-semibold">Overspend test</h1>
         <p className="mt-3 max-w-[64ch] text-muted">
-          Pick an agent that has run a job. A second agent is handed part of its budget and tries to spend more than that budget allows. Every attempt,
-          refused or not, is signed and written to Arweave.
+          Pick an agent that has run a job. A second agent gets part of its budget and tries every way it can to spend more than that budget allows.
+          Every attempt, blocked or not, is signed and written to Arweave.
         </p>
       </div>
 
-      {error && <div className="mt-3 shrink-0 text-bad">{error}</div>}
+      {/* The connection banner: only the state poll sets it, and the next good poll clears it. */}
+      {error && (
+        <div role="status" className="mt-3 shrink-0 text-bad">
+          The demo server couldn&apos;t report its state ({error}). Check that npm run dev is still running.
+        </div>
+      )}
 
       {runs.length === 0 ? (
         <p className="mt-6 text-foreground">
@@ -150,26 +160,27 @@ export default function AuditPage() {
               </div>
               {target && (
                 <div className="text-[12px] leading-4 text-muted">
-                  <span className={`break-all ${MONO}`}>{target.agent.ansName}</span>, <span className="tabular-nums">{money(target.budgetUsd)}</span> in total,{" "}
-                  <span className="tabular-nums">{money(target.rateUsdHr)}</span> an hour at most, expires {target.deadlineMinutes} minutes after it started
+                  <span className={`break-all ${MONO}`}>{target.agent.ansName}</span>, <span className="tabular-nums">{usd2(target.budgetUsd)}</span> in total,{" "}
+                  <span className="tabular-nums">{usd2(target.rateUsdHr)}</span> an hour at most, expires {target.deadlineMinutes} minutes after it started
                 </div>
               )}
+              <ActionError what="The overspend test didn't start" message={startError} onDismiss={() => setStartError(null)} />
             </div>
 
-            {attempts.length > 0 && (
+            {attempts.length > 0 && stress && (
               <div className="space-y-4 border-t border-rule pt-6">
                 <h2 className={H2}>
-                  Limit test for <span className="font-mono text-[12px] font-normal break-all">{stress?.job ? stress.job.agent : "this agent"}</span>
+                  Overspend test against <span className="font-mono text-[12px] font-normal break-all">{stress.job ? stress.job.agent : "this agent"}</span>
                 </h2>
-                <AttemptLedger attempts={allAttempts} />
-                {stress?.verdictUrl && (
+                <AttemptLedger attempts={attempts} status={stress.status} />
+                {stress.verdictUrl && (
                   <a href={stress.verdictUrl} target="_blank" rel="noreferrer" className="inline-block">
-                    The verdict against it, permanently on Arweave
+                    The auditor&apos;s verdict, stored on Arweave
                   </a>
                 )}
               </div>
             )}
-            {stress?.error && <div className="text-bad">{/[.!?]$/.test(stress.error) ? stress.error.charAt(0).toUpperCase() + stress.error.slice(1) : `${stress.error.charAt(0).toUpperCase()}${stress.error.slice(1)}.`}</div>}
+            {stress?.error && <div className="text-bad">{testCopy(stress.error)}</div>}
 
             <div className="border-t border-rule pt-6">
               <h2 className={H2}>Every request to rent a server</h2>
@@ -191,7 +202,7 @@ export default function AuditPage() {
                           <div className={`text-muted ${MONO} [overflow-wrap:anywhere]`}>{shortName(t.subject)}</div>
                           {t.reason && <div className="mt-0.5 text-muted">{plainReason(t.reason)}</div>}
                           <div className="mt-1 flex flex-wrap gap-x-4 text-[12px] leading-4">
-                            {step !== null && <span className="text-muted">Limit test, step {step}</span>}
+                            {step !== null && <span className="text-muted">Overspend test, step {step}</span>}
                             {t.solscan && (
                               <a href={t.solscan} target="_blank" rel="noreferrer">
                                 Payment on Solscan

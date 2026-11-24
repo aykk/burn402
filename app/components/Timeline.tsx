@@ -6,11 +6,15 @@ import type { TrainedModel } from "@/lib/train";
 import { Swatch } from "./BudgetMeter";
 import { NEXT_STEP } from "./copy";
 import { Fold } from "./Fold";
-import { PHASE_TEXT, REGIONS, clock, collapseLog, duration, money } from "./format";
-import { DEAL, STAGES, stageIndex } from "./stages";
+import { PHASE_TEXT, REGIONS, clock, collapseLog, duration, usd2, usd4 } from "./format";
+import { DEAL, failedWhere, stageIndex } from "./stages";
 
 const SUB = "text-[13.5px] leading-5 font-semibold text-foreground";
-const usd4 = (n: number) => `$${(Number.isFinite(n) ? Math.max(0, n) : 0).toFixed(4)}`;
+/** Backend errors are lowercase fragments ("the box did not finish…"); shown as a sentence. */
+const sentenceOf = (t: string) => {
+  const s = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+};
 
 /**
  * One signed message as a ledger row: sender and time on the left, then kind, signature and the text on
@@ -67,7 +71,8 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
     heading = `Trained in ${duration(job.actualSeconds)}${job.paidUsd !== null ? ` for ${usd4(job.paidUsd)}` : ""}`;
   }
   const failedAt = job.phase === "failed" ? stageIndex(job) : null;
-  if (failedAt !== null) heading = `Stopped during ${STAGES[Math.min(failedAt, STAGES.length - 1)].toLowerCase()}`;
+  // The heading agrees with the error: a run that died while the server booted never reads as "during training".
+  if (failedAt !== null) heading = `Stopped ${failedWhere(job)}`;
 
   const deal = job.messages.length > 0 && (
     <section key="deal" className="space-y-3">
@@ -111,7 +116,7 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
     <section key="plans" className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h3 className={SUB}>Recommended plans</h3>
-        <span className="text-[12px] leading-4 text-muted tabular-nums">for a budget of {money(job.budgetUsd)}</span>
+        <span className="text-[12px] leading-4 text-muted tabular-nums">for a budget of {usd2(job.budgetUsd)}</span>
         {job.quotes.length > shownQuotes.length || plans ? (
           <span className="ml-auto">
             <Fold
@@ -130,9 +135,9 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
               <th className="hidden py-2 pr-4 sm:table-cell text-right font-medium">Cores</th>
               <th className="hidden py-2 pr-4 sm:table-cell font-medium">Type</th>
               <th className="hidden py-2 pr-4 sm:table-cell font-medium">RAM</th>
-              <th className="py-2 pr-4 text-right font-medium">$/hour</th>
+              <th className="py-2 pr-4 text-right font-medium">Per hour</th>
               <th className="py-2 pr-4 text-right font-medium">Ready in</th>
-              <th className="py-2 pr-4 text-right font-medium">This run ($)</th>
+              <th className="py-2 pr-4 text-right font-medium">This run</th>
               <th className="py-2 text-right font-medium">Budget covers</th>
             </tr>
           </thead>
@@ -154,7 +159,7 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
                   <td className="hidden py-2 pr-4 sm:table-cell">
                     {q.ramGb} GB{q.enoughRam ? "" : " (too small)"}
                   </td>
-                  <td className="py-2 pr-4 text-right">{q.hourlyUsd.toFixed(4)}</td>
+                  <td className="py-2 pr-4 text-right">{usd4(q.hourlyUsd)}</td>
                   <td className="py-2 pr-4 text-right">
                     {duration(q.totalSeconds)}
                     {q.withinDeadline ? "" : " (over the limit)"}
@@ -165,10 +170,10 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
                         className="font-semibold text-foreground underline decoration-amber decoration-2 underline-offset-4"
                         title="The money this run uses, shown amber in the meter"
                       >
-                        {q.jobUsd.toFixed(4)}
+                        {usd4(q.jobUsd)}
                       </span>
                     ) : (
-                      q.jobUsd.toFixed(4)
+                      usd4(q.jobUsd)
                     )}
                   </td>
                   <td className="py-2 text-right">{q.budgetHours} h</td>
@@ -203,14 +208,14 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-2">
+        {/* The meter says the payment settled and links it; the card keeps the amount and the receipt. */}
         {job.paidUsd !== null ? (
           <>
             <Swatch />
             <span className="font-semibold tabular-nums">{usd4(job.paidUsd)} USDC</span>
-            <span className="text-ok">settled</span>
           </>
         ) : (
-          <span className="text-muted">Paid over x402</span>
+          <span className="text-muted">Paying over x402…</span>
         )}
       </div>
       <div className="flex flex-wrap gap-x-4 text-[12px] leading-4">
@@ -273,7 +278,7 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
           <div className="mt-3 space-y-1">
             {/* The page's live region announces the failure once; an alert here would say it twice. */}
             <p className="max-w-[64ch] text-bad">
-              {job.error?.trim() || "The run failed."}
+              {sentenceOf(job.error?.trim() || "The run failed")}
             </p>
             <p className="max-w-[64ch] text-foreground">
               {failedAt === DEAL ? NEXT_STEP.deal : NEXT_STEP.later(usd4(job.budgetUsd - (job.paidUsd ?? 0)))}
