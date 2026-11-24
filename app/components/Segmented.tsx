@@ -15,7 +15,8 @@ export function Segmented<T extends string | number>({
 }: {
   label: string;
   options: readonly { value: T; label: string; danger?: boolean }[];
-  value: T;
+  /** null selects nothing (the choice is still being worked out). */
+  value: T | null;
   onChange: (value: T) => void;
   disabled?: boolean;
   className?: string;

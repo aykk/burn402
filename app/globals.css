@@ -108,8 +108,19 @@
     cursor: pointer;
   }
 
-  input[type="range"] {
+  input[type="range"],
+  input[type="checkbox"] {
     accent-color: var(--foreground);
+  }
+
+  input,
+  textarea {
+    caret-color: var(--foreground);
+  }
+
+  ::selection {
+    background: var(--rule);
+    color: var(--foreground);
   }
 
   :where(body) {

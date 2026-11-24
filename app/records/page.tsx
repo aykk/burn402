@@ -117,12 +117,13 @@ function when(seconds: number | null): string | null {
 }
 
 export default function RecordsPage() {
-  const [network, setNetwork] = useState<"testnet" | "production">("production");
+  // null until we know which network to open on: the one in the URL, else the one the demo writes to.
+  const [network, setNetwork] = useState<"testnet" | "production" | null>(null);
   const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad" | "negotiation">("all");
   const [agent, setAgent] = useState("");
   const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   // Why the list could not be read: the demo server is down, or it answered but the gateway did not.
   const [failure, setFailure] = useState<{ title: string; detail: string } | null>(null);
   // "Try again" and "Check again" bump this to run the same read once more.
@@ -130,10 +131,28 @@ export default function RecordsPage() {
 
   useEffect(() => {
     const n = new URLSearchParams(window.location.search).get("network");
-    if (n === "testnet") setTimeout(() => setNetwork("testnet"), 0);
+    if (n === "testnet" || n === "production") {
+      setTimeout(() => setNetwork(n), 0);
+      return;
+    }
+    // Open on the network the demo server writes its records to, so the records of a run just made are
+    // the ones shown. If the server can't say, mainnet as before.
+    let cancelled = false;
+    fetch("/api/demo/state", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((b: { network?: string }) => {
+        if (!cancelled) setNetwork(b.network === "testnet" ? "testnet" : "production");
+      })
+      .catch(() => {
+        if (!cancelled) setNetwork("production");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (network === null) return;
     let cancelled = false;
     // A failed read keeps the records already on screen only if they are from the same network.
     const keepSameNetwork = (prev: Response | null) => (prev?.network === network ? prev : null);
@@ -182,7 +201,8 @@ export default function RecordsPage() {
         `${r.headline} ${r.outcome.label} ${r.reason ?? ""} ${r.subject ?? ""} ${r.kind} ${r.id} ${when(r.issuedAt) ?? ""}`.toLowerCase().includes(needle.toLowerCase())),
   );
 
-  const where = (data?.network ?? network) === "production" ? "mainnet" : "testnet";
+  const shownNetwork = data?.network ?? network;
+  const where = shownNetwork === null ? "" : shownNetwork === "production" ? " mainnet" : " testnet";
   const count = data?.records && !loading
     ? shown.length === records.length
       ? `${records.length} record${records.length === 1 ? "" : "s"}`
@@ -200,7 +220,7 @@ export default function RecordsPage() {
 
       <div className="shrink-0 pt-2">
         <h1 className="text-[20px] leading-[26px] font-semibold">
-          {count} on Arweave {where}
+          {count} on Arweave{where}
         </h1>
         {/* The line is always there so the page does not jump when the gateway arrives. */}
         <p className="mt-1 min-h-4 text-[12px] leading-4 text-muted">

@@ -9,6 +9,7 @@ import { JobForm, type JobDraft } from "@/app/components/JobForm";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import { ModelPicker } from "@/app/components/ModelPicker";
 import { RunPanel } from "@/app/components/RunPanel";
+import { RentedCard } from "@/app/components/Timeline";
 import { ActionError, UNREACHABLE, type Post } from "@/app/components/ActionError";
 import { runAnnouncement, runMark, type RunMark } from "@/app/components/announce";
 
@@ -204,6 +205,12 @@ export default function Page() {
             reload={load}
             post={post}
           />
+          {/* While a run is live the setup summary is short; what it bought sits under it, beside the live activity. */}
+          {running && job?.plan && (
+            <div className="mt-8 hidden lg:block">
+              <RentedCard job={job} />
+            </div>
+          )}
         </div>
 
         <div
@@ -211,7 +218,7 @@ export default function Page() {
             job ? "order-first lg:order-none" : "border-t pt-8 lg:border-t-0"
           }`}
         >
-          <RunPanel snap={snap} job={job} current={current} previous={previous} previousModel={previousModel} post={post} />
+          <RunPanel snap={snap} job={job} current={current} previous={previous} previousModel={previousModel} post={post} receiptAside={running} />
         </div>
       </section>
 

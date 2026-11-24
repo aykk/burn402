@@ -42,7 +42,51 @@ function Message(props: { who: string; at: number; kind: string; signed: string;
 /** Backend copy still says "Vultr desk"; the UI calls it the broker. */
 const brokerCopy = (text: string) => text.replace(/Vultr desk/gi, "broker");
 
-export function Timeline({ job, result }: { job: TrainingRunView; model: TrainedModel | null; result?: ReactNode }) {
+/** What was rented and paid: the server, the amount and the receipts. */
+export function RentedCard({ job }: { job: TrainingRunView }) {
+  const live = job.handle !== null && job.phase !== "done" && job.phase !== "failed";
+  return (
+    <section className="space-y-1 border-l-2 pl-3" style={{ borderColor: live ? "var(--foreground)" : "var(--rule)" }}>
+      <h3 className={SUB}>Rented and paid</h3>
+      <div>
+        {job.plan} in {REGIONS[job.region] ?? job.region}
+        {job.boxUrl && job.phase !== "done" && job.phase !== "failed" && (
+          <>
+            {", "}
+            <a href={job.boxUrl} target="_blank" rel="noreferrer">
+              open the box at {job.ip}
+            </a>
+          </>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2">
+        {/* The meter says the payment settled and links it; the card keeps the amount and the receipt. */}
+        {job.paidUsd !== null ? (
+          <>
+            <Swatch />
+            <span className="font-semibold tabular-nums">{usd4(job.paidUsd)} USDC</span>
+          </>
+        ) : (
+          <span className="text-muted">Paying over x402…</span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-x-4 text-[12px] leading-4">
+        {job.solscan && (
+          <a href={job.solscan} target="_blank" rel="noreferrer">
+            Payment on Solscan
+          </a>
+        )}
+        {job.arweaveUrl && (
+          <a href={job.arweaveUrl} target="_blank" rel="noreferrer">
+            Receipt on Arweave
+          </a>
+        )}
+      </div>
+    </section>
+    );
+}
+
+export function Timeline({ job, result, receiptAside = false }: { job: TrainingRunView; model: TrainedModel | null; result?: ReactNode; receiptAside?: boolean }) {
   const status = job.status;
   const progress = status?.progress ?? 0;
   const elapsed = status?.elapsed ?? null;
@@ -52,7 +96,6 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
   const folded = settled || onBox;
   const [openTalk, setOpenTalk] = useState(false);
   const [openPlans, setOpenPlans] = useState(false);
-  const live = job.handle !== null && !settled;
   const lastDesk = [...job.messages].reverse().find((m) => m.fromLabel === "vultr") ?? null;
   const talk = folded ? openTalk : true;
   const plans = folded ? openPlans : job.plan === null;
@@ -132,9 +175,9 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
           <thead>
             <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
               <th className="py-2 pr-4 pl-2.5 font-medium">Plan</th>
-              <th className="hidden py-2 pr-4 sm:table-cell text-right font-medium">Cores</th>
-              <th className="hidden py-2 pr-4 sm:table-cell font-medium">Type</th>
-              <th className="hidden py-2 pr-4 sm:table-cell font-medium">RAM</th>
+              <th className="hidden py-2 pr-4 font-medium sm:table-cell">Type</th>
+              <th className="hidden py-2 pr-4 text-right font-medium sm:table-cell">Cores</th>
+              <th className="hidden py-2 pr-4 text-right font-medium sm:table-cell">RAM</th>
               <th className="py-2 pr-4 text-right font-medium">Per hour</th>
               <th className="py-2 pr-4 text-right font-medium">Ready in</th>
               <th className="py-2 pr-4 text-right font-medium">This run</th>
@@ -154,9 +197,9 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
                     {q.plan}
                     {chosen && <span className="sr-only"> (chosen)</span>}
                   </td>
-                  <td className="hidden py-2 pr-4 text-right sm:table-cell">{q.vcpus}</td>
                   <td className="hidden py-2 pr-4 font-normal text-muted sm:table-cell">{q.familyLabel}</td>
-                  <td className="hidden py-2 pr-4 sm:table-cell">
+                  <td className="hidden py-2 pr-4 text-right sm:table-cell">{q.vcpus}</td>
+                  <td className="hidden py-2 pr-4 text-right sm:table-cell">
                     {q.ramGb} GB{q.enoughRam ? "" : " (too small)"}
                   </td>
                   <td className="py-2 pr-4 text-right">{usd4(q.hourlyUsd)}</td>
@@ -193,44 +236,12 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
     </section>
   );
 
+  // On a wide screen during a live run the receipt sits in the left column beside the run (the page renders
+  // it there), so it is hidden here from lg up; below lg the columns stack and it stays in the timeline.
   const rented = job.plan && (
-    <section key="rented" className="space-y-1 border-l-2 pl-3" style={{ borderColor: live ? "var(--foreground)" : "var(--rule)" }}>
-      <h3 className={SUB}>Rented and paid</h3>
-      <div>
-        {job.plan} in {REGIONS[job.region] ?? job.region}
-        {job.boxUrl && job.phase !== "done" && job.phase !== "failed" && (
-          <>
-            {", "}
-            <a href={job.boxUrl} target="_blank" rel="noreferrer">
-              open the box at {job.ip}
-            </a>
-          </>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-2">
-        {/* The meter says the payment settled and links it; the card keeps the amount and the receipt. */}
-        {job.paidUsd !== null ? (
-          <>
-            <Swatch />
-            <span className="font-semibold tabular-nums">{usd4(job.paidUsd)} USDC</span>
-          </>
-        ) : (
-          <span className="text-muted">Paying over x402…</span>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-x-4 text-[12px] leading-4">
-        {job.solscan && (
-          <a href={job.solscan} target="_blank" rel="noreferrer">
-            Payment on Solscan
-          </a>
-        )}
-        {job.arweaveUrl && (
-          <a href={job.arweaveUrl} target="_blank" rel="noreferrer">
-            Receipt on Arweave
-          </a>
-        )}
-      </div>
-    </section>
+    <div key="rented" className={receiptAside ? "lg:hidden" : undefined}>
+      <RentedCard job={job} />
+    </div>
   );
 
   const timing =
