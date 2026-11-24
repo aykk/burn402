@@ -129,6 +129,32 @@ function ReadoutBlock({ r }: { r: Readout }) {
   );
 }
 
+/**
+ * The allowance under the job gauge, at its honest proportion: ink for what is left, the job's slice in
+ * amber as a hairline (never a whole segment). While quotes are coming in it shows with no slice yet, so
+ * the meter is already its job-mode height and does not grow when the first quote lands.
+ */
+function Allowance({ who, leftUsd, budgetUsd, share, note }: { who: string; leftUsd: number; budgetUsd: number; share: number | null; note: string }) {
+  return (
+    <div className="mt-5">
+      <div
+        role="img"
+        aria-label={`${who} has ${usd4(leftUsd)} of ${usd2(budgetUsd)} left${share !== null ? `; this job is ${shareText(share)} of it` : ""}`}
+        className="flex h-[3px] w-full overflow-hidden rounded-[1px] bg-segment"
+      >
+        <span className="h-full bg-foreground" style={{ width: `${budgetShare(leftUsd, budgetUsd) * 100}%` }} />
+        {share !== null && <span className="h-full shrink-0 bg-amber" style={{ width: `max(1px, ${share * 100}%)` }} />}
+      </div>
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 text-muted tabular-nums">
+        <p>
+          {who} has <span className="text-foreground">{usd4(leftUsd)}</span> of {usd2(budgetUsd)} left
+        </p>
+        <p>{note}</p>
+      </div>
+    </div>
+  );
+}
+
 export function BudgetMeter(props: {
   agentName: string | null;
   formBudgetUsd: number;
@@ -177,6 +203,7 @@ export function BudgetMeter(props: {
           <p>$0, server shuts down</p>
           <p>{usd2(v.budgetUsd)}</p>
         </div>
+        {(v.phase === "negotiating" || v.phase === "running") && <Allowance who={who} leftUsd={v.remainingUsd} budgetUsd={v.budgetUsd} share={null} note={v.phase === "negotiating" ? "Waiting for the broker's quote" : "No price reported yet"} />}
       </section>
     );
   }
@@ -232,22 +259,7 @@ export function BudgetMeter(props: {
       </div>
 
       {/* The allowance at its honest proportion: the job's slice is a hairline, never a whole segment. */}
-      <div className="mt-5">
-        <div
-          role="img"
-          aria-label={`${who} has ${usd4(allowanceLeft)} of ${usd2(v.budgetUsd)} left; this job is ${shareText(share)} of it`}
-          className="flex h-[3px] w-full overflow-hidden rounded-[1px] bg-segment"
-        >
-          <span className="h-full bg-foreground" style={{ width: `${budgetShare(allowanceLeft, v.budgetUsd) * 100}%` }} />
-          <span className="h-full shrink-0 bg-amber" style={{ width: `max(1px, ${share * 100}%)` }} />
-        </div>
-        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 text-muted tabular-nums">
-          <p>
-            {who} has <span className="text-foreground">{usd4(allowanceLeft)}</span> of {usd2(v.budgetUsd)} left
-          </p>
-          <p>This job is {shareText(share)} of the budget</p>
-        </div>
-      </div>
+      <Allowance who={who} leftUsd={allowanceLeft} budgetUsd={v.budgetUsd} share={share} note={`This job is ${shareText(share)} of the budget`} />
     </section>
   );
 }

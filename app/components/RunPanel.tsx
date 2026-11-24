@@ -86,6 +86,7 @@ export function RunPanel({
   previous,
   previousModel,
   post,
+  receiptAside = false,
 }: {
   snap: Snapshot | null;
   job: TrainingRunView | null;
@@ -93,6 +94,8 @@ export function RunPanel({
   previous: TrainingRunView | null;
   previousModel: TrainedModel | null;
   post: Post;
+  /** The page shows the receipt beside the run (wide screens, live run), so the timeline leaves it out there. */
+  receiptAside?: boolean;
 }) {
   const done = job?.phase === "done";
   const settled = done || job?.phase === "failed";
@@ -102,7 +105,7 @@ export function RunPanel({
     <div className="space-y-8">
       <StageRow job={job} />
 
-      {job && <Timeline job={job} model={current} result={result} />}
+      {job && <Timeline job={job} model={current} result={result} receiptAside={receiptAside} />}
 
       {result ? null : previousModel && previous ? (
         <TryIt title="The model from the last run" job={previous} model={previousModel} models={snap?.models} />

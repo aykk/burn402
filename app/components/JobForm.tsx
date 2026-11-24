@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { DatasetSource } from "@/lib/train";
 import { ActionError, failureMessage, type Post } from "./ActionError";
-import { DatasetCard, type Detected } from "./DatasetCard";
+import { DatasetCard, datasetSummary, type Detected } from "./DatasetCard";
 import { HELP } from "./copy";
 import { size, usd2 } from "./format";
 import { Help } from "./Help";
@@ -189,6 +189,9 @@ export function JobForm(props: {
   };
 
   const sampleAdded = sources.some((src) => src.url.endsWith(SAMPLE_PATH));
+  const hasData = sources.length > 0;
+  // With one source the combined summary describes that source, so it shares the source's row.
+  const singleSummary = sources.length === 1 && detected ? datasetSummary(detected) : null;
   const useSample = () => {
     // The task is only filled in when it is empty, so nothing typed is overwritten.
     if (!request.trim()) setRequest(SAMPLE_TASK);
@@ -377,63 +380,71 @@ export function JobForm(props: {
             e.target.value = "";
           }}
         />
-        <div
-          className={`flex h-12 items-center gap-4 rounded-[3px] border border-dashed px-4 text-muted transition-colors ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            if (!running && !dragging) setDragging(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            setDragging(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            if (running) return;
-            const files = Array.from(e.dataTransfer.files ?? []);
-            if (files.length > 0) readFiles(files);
-          }}
-        >
-          {dragging ? (
-            <span className="text-foreground">Drop them here</span>
-          ) : (
-            <span>
-              {sources.length > 0 ? "Drop more files here or " : "Drop files here or "}
-              <button type="button" className={TEXT_BTN} disabled={running || reading} onClick={() => fileRef.current?.click()}>
-                choose files
-              </button>
-            </span>
-          )}
-          {!dragging && !sampleAdded && (
-            <button type="button" className={`ml-auto shrink-0 ${TEXT_BTN}`} disabled={running || reading} onClick={useSample}>
-              Use sample reviews
-            </button>
-          )}
-        </div>
-        <div className="flex gap-2 pt-0.5">
-          <input
-            aria-label="Data URL"
-            className={`${INPUT} flex-1`}
-            placeholder="Or paste a URL"
-            value={url}
-            disabled={running}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") readUrl();
+        {/* Once data is in, the sample link is gone, so adding more shrinks to one row (drop zone beside the URL field). */}
+        <div className={`flex flex-col gap-2 ${hasData ? "@min-[36rem]:flex-row" : ""}`}>
+          <div
+            className={`flex items-center gap-4 rounded-[3px] border border-dashed px-4 text-muted transition-colors ${hasData ? "h-9 @min-[36rem]:min-w-0 @min-[36rem]:flex-1" : "h-12"} ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!running && !dragging) setDragging(true);
             }}
-          />
-          <button className={BTN} disabled={running || reading || !url.trim()} onClick={readUrl}>
-            Add
-          </button>
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              if (running) return;
+              const files = Array.from(e.dataTransfer.files ?? []);
+              if (files.length > 0) readFiles(files);
+            }}
+          >
+            {dragging ? (
+              <span className="text-foreground">Drop them here</span>
+            ) : (
+              <span className="truncate">
+                {hasData ? "Drop more files or " : "Drop files here or "}
+                <button type="button" className={TEXT_BTN} disabled={running || reading} onClick={() => fileRef.current?.click()}>
+                  choose files
+                </button>
+              </span>
+            )}
+            {!dragging && !sampleAdded && (
+              <button type="button" className={`ml-auto shrink-0 ${TEXT_BTN}`} disabled={running || reading} onClick={useSample}>
+                Use sample reviews
+              </button>
+            )}
+          </div>
+          <div className={`flex gap-2 ${hasData ? "@min-[36rem]:min-w-0 @min-[36rem]:flex-1" : ""}`}>
+            <input
+              aria-label="Data URL"
+              className={`${INPUT} min-w-0 flex-1`}
+              placeholder="Or paste a URL"
+              value={url}
+              disabled={running}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") readUrl();
+              }}
+            />
+            <button className={BTN} disabled={running || reading || !url.trim()} onClick={readUrl}>
+              Add
+            </button>
+          </div>
         </div>
 
         {sources.length > 0 && (
           <div className="space-y-1 pt-1">
             {sources.map((src, i) => (
               <div key={`${src.uploadId ?? src.url}-${i}`} className="flex items-baseline gap-3">
-                <span className="truncate">{src.name}</span>
-                <span className="shrink-0 text-[12px] text-muted">{size(src)}</span>
+                <span className="min-w-0 shrink truncate">{src.name}</span>
+                {/* One source: what it trains sits on its own row, so the form stays short enough to keep Start run in view. */}
+                {singleSummary ? (
+                  <span className="min-w-0 flex-1 text-[12px] leading-4 text-muted">{singleSummary}</span>
+                ) : (
+                  <span className="shrink-0 text-[12px] text-muted">{size(src)}</span>
+                )}
                 <button className={`ml-auto shrink-0 text-[12px] ${TEXT_BTN}`} disabled={running} onClick={() => void dropSource(i)}>
                   Remove
                 </button>
@@ -444,7 +455,7 @@ export function JobForm(props: {
 
         {reading && <div className="text-muted">Reading it…</div>}
         <ActionError what="That data couldn't be added" message={datasetError} onDismiss={() => setDatasetError(null)} />
-        {detected && <DatasetCard detected={detected} />}
+        {detected && !singleSummary && <DatasetCard detected={detected} />}
       </div>
 
       <div className="space-y-1.5">
@@ -580,7 +591,7 @@ export function JobForm(props: {
               disabled={running}
               onChange={(e) => void setPublish(e.target.checked)}
             />
-            <Help id="help-publish" text={HELP.publish} forId="publish-input" className="text-muted">
+            <Help id="help-publish" text={HELP.publish} forId="publish-input">
               Publish my side of the negotiation
             </Help>
           </span>
