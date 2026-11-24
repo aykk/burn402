@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { DatasetSource } from "@/lib/train";
+import { ActionError, failureMessage, type Post } from "./ActionError";
 import { DatasetCard, type Detected } from "./DatasetCard";
 import { HELP } from "./copy";
 import { size } from "./format";
@@ -57,9 +58,9 @@ export function JobForm(props: {
   running: boolean;
   collapsed: boolean;
   onDraftChange: (draft: JobDraft) => void;
-  onStart: (body: JobBody) => Promise<void>;
+  onStart: (body: JobBody) => Promise<string | null>;
   reload: () => Promise<void>;
-  post: (path: string, body?: unknown) => Promise<void>;
+  post: Post;
   resetSignal: number;
 }) {
   const { resetSignal, snap, running, collapsed, onDraftChange, onStart, reload, post } = props;
@@ -73,6 +74,9 @@ export function JobForm(props: {
   const [agentName, setAgentName] = useState("");
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
   // "Use a different agent" is rarely needed, so its form stays closed until asked for.
   const [otherAgent, setOtherAgent] = useState(false);
   const [budget, setBudget] = useState(5);
@@ -95,6 +99,8 @@ export function JobForm(props: {
     setRequest("");
     setAgentName("");
     setRegisterError(null);
+    setStartError(null);
+    setNetworkError(null);
     setOtherAgent(false);
   }, [resetSignal]);
 
@@ -122,23 +128,27 @@ export function JobForm(props: {
     setDetected(body as Detected);
   };
 
-  const addSources = async (init: RequestInit) => {
+  /** Resolves true once the source is in the list, so a URL that failed stays in its field to be corrected. */
+  const addSources = async (init: RequestInit): Promise<boolean> => {
     setDatasetError(null);
     setReading(true);
     const mine = gen.current;
+    let added = false;
     try {
       const res = await fetch("/api/demo/dataset", init);
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      if (gen.current !== mine) return;
+      if (gen.current !== mine) return false;
       const next = [...sources, (body as Detected).dataset];
       setSources(next);
+      added = true;
       await combineSources(next);
     } catch (e) {
-      setDatasetError((e as Error).message);
+      setDatasetError(failureMessage(e));
     } finally {
       setReading(false);
     }
+    return added;
   };
 
   const readFiles = (files: File[]) => {
@@ -149,7 +159,9 @@ export function JobForm(props: {
 
   const readUrl = () => {
     if (!url.trim()) return;
-    void addSources({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).then(() => setUrl(""));
+    void addSources({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).then((added) => {
+      if (added) setUrl("");
+    });
   };
 
   const dropSource = async (index: number) => {
@@ -159,7 +171,7 @@ export function JobForm(props: {
     try {
       await combineSources(next);
     } catch (e) {
-      setDatasetError((e as Error).message);
+      setDatasetError(failureMessage(e));
     }
   };
 
@@ -177,7 +189,7 @@ export function JobForm(props: {
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       await reload();
     } catch (e) {
-      setRegisterError((e as Error).message);
+      setRegisterError(failureMessage(e));
     } finally {
       setRegistering(false);
     }
@@ -214,7 +226,27 @@ export function JobForm(props: {
     );
   }
 
-  const blocked = running || !hasKey || !detected || !snap?.company;
+  const blocked = running || starting || !hasKey || !detected || !snap?.company;
+
+  const start = async () => {
+    setStartError(null);
+    setStarting(true);
+    const failed = await onStart({
+      request,
+      dataset: detected!.dataset,
+      budgetUsd: budget,
+      rateUsdHr: rate,
+      deadlineMinutes: deadline,
+      preference,
+    });
+    setStartError(failed);
+    setStarting(false);
+  };
+
+  const setPublish = async (full: boolean) => {
+    setNetworkError(null);
+    setNetworkError(await post("/api/demo/network", { disclosure: full ? "full" : "desk-only" }));
+  };
   const reason = !hasKey
     ? "Add a model key first, top right."
     : !snap?.company
@@ -279,7 +311,7 @@ export function JobForm(props: {
             </button>
           </form>
         )}
-        {registerError && <div className="text-bad">{registerError}</div>}
+        <ActionError what="The agent wasn't registered" message={registerError} onDismiss={() => setRegisterError(null)} />
       </div>
 
       <div className="space-y-1.5">
@@ -358,7 +390,7 @@ export function JobForm(props: {
         )}
 
         {reading && <div className="text-muted">Reading it…</div>}
-        {datasetError && <div className="text-bad">{datasetError}</div>}
+        <ActionError what="That data couldn't be added" message={datasetError} onDismiss={() => setDatasetError(null)} />
         {detected && <DatasetCard detected={detected} />}
       </div>
 
@@ -470,18 +502,9 @@ export function JobForm(props: {
           <button
             className={START}
             disabled={blocked}
-            onClick={() =>
-              void onStart({
-                request,
-                dataset: detected!.dataset,
-                budgetUsd: budget,
-                rateUsdHr: rate,
-                deadlineMinutes: deadline,
-                preference,
-              })
-            }
+            onClick={() => void start()}
           >
-            Start run
+            {starting ? "Starting…" : "Start run"}
           </button>
           <span className="flex items-center gap-2">
             <input
@@ -490,7 +513,7 @@ export function JobForm(props: {
               aria-label="Publish my side of the negotiation"
               checked={snap?.disclosure === "full"}
               disabled={running}
-              onChange={(e) => post("/api/demo/network", { disclosure: e.target.checked ? "full" : "desk-only" })}
+              onChange={(e) => void setPublish(e.target.checked)}
             />
             <Help id="help-publish" text={HELP.publish} className="text-muted">
               Publish my side of the negotiation
@@ -498,6 +521,8 @@ export function JobForm(props: {
           </span>
         </div>
         {reason && <p className="text-[12px] leading-4 text-foreground">{reason}</p>}
+        <ActionError what="The run didn't start" message={startError} onDismiss={() => setStartError(null)} />
+        <ActionError what="The publish setting wasn't saved" message={networkError} onDismiss={() => setNetworkError(null)} />
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { Nav } from "@/app/nav";
 import { Segmented } from "@/app/components/Segmented";
-import { INPUT, MONO } from "@/app/components/ui";
+import { BTN, INPUT, MONO, TEXT_BTN } from "@/app/components/ui";
 import { useEffect, useState } from "react";
 
 type Step = { name: string; ok: boolean; detail: string };
@@ -72,6 +72,33 @@ function Detail({ text }: { text: string }) {
   );
 }
 
+/**
+ * A check that stopped because the gateway (or the ANS directory) did not answer, rather than because
+ * the record failed it: the verifier passes the network error through as the step's detail.
+ */
+const UNREACHABLE =
+  /fetch failed|^fetch \S+: HTTP \d+|not found on the gateway|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR|socket hang up|timed? ?out|aborted|NetworkError/i;
+
+type Check = { state: "verified" } | { state: "invalid"; label: string } | { state: "unchecked"; step: Step | null };
+
+/** Verified, failed a check, or could not be checked at all. Only the second is the record's fault. */
+function checkOf(r: Record): Check {
+  if (r.verified) return { state: "verified" };
+  const failed = r.steps.find((s) => !s.ok) ?? null;
+  // Not verified with no failed step means the check never finished.
+  if (!failed || UNREACHABLE.test(failed.detail)) return { state: "unchecked", step: failed };
+  if (/no signature attached/i.test(failed.detail)) return { state: "invalid", label: "No signature attached" };
+  if (/signature/i.test(failed.name)) return { state: "invalid", label: "Signature invalid" };
+  return { state: "invalid", label: `${stepName(failed.name)} check failed` };
+}
+
+/** A step's detail in words: a bare network error becomes what it means for the check. */
+function stepDetail(s: Step): string {
+  if (/^fetch failed$/i.test(s.detail)) return "the gateway did not answer (fetch failed)";
+  if (/^fetch \S+: HTTP (\d+)$/i.test(s.detail)) return `the gateway answered HTTP ${/HTTP (\d+)/.exec(s.detail)![1]} instead of the record`;
+  return s.detail;
+}
+
 /** The outcome in a few words so it never wraps the column: "signatures verified, some held back" is the long one. */
 function outcomeLabel(r: Record): string {
   if (/^signatures verified, some held back$/i.test(r.outcome.label)) {
@@ -101,6 +128,10 @@ export default function RecordsPage() {
   const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(false);
+  // Why the list could not be read: the demo server is down, or it answered but the gateway did not.
+  const [failure, setFailure] = useState<{ title: string; detail: string } | null>(null);
+  // "Try again" and "Check again" bump this to run the same read once more.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const n = new URLSearchParams(window.location.search).get("network");
@@ -109,12 +140,32 @@ export default function RecordsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // A failed read keeps the records already on screen only if they are from the same network.
+    const keepSameNetwork = (prev: Response | null) => (prev?.network === network ? prev : null);
     const run = async () => {
       setLoading(true);
+      setFailure(null);
       try {
         const res = await fetch(`/api/records?network=${network}`, { cache: "no-store" });
         const body = (await res.json()) as Response;
-        if (!cancelled) setData(body);
+        if (cancelled) return;
+        if (!res.ok || body.error || !body.records) {
+          setFailure({
+            title: "Couldn't read the records from Arweave",
+            detail: `The gateway didn't answer the demo server (${body.error ?? `HTTP ${res.status}`}). This is usually brief; try again in a moment.`,
+          });
+          setData(keepSameNetwork);
+        } else {
+          setData(body);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setFailure(
+          e instanceof TypeError
+            ? { title: "Couldn't load the records", detail: "The demo server didn't answer. Check that npm run dev is still running, then try again." }
+            : { title: "Couldn't load the records", detail: "The demo server sent back a reply it couldn't read. Check the terminal running npm run dev." },
+        );
+        setData(keepSameNetwork);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -124,7 +175,7 @@ export default function RecordsPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [network]);
+  }, [network, attempt]);
 
   const records = data?.records ?? [];
   const agents = [...new Set(records.map((r) => r.subject ?? "").filter(Boolean))].sort();
@@ -207,14 +258,42 @@ export default function RecordsPage() {
       </div>
 
       {loading && <div className="mt-4 shrink-0 text-muted">Reading from Arweave and checking each record…</div>}
-      {data?.error && <div className="mt-4 shrink-0 text-bad">{data.error}</div>}
+      {failure && !loading && (
+        <div role="alert" className="mt-4 shrink-0 space-y-3">
+          <div>
+            <p className="font-medium text-bad">{failure.title}</p>
+            <p className="mt-1 max-w-[64ch] text-muted">
+              {failure.detail}
+              {data?.records ? " The list below is from the last read." : ""}
+            </p>
+          </div>
+          <button type="button" className={BTN} onClick={() => setAttempt((a) => a + 1)}>
+            Try again
+          </button>
+        </div>
+      )}
       {data?.records && !loading && (
         <div className="pb-4">
           {shown.length === 0 && <div className="pt-4 text-muted">Nothing matches those filters.</div>}
           {shown.map((r) => {
-            const tone = TONE[r.outcome.tone];
-            // One red per row: an unverified signature is only red when the outcome is otherwise good.
-            const sigBad = !r.verified && r.outcome.tone === "good";
+            const check = checkOf(r);
+            const unchecked = check.state === "unchecked";
+            // A verdict whose record never arrived has no verdict to report; the route's defaults would read as a pass.
+            const noVerdict = r.kind === "verdict" && !r.steps.some((s) => s.name === "verdict signature" && s.ok);
+            const headline = unchecked && noVerdict ? "verdict could not be read from the gateway" : r.headline;
+            // An outcome is only shown as settled once its check has run. Unchecked: muted, and said so.
+            // A conversation's outcome is its verification, so a failed one reads as failed, not "could not be checked".
+            // A transaction's outcome still comes from its tags, so it stays, muted, over "Couldn't check".
+            const outcomeText = unchecked
+              ? r.kind === "transaction"
+                ? outcomeLabel(r)
+                : "Not confirmed yet"
+              : r.kind === "conversation" && check.state === "invalid"
+                ? "Failed verification"
+                : outcomeLabel(r);
+            const tone = unchecked ? "var(--muted)" : TONE[r.outcome.tone];
+            // One red per row: a failed check is red unless the outcome beside it is already red.
+            const outcomeRed = !unchecked && r.outcome.tone === "bad";
             return (
               <article
                 key={r.id}
@@ -222,20 +301,35 @@ export default function RecordsPage() {
               >
                 <div className="text-[12px] leading-5 text-muted">{KIND[r.kind] ?? r.kind}</div>
                 <div className="min-w-0">
-                  <div className="font-medium text-foreground">{sentence(moneyCopy(r.headline))}</div>
+                  <div className="font-medium text-foreground">{sentence(moneyCopy(headline))}</div>
                   {r.reason && <div className="text-muted">{sentence(moneyCopy(r.reason))}</div>}
                   {r.subject && <div className={`mt-0.5 break-all text-muted ${MONO}`}>{shortAgent(r.subject)}</div>}
                 </div>
                 <div>
-                  <div className="font-medium" style={{ color: tone }}>
-                    {outcomeLabel(r)}
-                  </div>
                   <div
-                    className={`text-[12px] leading-4 ${sigBad ? "text-bad" : "text-muted"}`}
-                    title={sigBad ? "Red here because money moved on a record whose signature could not be verified" : undefined}
+                    className="font-medium"
+                    style={{ color: tone }}
+                    title={unchecked && r.kind === "transaction" ? "From the record's tags; not confirmed until its signed record can be checked" : undefined}
                   >
-                    {r.verified ? "Signature verified" : "Signature not verified"}
+                    {outcomeText}
                   </div>
+                  {check.state === "verified" && <div className="text-[12px] leading-4 text-ok">Verified</div>}
+                  {check.state === "invalid" && (
+                    <div className={`text-[12px] leading-4 font-medium ${outcomeRed ? "text-foreground" : "text-bad"}`}>{check.label}</div>
+                  )}
+                  {check.state === "unchecked" && (
+                    <div className="flex flex-wrap items-baseline gap-x-3 text-[12px] leading-4">
+                      <span
+                        className="text-muted"
+                        title={check.step ? `${stepName(check.step.name)}: ${stepDetail(check.step)}` : "The check did not finish"}
+                      >
+                        Couldn&apos;t check
+                      </span>
+                      <button type="button" className={TEXT_BTN} onClick={() => setAttempt((a) => a + 1)}>
+                        Check again
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="text-[12px] leading-5 text-muted tabular-nums lg:text-right">
                   {when(r.issuedAt) ?? when(r.anchoredAt) ?? "Date not on record"}
@@ -267,8 +361,13 @@ export default function RecordsPage() {
                         <div key={s.name} className="contents">
                           <div className="text-foreground">{stepName(s.name)}</div>
                           <div className="mb-1 min-w-0 break-words text-muted sm:mb-0">
-                            {!s.ok && <span className="mr-2 font-medium text-bad">Failed</span>}
-                            <Detail text={s.detail} />
+                            {!s.ok &&
+                              (UNREACHABLE.test(s.detail) ? (
+                                <span className="mr-2 font-medium text-foreground">Couldn&apos;t check</span>
+                              ) : (
+                                <span className="mr-2 font-medium text-bad">Failed</span>
+                              ))}
+                            <Detail text={stepDetail(s)} />
                           </div>
                         </div>
                       ))}

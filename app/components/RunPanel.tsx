@@ -1,6 +1,7 @@
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { TrainingRunView } from "@/lib/demo/train";
 import type { TrainedModel } from "@/lib/train";
+import type { Post } from "./ActionError";
 import { HELP } from "./copy";
 import { STAGES, stageIndex } from "./stages";
 import { StressTest } from "./StressTest";
@@ -66,7 +67,7 @@ export function RunPanel({
   current: TrainedModel | null;
   previous: TrainingRunView | null;
   previousModel: TrainedModel | null;
-  post: (path: string, body?: unknown) => Promise<void>;
+  post: Post;
 }) {
   const done = job?.phase === "done";
   const settled = done || job?.phase === "failed";
