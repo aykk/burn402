@@ -18,6 +18,7 @@ export default function Page() {
   const [error, setError] = useState<{ message: string; unreachable: boolean } | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<JobDraft>({ budgetUsd: 5, rateUsdHr: 1.25 });
   const [resetSignal, setResetSignal] = useState(0);
   const [models, setModels] = useState<Record<string, TrainedModel>>({});
@@ -98,7 +99,15 @@ export default function Page() {
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/">
-        {snap && <ModelPicker models={snap.models} disabled={running} onSave={(provider, key) => post("/api/demo/model", { provider, key })} />}
+        {snap && (
+          <ModelPicker
+            models={snap.models}
+            disabled={running}
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            onSave={(provider, key) => post("/api/demo/model", { provider, key })}
+          />
+        )}
         <button className="underline decoration-1 underline-offset-[3px] hover:decoration-2" onClick={() => setDrawer(true)}>
           Log
         </button>
@@ -118,7 +127,14 @@ export default function Page() {
         </button>
       </Nav>
 
-      <div className="shrink-0">
+      {/* A cold visitor learns what this is in one line; the meter under it stays the biggest thing on the page. */}
+      {/* On wide screens the explanation trails the heading on its baseline; it wraps under it when narrower. */}
+      <div className="flex shrink-0 flex-wrap items-baseline gap-x-4 gap-y-1 pt-2">
+        <h1 className="text-[20px] leading-[26px] font-semibold">Give an agent a budget and it trains a custom model for you.</h1>
+        <p className="text-muted">It rents a server, pays as it goes, and the server shuts down when the budget runs out.</p>
+      </div>
+
+      <div className="mt-4 shrink-0">
         <BudgetMeter
           agentName={snap?.company?.name ?? null}
           formBudgetUsd={draft.budgetUsd}
@@ -146,7 +162,7 @@ export default function Page() {
           table fits; it gives the space back to the form after Reset. A finished job leaves the form
           expanded in a slightly wider column so the next run can be set up. */}
       <section
-        className={`mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 lg:gap-10 ${
+        className={`mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:gap-10 ${
           running
             ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
             : job
@@ -163,6 +179,7 @@ export default function Page() {
             collapsed={running}
             onDraftChange={setDraft}
             onStart={(body) => post("/api/demo/job", body)}
+            onAddKey={() => setPickerOpen(true)}
             reload={load}
             post={post}
           />

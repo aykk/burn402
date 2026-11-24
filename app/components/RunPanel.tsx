@@ -20,37 +20,45 @@ function StageRow({ job }: { job: TrainingRunView | null }) {
   const failed = job?.phase === "failed";
   const state = (i: number): StageState => (i < at ? "done" : i > at ? "next" : failed ? "failed" : "now");
   return (
-    <ol aria-label="Run stages" className="grid grid-cols-4 gap-[3px]">
-      {STAGES.map((label, i) => {
-        const s = state(i);
-        return (
-          <li key={label} aria-current={s === "now" ? "step" : undefined} className="min-w-0">
-            <span className="flex h-[5px] items-end" aria-hidden>
+    <div>
+      {/* Before a run the row is a preview, so it says so; during a run the timeline under it explains each stage. */}
+      {!job && (
+        <p id="stages-label" className="mb-2 text-[12px] leading-4 font-medium text-foreground">
+          What happens when you start
+        </p>
+      )}
+      <ol aria-label={job ? "Run stages" : undefined} aria-labelledby={job ? undefined : "stages-label"} className="grid grid-cols-4 gap-[3px]">
+        {STAGES.map((label, i) => {
+          const s = state(i);
+          return (
+            <li key={label} aria-current={s === "now" ? "step" : undefined} className="min-w-0">
+              <span className="flex h-[5px] items-end" aria-hidden>
+                <span
+                  className={`block w-full ${
+                    s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-foreground" : "h-[2px] bg-rule-strong"
+                  }`}
+                />
+              </span>
               <span
-                className={`block w-full ${
-                  s === "now" ? "h-[5px] bg-foreground" : s === "failed" ? "h-[5px] bg-bad" : s === "done" ? "h-[2px] bg-foreground" : "h-[2px] bg-rule-strong"
+                className={`mt-1.5 block truncate text-[12px] leading-4 ${
+                  s === "now"
+                    ? "font-semibold text-foreground"
+                    : s === "failed"
+                      ? "font-semibold text-bad"
+                      : s === "done"
+                        ? "font-medium text-foreground"
+                        : "font-medium text-muted"
                 }`}
-              />
-            </span>
-            <span
-              className={`mt-1.5 block truncate text-[12px] leading-4 ${
-                s === "now"
-                  ? "font-semibold text-foreground"
-                  : s === "failed"
-                    ? "font-semibold text-bad"
-                    : s === "done"
-                      ? "font-medium text-foreground"
-                      : "font-medium text-muted"
-              }`}
-            >
-              {label}
-              {s === "failed" && <span className="sr-only">, stopped here</span>}
-              {s === "done" && <span className="sr-only">, finished</span>}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+              >
+                {label}
+                {s === "failed" && <span className="sr-only">, stopped here</span>}
+                {s === "done" && <span className="sr-only">, finished</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 

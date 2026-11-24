@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { DatasetSource } from "@/lib/train";
 import { ActionError, failureMessage, type Post } from "./ActionError";
@@ -47,6 +47,10 @@ function Label({ children, help, id, htmlFor }: { children: string; help: keyof 
 /** Number fields with the unit inside: no spinner arrows to collide with the suffix (arrow keys still step). */
 const NUMBER = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
+/** A small classifier dataset served by the app, so a first run needs no file of your own. */
+const SAMPLE_PATH = "/samples/reviews.csv";
+const SAMPLE_TASK = "Sort product reviews into positive or negative";
+
 const PLAN_OPTIONS = [
   { value: 0, label: "Cheapest" },
   { value: 0.5, label: "Balanced" },
@@ -62,8 +66,10 @@ export function JobForm(props: {
   reload: () => Promise<void>;
   post: Post;
   resetSignal: number;
+  /** Opens the model picker in the header, where the key is added. */
+  onAddKey: () => void;
 }) {
-  const { resetSignal, snap, running, collapsed, onDraftChange, onStart, reload, post } = props;
+  const { resetSignal, snap, running, collapsed, onDraftChange, onStart, reload, post, onAddKey } = props;
   const [request, setRequest] = useState("");
   const [url, setUrl] = useState("");
   const [sources, setSources] = useState<DatasetSource[]>([]);
@@ -157,11 +163,22 @@ export function JobForm(props: {
     void addSources({ method: "POST", body: form });
   };
 
+  /** Reads a dataset by URL, the same request the URL field sends. */
+  const addUrl = (target: string) =>
+    addSources({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: target }) });
+
   const readUrl = () => {
     if (!url.trim()) return;
-    void addSources({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).then((added) => {
+    void addUrl(url).then((added) => {
       if (added) setUrl("");
     });
+  };
+
+  const sampleAdded = sources.some((src) => src.url.endsWith(SAMPLE_PATH));
+  const useSample = () => {
+    // The task is only filled in when it is empty, so nothing typed is overwritten.
+    if (!request.trim()) setRequest(SAMPLE_TASK);
+    void addUrl(`${window.location.origin}${SAMPLE_PATH}`);
   };
 
   const dropSource = async (index: number) => {
@@ -247,40 +264,59 @@ export function JobForm(props: {
     setNetworkError(null);
     setNetworkError(await post("/api/demo/network", { disclosure: full ? "full" : "desk-only" }));
   };
-  const reason = !hasKey
-    ? "Add a model key first, top right."
-    : !snap?.company
-      ? "Name and register your agent first."
-      : !detected
-        ? "Add the data it should learn from."
-        : null;
+  // Each reason names the fix and, where it can, is the fix: the key opens the model picker, the
+  // agent focuses its name field, and data can come from the sample in one click.
+  const reason: ReactNode = !hasKey ? (
+    <>
+      <button type="button" className={TEXT_BTN} onClick={onAddKey}>
+        Add a model key
+      </button>{" "}
+      to start.
+    </>
+  ) : !snap?.company ? (
+    <>
+      <button type="button" className={TEXT_BTN} onClick={() => document.getElementById("agent-name")?.focus()}>
+        Name and register your agent
+      </button>{" "}
+      to start.
+    </>
+  ) : !detected ? (
+    <>
+      Add training data, or{" "}
+      <button type="button" className={TEXT_BTN} disabled={reading} onClick={useSample}>
+        use sample reviews
+      </button>
+      .
+    </>
+  ) : null;
 
   return (
-    <div className="@container space-y-6">
+    <div className="@container space-y-5">
       <div className="space-y-1.5">
         <Label help="agent" id="agent">
           Your agent
         </Label>
         {snap?.company && (
           <div>
-            <div className="text-[16px] leading-[22px] font-semibold text-foreground">{snap.company.name}</div>
+            {/* Name, status and the switch share one row so the form stays short enough to keep Start run in view. */}
             <div className="flex flex-wrap items-baseline gap-x-3">
-              <span className={`break-all text-muted ${MONO}`}>{snap.company.ansName}</span>
+              <span className="text-[16px] leading-[22px] font-semibold text-foreground">{snap.company.name}</span>
               <span className="text-[12px] leading-4 font-medium text-ok">Registered</span>
+              {!otherAgent && (
+                <button
+                  type="button"
+                  className={`text-[12px] leading-4 @min-[26rem]:ml-auto ${TEXT_BTN}`}
+                  aria-expanded={false}
+                  aria-controls="agent-name-form"
+                  disabled={running}
+                  onClick={() => setOtherAgent(true)}
+                >
+                  Use a different agent
+                </button>
+              )}
             </div>
+            <div className={`break-all text-muted ${MONO}`}>{snap.company.ansName}</div>
             <div className="mt-0.5 text-[12px] leading-4 text-muted">Its key is sealed in the transparency log.</div>
-            {!otherAgent && (
-              <button
-                type="button"
-                className={`mt-1.5 text-[12px] leading-4 ${TEXT_BTN}`}
-                aria-expanded={false}
-                aria-controls="agent-name-form"
-                disabled={running}
-                onClick={() => setOtherAgent(true)}
-              >
-                Use a different agent
-              </button>
-            )}
           </div>
         )}
         {snap?.company && otherAgent && (
@@ -330,7 +366,7 @@ export function JobForm(props: {
           }}
         />
         <div
-          className={`flex h-16 items-center rounded-[3px] border border-dashed px-4 text-muted transition-colors ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
+          className={`flex h-12 items-center gap-4 rounded-[3px] border border-dashed px-4 text-muted transition-colors ${dragging ? "border-foreground bg-surface" : "border-rule-strong"}`}
           onDragOver={(e) => {
             e.preventDefault();
             if (!running && !dragging) setDragging(true);
@@ -356,6 +392,11 @@ export function JobForm(props: {
                 choose files
               </button>
             </span>
+          )}
+          {!dragging && !sampleAdded && (
+            <button type="button" className={`ml-auto shrink-0 ${TEXT_BTN}`} disabled={running || reading} onClick={useSample}>
+              Use sample reviews
+            </button>
           )}
         </div>
         <div className="flex gap-2 pt-0.5">
@@ -401,7 +442,7 @@ export function JobForm(props: {
         <textarea
           id="task-input"
           className={`${TEXTAREA} block w-full resize-none`}
-          rows={4}
+          rows={2}
           placeholder="Sort product reviews into positive, negative and mixed"
           value={request}
           disabled={running}
@@ -498,14 +539,23 @@ export function JobForm(props: {
       </div>
 
       <div className="space-y-2">
+        {/* Why Start run is off sits right beside it (under it on narrow screens), so it is seen with the button. */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <button
-            className={START}
-            disabled={blocked}
-            onClick={() => void start()}
-          >
-            {starting ? "Starting…" : "Start run"}
-          </button>
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <button
+              className={START}
+              disabled={blocked}
+              aria-describedby={reason ? "start-reason" : undefined}
+              onClick={() => void start()}
+            >
+              {starting ? "Starting…" : "Start run"}
+            </button>
+            {reason && !running && (
+              <span id="start-reason" className="text-foreground">
+                {reason}
+              </span>
+            )}
+          </span>
           <span className="flex items-center gap-2">
             <input
               id="publish-input"
@@ -520,7 +570,6 @@ export function JobForm(props: {
             </Help>
           </span>
         </div>
-        {reason && <p className="text-[12px] leading-4 text-foreground">{reason}</p>}
         <ActionError what="The run didn't start" message={startError} onDismiss={() => setStartError(null)} />
         <ActionError what="The publish setting wasn't saved" message={networkError} onDismiss={() => setNetworkError(null)} />
       </div>
