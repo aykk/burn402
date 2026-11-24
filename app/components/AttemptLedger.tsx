@@ -11,7 +11,8 @@ function attemptText(what: string): string {
     what
       .replace(/^it /, "")
       .replace(/, at \$/, " at $")
-      .replace(/Vultr desk/gi, "broker"),
+      .replace(/Vultr desk/gi, "broker")
+      .replace(/\bits behaviour score/i, "the limit tester's behaviour score"),
   );
 }
 
@@ -70,16 +71,18 @@ function Prose({ text }: { text: string }) {
  * attempt, the outcome and what it proves behind one 2px ink rule. Stacks under 640px.
  */
 export function AttemptLedger({ attempts }: { attempts: Attempt[] }) {
+  let step = 0;
   return (
     <div className="space-y-3">
       {attempts.map((a, i) => {
         const o = attemptOutcome(a);
+        if (!a.quiet) step += 1;
         return (
           <div key={i} className="grid grid-cols-1 gap-y-1 sm:grid-cols-[88px_minmax(0,1fr)] sm:gap-x-4">
-            <div className="text-[12px] leading-5 font-semibold text-foreground">Step {i + 1}</div>
+            <div className="text-[12px] leading-5 font-semibold text-foreground">{a.quiet ? "" : `Step ${step}`}</div>
             <div className="min-w-0 border-l-2 border-foreground pl-3 break-words">
               <div className="text-foreground">
-                <Prose text={attemptText(a.what)} />
+                <Prose text={a.quiet ? `Then it ${attemptText(a.what).replace(/^./, (c) => c.toLowerCase())}` : attemptText(a.what)} />
               </div>
               <div>
                 <span className="font-semibold" style={{ color: o.color }}>
@@ -92,7 +95,7 @@ export function AttemptLedger({ attempts }: { attempts: Attempt[] }) {
                   </span>
                 )}
               </div>
-              <div className="mt-0.5 text-[12px] leading-4 text-muted">{period(sentence(a.proves))}</div>
+              {!a.quiet && <div className="mt-0.5 text-[12px] leading-4 text-muted">{period(sentence(a.proves))}</div>}
             </div>
           </div>
         );

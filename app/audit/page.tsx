@@ -78,7 +78,8 @@ export default function AuditPage() {
   const target = runs.find((r) => r.id === picked) ?? runs[0] ?? null;
   const stress = snap?.stress;
   const running = snap?.busy ?? false;
-  const attempts = (stress?.attempts ?? []).filter((a) => !a.quiet);
+  const allAttempts = stress?.attempts ?? [];
+  const attempts = allAttempts.filter((a) => !a.quiet);
   // A broker record carries the mark of the limit-test attempt that produced it; name that step.
   const stepOf = (mark: number | null) => {
     if (typeof mark !== "number") return null;
@@ -160,7 +161,7 @@ export default function AuditPage() {
                 <h2 className={H2}>
                   Limit test for <span className="font-mono text-[12px] font-normal break-all">{stress?.job ? stress.job.agent : "this agent"}</span>
                 </h2>
-                <AttemptLedger attempts={attempts} />
+                <AttemptLedger attempts={allAttempts} />
                 {stress?.verdictUrl && (
                   <a href={stress.verdictUrl} target="_blank" rel="noreferrer" className="inline-block">
                     The verdict against it, permanently on Arweave
