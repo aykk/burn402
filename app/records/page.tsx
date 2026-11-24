@@ -1,6 +1,7 @@
 "use client";
 
 import { Nav } from "@/app/nav";
+import { isUnreachable } from "../components/verify-state";
 import { Segmented } from "@/app/components/Segmented";
 import { BTN, INPUT, MONO, TEXT_BTN } from "@/app/components/ui";
 import { useEffect, useState } from "react";
@@ -72,13 +73,6 @@ function Detail({ text }: { text: string }) {
   );
 }
 
-/**
- * A check that stopped because the gateway (or the ANS directory) did not answer, rather than because
- * the record failed it: the verifier passes the network error through as the step's detail.
- */
-const UNREACHABLE =
-  /fetch failed|^fetch \S+: HTTP \d+|not found on the gateway|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR|socket hang up|timed? ?out|aborted|NetworkError/i;
-
 type Check = { state: "verified" } | { state: "invalid"; label: string } | { state: "unchecked"; step: Step | null };
 
 /** Verified, failed a check, or could not be checked at all. Only the second is the record's fault. */
@@ -86,7 +80,7 @@ function checkOf(r: Record): Check {
   if (r.verified) return { state: "verified" };
   const failed = r.steps.find((s) => !s.ok) ?? null;
   // Not verified with no failed step means the check never finished.
-  if (!failed || UNREACHABLE.test(failed.detail)) return { state: "unchecked", step: failed };
+  if (!failed || isUnreachable(failed)) return { state: "unchecked", step: failed };
   if (/no signature attached/i.test(failed.detail)) return { state: "invalid", label: "No signature attached" };
   if (/signature/i.test(failed.name)) return { state: "invalid", label: "Signature invalid" };
   return { state: "invalid", label: `${stepName(failed.name)} check failed` };
@@ -362,7 +356,7 @@ export default function RecordsPage() {
                           <div className="text-foreground">{stepName(s.name)}</div>
                           <div className="mb-1 min-w-0 break-words text-muted sm:mb-0">
                             {!s.ok &&
-                              (UNREACHABLE.test(s.detail) ? (
+                              (isUnreachable(s) ? (
                                 <span className="mr-2 font-medium text-foreground">Couldn&apos;t check</span>
                               ) : (
                                 <span className="mr-2 font-medium text-bad">Failed</span>
