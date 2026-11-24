@@ -1,6 +1,6 @@
 import type { TrainingRunView } from "@/lib/demo/train";
 import { duration, usd4 } from "./format";
-import { STAGES, stageIndex } from "./stages";
+import { STAGES, failedWhere, stageIndex } from "./stages";
 
 /** What the live region remembers about a run between polls. */
 export type RunMark = { id: string; phase: TrainingRunView["phase"]; stage: number; paid: boolean };
@@ -38,8 +38,7 @@ export function runAnnouncement(prev: RunMark | null | undefined, job: TrainingR
     }
   } else if (next.phase === "failed") {
     if (fresh || prev.phase !== "failed") {
-      const where = STAGES[Math.min(next.stage, STAGES.length - 1)].toLowerCase();
-      parts.push(`Run failed during ${where}. ${sentence(job.error?.trim() || "The run failed")}`);
+      parts.push(`Run failed ${failedWhere(job)}. ${sentence(job.error?.trim() || "The run failed")}`);
     }
   } else if (fresh || next.stage !== prev.stage) {
     parts.push(`Stage ${next.stage + 1} of ${STAGES.length}: ${STAGES[next.stage]}.`);

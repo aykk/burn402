@@ -3,29 +3,25 @@
 import { useState } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import { ActionError, type Post } from "./ActionError";
-import { AttemptLedger } from "./AttemptLedger";
-import { money } from "./format";
+import { AttemptLedger, testCopy } from "./AttemptLedger";
+import { usd2 } from "./format";
 import { BTN } from "./ui";
 
-const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-const period = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
-
+/** The overspend test on the Run page. The feature is "Overspend test" everywhere; the action is "Try to overspend". */
 export function StressTest({ snap, post }: { snap: Snapshot | null; post: Post }) {
   // A refused start (the server says no before any attempt runs); failures during the test arrive as stress.error.
   const [startError, setStartError] = useState<string | null>(null);
   const stress = snap?.stress;
   const target = stress?.target;
-  // Only the second agent's attempts count (blocked is set); the auditor and trust-index steps respond to them.
-  const attempts = stress?.attempts.filter((a) => a.blocked !== null).length ?? 0;
-  const tries = stress?.status === "done" && attempts > 0 ? `${attempts} ways` : "every way it can";
+  // The attempt count lives in the ledger's verdict sentence, so the intro only sets up the test.
   return (
     <div className="space-y-3 border-t border-rule pt-6">
       <div>
-        <h2 className="text-[16px] leading-[22px] font-semibold">Limit testing</h2>
+        <h2 className="text-[16px] leading-[22px] font-semibold">Overspend test</h2>
         <p className="mt-1 max-w-[64ch] text-muted">
           {target
-            ? `A second agent is handed a slice of the same budget: ${money(target.budgetUsd)} at up to ${money(target.rateUsdHr)} an hour. It tries ${tries} to spend more than that.${stress?.status === "done" ? " Then the auditor checks the public record." : ""}`
-            : "A second agent is handed a slice of the budget this job used, then tries to spend more than it was allowed."}
+            ? `A second agent gets a slice of the same budget, ${usd2(target.budgetUsd)} at up to ${usd2(target.rateUsdHr)} an hour, and tries every way it can to spend more than that. Then the auditor checks the public record.`
+            : "A second agent gets a slice of the budget this job used and tries every way it can to spend more than that. Then the auditor checks the public record."}
         </p>
       </div>
       {/* Secondary: Start run stays the only filled button in the view. */}
@@ -39,14 +35,14 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: Post }
       >
         {stress?.status === "running" ? "Trying…" : "Try to overspend"}
       </button>
-      <ActionError what="The limit test didn't start" message={startError} onDismiss={() => setStartError(null)} />
-      {stress?.error && <div className="text-bad">{period(sentence(stress.error))}</div>}
+      <ActionError what="The overspend test didn't start" message={startError} onDismiss={() => setStartError(null)} />
+      {stress?.error && <div className="text-bad">{testCopy(stress.error)}</div>}
       {stress && stress.attempts.length > 0 && (
         <div className="space-y-3">
-          <AttemptLedger attempts={stress.attempts} />
+          <AttemptLedger attempts={stress.attempts} status={stress.status} />
           {stress.verdictUrl && (
             <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
-              Verdict, stored on Arweave
+              The auditor&apos;s verdict, stored on Arweave
             </a>
           )}
         </div>

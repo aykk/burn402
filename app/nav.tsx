@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 const PAGES = [
   { href: "/", label: "Run" },
   { href: "/records", label: "Records" },
-  { href: "/audit", label: "Audit" },
+  { href: "/audit", label: "Overspend test" },
 ] as const;
 
 export function Nav({

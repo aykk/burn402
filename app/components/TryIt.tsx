@@ -6,7 +6,7 @@ import type { TrainingRunView } from "@/lib/demo/train";
 import type { TrainedModel } from "@/lib/train";
 import { formatMetric, headlineMetric, run as runModel, runnerFor } from "@/lib/train/infer";
 import { MetricList } from "./MetricList";
-import { kb, money } from "./format";
+import { kb, usd4 } from "./format";
 import { BTN, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
 
 /** `bare` drops the top rule when the panel sits directly under the result heading. */
@@ -70,7 +70,7 @@ export function TryIt({
           </div>
         )}
         <div className="text-[12px] leading-4 text-muted">
-          Trained on {job.dataset.name}, {job.plan}, {money(job.paidUsd)}, {kb(job.modelBytes)}
+          Trained on {[job.dataset.name, job.plan, job.paidUsd !== null ? usd4(job.paidUsd) : null, job.modelBytes !== null ? kb(job.modelBytes) : null].filter(Boolean).join(", ")}
         </div>
       </div>
 
