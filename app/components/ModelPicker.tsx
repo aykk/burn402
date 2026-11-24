@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
+import { ActionError } from "./ActionError";
 import { BTN_PRIMARY, INPUT, MONO, TEXT_BTN } from "./ui";
 
 /** Provider marks render monochrome in ink so the picker stays inside the palette. */
@@ -15,16 +16,31 @@ export function ModelPicker({
 }: {
   models: Snapshot["models"];
   disabled: boolean;
-  onSave: (provider: string, key?: string) => Promise<void>;
+  onSave: (provider: string, key?: string) => Promise<string | null>;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  // What failed and why: saving a key or switching model. Shown inside the panel until dismissed or retried.
+  const [error, setError] = useState<{ what: string; message: string } | null>(null);
   const selected = models.providers.find((p) => p.id === models.selected)!;
   const missingKey = !selected.key;
 
   const save = async () => {
-    await onSave(selected.id, draft);
+    setError(null);
+    setSaving(true);
+    const failed = await onSave(selected.id, draft);
+    setSaving(false);
+    // A refused key stays in the field so it can be corrected instead of pasted again.
+    if (failed) setError({ what: "The key wasn't saved", message: failed });
+    else setDraft("");
+  };
+
+  const choose = async (id: string, name: string) => {
+    setError(null);
     setDraft("");
+    const failed = await onSave(id);
+    if (failed) setError({ what: `Couldn't switch to ${name}`, message: failed });
   };
 
   return (
@@ -60,10 +76,7 @@ export function ModelPicker({
                   p.id === models.selected ? "border-foreground text-foreground" : "border-rule-strong text-foreground hover:border-foreground"
                 } ${disabled ? "opacity-50" : ""}`}
                 disabled={disabled || p.id === models.selected}
-                onClick={() => {
-                  setDraft("");
-                  void onSave(p.id);
-                }}
+                onClick={() => void choose(p.id, p.name)}
               >
                 <Image src={`/models/${p.id}.svg`} alt="" width={14} height={14} unoptimized style={MONO_MARK} />
                 {p.name}
@@ -98,10 +111,11 @@ export function ModelPicker({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <button className={BTN_PRIMARY} disabled={disabled || !draft.trim()}>
-              Save key
+            <button className={BTN_PRIMARY} disabled={disabled || saving || !draft.trim()}>
+              {saving ? "Saving…" : "Save key"}
             </button>
           </form>
+          <ActionError what={error?.what ?? ""} message={error?.message ?? null} onDismiss={() => setError(null)} />
           <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={() => setOpen(false)}>
             Close
           </button>

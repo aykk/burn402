@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
+import { ActionError, type Post } from "./ActionError";
 import { AttemptLedger } from "./AttemptLedger";
 import { money } from "./format";
 import { BTN } from "./ui";
@@ -8,7 +10,9 @@ import { BTN } from "./ui";
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const period = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
 
-export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path: string, body?: unknown) => Promise<void> }) {
+export function StressTest({ snap, post }: { snap: Snapshot | null; post: Post }) {
+  // A refused start (the server says no before any attempt runs); failures during the test arrive as stress.error.
+  const [startError, setStartError] = useState<string | null>(null);
   const stress = snap?.stress;
   const target = stress?.target;
   // Only the second agent's attempts count (blocked is set); the auditor and trust-index steps respond to them.
@@ -25,9 +29,17 @@ export function StressTest({ snap, post }: { snap: Snapshot | null; post: (path:
         </p>
       </div>
       {/* Secondary: Start run stays the only filled button in the view. */}
-      <button className={BTN} disabled={stress?.status === "running" || snap?.busy} onClick={() => post("/api/demo/stress")}>
+      <button
+        className={BTN}
+        disabled={stress?.status === "running" || snap?.busy}
+        onClick={async () => {
+          setStartError(null);
+          setStartError(await post("/api/demo/stress"));
+        }}
+      >
         {stress?.status === "running" ? "Trying…" : "Try to overspend"}
       </button>
+      <ActionError what="The limit test didn't start" message={startError} onDismiss={() => setStartError(null)} />
       {stress?.error && <div className="text-bad">{period(sentence(stress.error))}</div>}
       {stress && stress.attempts.length > 0 && (
         <div className="space-y-3">

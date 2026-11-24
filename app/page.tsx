@@ -9,10 +9,14 @@ import { JobForm, type JobDraft } from "@/app/components/JobForm";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import { ModelPicker } from "@/app/components/ModelPicker";
 import { RunPanel } from "@/app/components/RunPanel";
+import { ActionError, UNREACHABLE, type Post } from "@/app/components/ActionError";
 
 export default function Page() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Only the 1.5s state poll writes this: it means the page has lost the server. Action failures live
+  // next to their controls instead, so the next good poll cannot wipe them.
+  const [error, setError] = useState<{ message: string; unreachable: boolean } | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [draft, setDraft] = useState<JobDraft>({ budgetUsd: 5, rateUsdHr: 1.25 });
   const [resetSignal, setResetSignal] = useState(0);
@@ -22,15 +26,21 @@ export default function Page() {
   const [tick, setTick] = useState(0);
 
   const load = useCallback(async () => {
+    let res: Response;
     try {
-      const res = await fetch("/api/demo/state", { cache: "no-store" });
+      res = await fetch("/api/demo/state", { cache: "no-store" });
+    } catch (e) {
+      setError({ message: (e as Error).message, unreachable: true });
+      return;
+    }
+    try {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       if (typeof body.now === "number") clockOffset.current = body.now - Date.now() / 1000;
       setSnap(body);
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError({ message: (e as Error).message, unreachable: false });
     }
   }, []);
 
@@ -55,19 +65,21 @@ export default function Page() {
       .catch(() => {});
   }, [job?.modelReady, job?.id, models]);
 
-  const post = async (path: string, body?: unknown) => {
+  const post: Post = async (path, body) => {
+    let res: Response;
     try {
-      const res = await fetch(path, {
+      res = await fetch(path, {
         method: "POST",
         headers: body ? { "Content-Type": "application/json" } : undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
+    } catch {
+      return UNREACHABLE;
     }
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) return json.error ?? `The server answered HTTP ${res.status}`;
+    await load();
+    return null;
   };
 
   const running = job !== null && !["done", "failed"].includes(job.phase);
@@ -95,8 +107,11 @@ export default function Page() {
           className="ml-4 text-muted underline decoration-1 underline-offset-[3px] hover:text-foreground"
           title="Forget this session: destroys any running server, clears the jobs and the log"
           onClick={async () => {
-            await post("/api/demo/reset");
-            setResetSignal((k) => k + 1);
+            setResetError(null);
+            const failed = await post("/api/demo/reset");
+            // A refused reset keeps the form as it was, so it still matches what the server holds.
+            if (failed) setResetError(failed);
+            else setResetSignal((k) => k + 1);
           }}
         >
           Reset
@@ -113,7 +128,19 @@ export default function Page() {
         />
       </div>
 
-      {error && <div className="mt-4 shrink-0 text-bad">Can&apos;t reach the demo server ({error}). Start it with: npm run dev</div>}
+      {resetError && (
+        <div className="mt-4 shrink-0">
+          <ActionError what="Reset didn't finish" message={resetError} onDismiss={() => setResetError(null)} />
+        </div>
+      )}
+
+      {error && (
+        <div role="status" className="mt-4 shrink-0 text-bad">
+          {error.unreachable
+            ? `Can't reach the demo server (${error.message}). Start it with: npm run dev`
+            : `The demo server couldn't report its state (${error.message}). Check the terminal running npm run dev.`}
+        </div>
+      )}
 
       {/* The run column is wide while there is a current job (live, finished or failed) so the plan
           table fits; it gives the space back to the form after Reset. A finished job leaves the form
