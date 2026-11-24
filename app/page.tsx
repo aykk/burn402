@@ -10,6 +10,7 @@ import { LogDrawer } from "@/app/components/LogDrawer";
 import { ModelPicker } from "@/app/components/ModelPicker";
 import { RunPanel } from "@/app/components/RunPanel";
 import { ActionError, UNREACHABLE, type Post } from "@/app/components/ActionError";
+import { runAnnouncement, runMark, type RunMark } from "@/app/components/announce";
 
 export default function Page() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -18,6 +19,7 @@ export default function Page() {
   const [error, setError] = useState<{ message: string; unreachable: boolean } | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const logButton = useRef<HTMLButtonElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<JobDraft>({ budgetUsd: 5, rateUsdHr: 1.25 });
   const [resetSignal, setResetSignal] = useState(0);
@@ -56,6 +58,17 @@ export default function Page() {
 
   const job = snap?.job ?? null;
 
+  // Run milestones for screen readers (stage, payment, done, failed), never the per-second drain.
+  // `undefined` until the first snapshot, so loading the page on an old run is a silent baseline.
+  const lastMark = useRef<RunMark | null | undefined>(undefined);
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    if (!snap) return;
+    const said = runAnnouncement(lastMark.current, job);
+    lastMark.current = job ? runMark(job) : null;
+    if (said) setAnnouncement(said);
+  }, [snap, job]);
+
   useEffect(() => {
     if (!job?.modelReady || models[job.id]) return;
     void fetch(`/api/demo/trained?job=${job.id}`)
@@ -83,6 +96,8 @@ export default function Page() {
     return null;
   };
 
+  const closeDrawer = useCallback(() => setDrawer(false), []);
+
   const running = job !== null && !["done", "failed"].includes(job.phase);
   const current = job && models[job.id] ? models[job.id] : null;
   const previous = snap?.previous ?? null;
@@ -108,7 +123,13 @@ export default function Page() {
             onSave={(provider, key) => post("/api/demo/model", { provider, key })}
           />
         )}
-        <button className="underline decoration-1 underline-offset-[3px] hover:decoration-2" onClick={() => setDrawer(true)}>
+        <button
+          ref={logButton}
+          className="underline decoration-1 underline-offset-[3px] hover:decoration-2"
+          aria-haspopup="dialog"
+          aria-expanded={drawer}
+          onClick={() => setDrawer(true)}
+        >
           Log
         </button>
         {/* Reset is destructive, so it sits 40px from Log instead of 24. */}
@@ -194,7 +215,11 @@ export default function Page() {
         </div>
       </section>
 
-      <LogDrawer open={drawer} onClose={() => setDrawer(false)} log={snap?.log ?? []} />
+      <LogDrawer open={drawer} onClose={closeDrawer} log={snap?.log ?? []} returnFocus={logButton} />
+
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </p>
     </main>
   );
 }

@@ -271,7 +271,8 @@ export function Timeline({ job, result }: { job: TrainingRunView; model: Trained
         </p>
         {failedAt !== null && (
           <div className="mt-3 space-y-1">
-            <p role="alert" className="max-w-[64ch] text-bad">
+            {/* The page's live region announces the failure once; an alert here would say it twice. */}
+            <p className="max-w-[64ch] text-bad">
               {job.error?.trim() || "The run failed."}
             </p>
             <p className="max-w-[64ch] text-foreground">

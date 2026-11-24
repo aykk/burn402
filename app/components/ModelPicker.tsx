@@ -24,6 +24,8 @@ export function ModelPicker({
   onOpenChange: (open: boolean) => void;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLSpanElement>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   // What failed and why: saving a key or switching model. Shown inside the panel until dismissed or retried.
@@ -36,6 +38,24 @@ export function ModelPicker({
   useEffect(() => {
     if (open && missingKey) keyRef.current?.focus();
   }, [open, missingKey]);
+
+  // Closing from inside the panel hands focus back to the button that opened it.
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  // Esc closes the panel (and returns focus) unless a tooltip or other layer already took it.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      setOpen(false);
+      if (panelRef.current?.contains(document.activeElement) || document.activeElement === document.body) triggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, setOpen]);
 
   const save = async () => {
     setError(null);
@@ -57,8 +77,11 @@ export function ModelPicker({
   return (
     <span className="relative flex items-center gap-3">
       <button
+        ref={triggerRef}
         className="flex h-8 items-center gap-2 rounded-[3px] border border-rule-strong px-3 text-foreground hover:border-foreground"
         aria-expanded={open}
+        aria-controls="model-picker"
+        aria-label={`Agent model: ${selected.modelName}`}
         onClick={() => setOpen(!open)}
       >
         <Image src={`/models/${selected.id}.svg`} alt="" width={14} height={14} unoptimized style={MONO_MARK} />
@@ -71,7 +94,12 @@ export function ModelPicker({
       )}
 
       {open && (
-        <span className="absolute top-10 right-0 z-20 block w-[min(380px,calc(100vw-32px))] space-y-4 rounded-[3px] border border-rule-strong bg-surface p-4">
+        <span
+          ref={panelRef}
+          id="model-picker"
+          role="group"
+          aria-label="Agent model"
+          className="absolute top-10 right-0 z-20 block w-[min(380px,calc(100vw-32px))] space-y-4 rounded-[3px] border border-rule-strong bg-surface p-4">
           <span className="block space-y-1">
             <span className="block text-[16px] leading-[22px] font-semibold">Agent model</span>
             <span className="block text-muted">
@@ -118,6 +146,7 @@ export function ModelPicker({
               ref={keyRef}
               type="password"
               autoComplete="off"
+              aria-label={`${selected.name} API key`}
               className={`${INPUT} flex-1`}
               placeholder={selected.key ? "Paste a different key to replace it" : `Paste your ${selected.name} API key`}
               value={draft}
@@ -128,7 +157,7 @@ export function ModelPicker({
             </button>
           </form>
           <ActionError what={error?.what ?? ""} message={error?.message ?? null} onDismiss={() => setError(null)} />
-          <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={() => setOpen(false)}>
+          <button className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={close}>
             Close
           </button>
         </span>
