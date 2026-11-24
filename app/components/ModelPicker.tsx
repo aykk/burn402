@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import { ActionError } from "./ActionError";
 import { BTN_PRIMARY, INPUT, MONO, TEXT_BTN } from "./ui";
@@ -13,18 +13,29 @@ export function ModelPicker({
   models,
   disabled,
   onSave,
+  open,
+  onOpenChange: setOpen,
 }: {
   models: Snapshot["models"];
   disabled: boolean;
   onSave: (provider: string, key?: string) => Promise<string | null>;
+  /** Owned by the page so a blocked Start run can open the picker too. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const keyRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   // What failed and why: saving a key or switching model. Shown inside the panel until dismissed or retried.
   const [error, setError] = useState<{ what: string; message: string } | null>(null);
   const selected = models.providers.find((p) => p.id === models.selected)!;
   const missingKey = !selected.key;
+
+  // Opened without a key (from Add key or from the Start run hint), the cursor goes straight to the
+  // key field; focusing it also scrolls the panel into view when the page is scrolled down.
+  useEffect(() => {
+    if (open && missingKey) keyRef.current?.focus();
+  }, [open, missingKey]);
 
   const save = async () => {
     setError(null);
@@ -104,6 +115,7 @@ export function ModelPicker({
             }}
           >
             <input
+              ref={keyRef}
               type="password"
               autoComplete="off"
               className={`${INPUT} flex-1`}

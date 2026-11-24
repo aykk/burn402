@@ -128,7 +128,7 @@ export function BudgetMeter(props: {
     const amount = usd4(v.remainingUsd);
     return (
       <section aria-label="Budget meter" className="rounded-[6px] bg-surface px-5 py-5 sm:px-7 sm:py-6">
-        <p className="text-[13.5px] leading-5 font-medium text-foreground">{who} has left</p>
+        <p className="text-[13.5px] leading-5 font-medium text-foreground">Budget left for {props.agentName?.trim() || "your agent"}</p>
         <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
           <p className="flex flex-wrap items-baseline gap-x-3">
             <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] tabular-nums text-foreground" style={CONDENSED}>
