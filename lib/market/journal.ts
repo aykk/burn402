@@ -39,7 +39,14 @@ export class Journal {
 
   append(entry: JournalEntry): void {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.appendFileSync(this.file, JSON.stringify(entry) + "\n", { mode: 0o600 });
+    // Leading newline: a previous write cut off mid-line must not swallow this entry (all() skips blank lines).
+    const fd = fs.openSync(this.file, "a", 0o600);
+    try {
+      fs.writeSync(fd, "\n" + JSON.stringify(entry) + "\n");
+      fs.fsyncSync(fd); // an intent must survive a power loss
+    } finally {
+      fs.closeSync(fd);
+    }
   }
 
   all(): JournalEntry[] {
