@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./guard";
 import { Journal } from "./journal";
-import { MarketRun, type MarketRunDeps, type PurchaseRecord } from "./run";
+import { MarketRun, probeable, type MarketRunDeps, type PurchaseRecord } from "./run";
 import { SELLERS, SellerClient, type SellerConfig } from "./seller";
 import { newSshKey } from "./sshkey";
 import { FakeProcessor, fakePayer, inProcess } from "./testing";
@@ -503,7 +503,7 @@ describe("MarketRun seller-supplied IP", () => {
   }
 
   it("still probes public addresses next to the private ranges", async () => {
-    for (const ip of ["172.32.0.1", "11.0.0.1", "2001:db8::7"]) {
+    for (const ip of ["172.32.0.1", "11.0.0.1", "2606:4700:4700::1111"]) {
       const probePort = vi.fn(async () => false);
       const { run } = setup({ wrap: rewriteIp(ip), probePort });
       await run.start();
@@ -515,14 +515,47 @@ describe("MarketRun seller-supplied IP", () => {
 
   it("probes a valid routable IP and puts it in the ssh line", async () => {
     const probePort = vi.fn(async () => true);
-    const { run } = setup({ wrap: rewriteIp("198.51.100.7"), probePort });
+    const { run } = setup({ wrap: rewriteIp("8.8.8.8"), probePort });
     await run.start();
     const v = run.view();
     expect(v.phase).toBe("ready");
-    expect(probePort).toHaveBeenCalledWith("198.51.100.7");
-    expect(v.machine).toMatchObject({ ip: "198.51.100.7", port22: "open" });
-    expect(v.machine?.ssh).toMatch(/ root@198\.51\.100\.7$/);
+    expect(probePort).toHaveBeenCalledWith("8.8.8.8");
+    expect(v.machine).toMatchObject({ ip: "8.8.8.8", port22: "open" });
+    expect(v.machine?.ssh).toMatch(/ root@8\.8\.8\.8$/);
   });
+});
+
+describe("probeable", () => {
+  const notPublic: [string, string][] = [
+    ["100.64.0.1", "shared address space (CGNAT) 100.64.0.0/10"],
+    ["100.127.255.254", "top of 100.64.0.0/10"],
+    ["192.0.0.8", "IETF protocol assignments 192.0.0.0/24"],
+    ["192.0.2.10", "TEST-NET-1 192.0.2.0/24"],
+    ["198.18.0.1", "benchmarking 198.18.0.0/15"],
+    ["198.19.255.1", "top of 198.18.0.0/15"],
+    ["198.51.100.7", "TEST-NET-2 198.51.100.0/24"],
+    ["203.0.113.9", "TEST-NET-3 203.0.113.0/24"],
+    ["224.0.0.251", "multicast 224.0.0.0/4"],
+    ["239.255.255.250", "multicast 224.0.0.0/4"],
+    ["240.0.0.1", "reserved 240.0.0.0/4"],
+    ["255.255.255.255", "broadcast, in 240.0.0.0/4"],
+    ["64:ff9b::a00:1", "NAT64 64:ff9b::/96"],
+    ["2002:a00:1::1", "6to4 2002::/16"],
+    ["2001:db8::7", "documentation 2001:db8::/32"],
+    ["::a00:1", "IPv4-compatible ::/96"],
+    ["ff02::1", "multicast ff00::/8"],
+    ["::ffff:100.64.0.1", "IPv4-mapped CGNAT"],
+    ["::ffff:192.168.1.1", "IPv4-mapped private"],
+    ["::ffff:7f00:1", "IPv4-mapped loopback, hex spelling"],
+    ["0:0:0:0:0:ffff:a00:1", "IPv4-mapped private, long spelling"],
+    ["fe80::1%en0", "link-local with a zone id"],
+  ];
+  for (const [ip, why] of notPublic) {
+    it(`does not probe ${ip} (${why})`, () => expect(probeable(ip)).toBe(false));
+  }
+  for (const ip of ["8.8.8.8", "1.1.1.1", "100.128.0.1", "198.20.0.1", "223.255.255.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
+    it(`probes the public address ${ip}`, () => expect(probeable(ip)).toBe(true));
+  }
 });
 
 describe("MarketRun destroy", () => {

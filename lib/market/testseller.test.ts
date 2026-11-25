@@ -218,6 +218,32 @@ describe("TestSeller faults", () => {
     expect(list).toHaveLength(1);
     expect(list[0].plan).toBe("vc2-1c-1gb");
   });
+
+  it("settleThenReject keeps the money, builds nothing and answers 402 with a fresh requirement", async () => {
+    const { client, seller, pay, processor, payer } = setup(0);
+    seller.faults = { ...NO_FAULTS, settleThenReject: true };
+    const q = await client.quote(await candidate(client), "ewr", opts);
+    const out = await client.provision(q, pay);
+    expect(out).toMatchObject({ kind: "not_charged", code: "PAYMENT_REJECTED" });
+    expect(pay).toHaveBeenCalledTimes(1);
+    expect(processor.settled).toBe(1);
+    expect(seller.machines.size).toBe(0);
+    expect(seller.settlements).toEqual([{ at: T0, usd: Number(q.atomic) / 1e6, payer: payer.address, plan: "vc2-1c-1gb", region: "ewr" }]);
+    // the raw answer carries a new PAYMENT-REQUIRED header, as a real rejection would
+    const signed = (await pay.mock.results[0].value) as Record<string, string>;
+    const raw = await seller.handle(post(q.body, signed));
+    expect(raw.status).toBe(402);
+    expect(raw.headers.get("PAYMENT-REQUIRED")).toBeTruthy();
+    expect(seller.settlements).toHaveLength(2);
+  });
+
+  it("records every settle in the ledger, whatever the answer", async () => {
+    const { client, seller, pay } = setup();
+    seller.faults = { ...NO_FAULTS, settlementPending409: true };
+    await client.provision(await client.quote(await candidate(client), "ewr", opts), pay);
+    expect(seller.settlements).toHaveLength(1);
+    expect(seller.machines.size).toBe(1);
+  });
 });
 
 describe("TestSeller machine management", () => {
