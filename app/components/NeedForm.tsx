@@ -141,10 +141,12 @@ export function NeedForm(props: {
   onStart: (body: RunBody) => Promise<string | null>;
   /** Reads market prices for this need; starts no run. Resolves to the failure, or null. */
   onCompare: (body: CompareBody) => Promise<string | null>;
+  /** Bumped when the comparison is closed: focus goes to Compare prices once it is enabled, else to the heading. */
+  compareClosed?: number;
   /** Opens the model picker in the header, where the key is added. */
   onAddKey: () => void;
 }) {
-  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, onAddKey } = props;
+  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, onAddKey, compareClosed = 0 } = props;
   const [market, setMarket] = useState<MarketId>("test");
   const [kind, setKind] = useState<"cpu" | "gpu">("cpu");
   const [vcpus, setVcpus] = useState(1);
@@ -164,6 +166,19 @@ export function NeedForm(props: {
   const [startError, setStartError] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
+
+  // After Close: focus waits for Compare prices to be enabled again (its request is cancelled at once); when the
+  // form blocks it for another reason, focus goes to the form's heading instead, never to the page.
+  const compareButton = useRef<HTMLButtonElement>(null);
+  const formHeading = useRef<HTMLHeadingElement>(null);
+  const focusAfterClose = useRef(compareClosed);
+  useEffect(() => {
+    if (focusAfterClose.current === compareClosed || comparing) return;
+    focusAfterClose.current = compareClosed;
+    const button = compareButton.current;
+    if (button && !button.disabled) button.focus();
+    else formHeading.current?.focus();
+  });
 
   // Page Reset clears what was typed into the description and any errors; the fields keep their values.
   const lastReset = useRef(resetSignal);
@@ -305,7 +320,9 @@ export function NeedForm(props: {
 
   return (
     <div className="@container space-y-5">
-      <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">What you need</h2>
+      <h2 ref={formHeading} tabIndex={-1} className="text-[16px] leading-[22px] font-semibold text-foreground focus:outline-none">
+        What you need
+      </h2>
 
       <div className="space-y-1.5">
         <Label help="describe" htmlFor="describe-input">
@@ -419,7 +436,7 @@ export function NeedForm(props: {
             {starting ? "Starting…" : "Find and rent"}
           </button>
           {/* Reads prices only: starts no run and spends nothing. */}
-          <button id="compare-button" type="button" className={BTN} disabled={blocked || comparing} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void compare()}>
+          <button ref={compareButton} id="compare-button" type="button" className={BTN} disabled={blocked || comparing} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void compare()}>
             {comparing ? "Comparing…" : "Compare prices"}
           </button>
           {reason && (

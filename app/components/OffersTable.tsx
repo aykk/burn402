@@ -16,7 +16,9 @@ const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote 
  * one line counting what was left out and why. "Show all" opens every plan, left-out ones included, in
  * the same table. Columns follow the width the table actually has (a container query), so the firm quote
  * and the status are always in view without scrolling: under 30rem the status sits under the plan name,
- * Provider and List price join from 37rem, Size from 43rem.
+ * Provider and the monthly list price join from 37rem, Size from 43rem. The list price here is the seller's
+ * figure (the provider's monthly price ÷ 720 hours), so it can differ by a few hundredths of a cent from the hourly
+ * price the provider publishes, which Market prices shows; the header and its title say which is which.
  */
 export function OffersTable({ run }: { run: MarketRunView }) {
   const [all, setAll] = useState(false);
@@ -68,7 +70,12 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 <th className={`${PAD} pl-2.5 font-medium`}>Plan</th>
                 <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Provider</th>
                 <th className={`hidden ${PAD} font-medium @min-[43rem]:table-cell`}>Size</th>
-                <th className={`hidden ${PAD} text-right font-medium @min-[37rem]:table-cell`}>List price/h</th>
+                <th
+                  className={`hidden ${PAD} text-right font-medium @min-[37rem]:table-cell`}
+                  title="The seller's figure: the provider's monthly price divided by 720 hours. Market prices shows the hourly price the provider publishes."
+                >
+                  Monthly list/h
+                </th>
                 <th className={`${PAD} text-right font-medium`}>Seller price/h</th>
                 <th className={`${PAD} text-right font-medium`}>Firm quote</th>
                 <th className="hidden py-2 font-medium @min-[30rem]:table-cell">

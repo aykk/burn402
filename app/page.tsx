@@ -36,10 +36,14 @@ export default function Page() {
   // Server clock minus client clock (ms), refreshed on every poll, so the meter ticks in server time.
   const clockOffset = useRef(0);
   const [tick, setTick] = useState(0);
-  // Prices compared from the form without a run: shown in the right column until closed, a run starts, or Reset.
+  // Prices compared from the form without a run: shown in the right column (in place of an ended run's body)
+  // until closed, a run starts, or Reset.
   const [compare, setCompare] = useState<(CompareBody & { seq: number; prices: PriceComparison | null }) | null>(null);
-  // Only the latest comparison may land; a closed or replaced one is dropped.
+  // Only the latest comparison may land; a closed or replaced one is dropped and its request cancelled.
   const compareSeq = useRef(0);
+  const compareAbort = useRef<AbortController | null>(null);
+  // Bumped when the comparison is closed: the form moves focus to Compare prices once it is enabled again.
+  const [compareClosed, setCompareClosed] = useState(0);
 
   const load = useCallback(async () => {
     let res: Response;
@@ -113,9 +117,12 @@ export default function Page() {
   /** Reads market prices for a need. Starts no run, quotes nothing, pays nothing. */
   const comparePrices = async (body: CompareBody): Promise<string | null> => {
     const seq = ++compareSeq.current;
+    compareAbort.current?.abort();
+    const abort = new AbortController();
+    compareAbort.current = abort;
     setCompare({ ...body, seq, prices: null });
     try {
-      const res = await fetch("/api/market/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch("/api/market/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.signal });
       const json = (await res.json()) as { prices?: PriceComparison; error?: string };
       if (!res.ok || !json.prices) throw new Error(json.error ?? `The server answered HTTP ${res.status}`);
       if (seq === compareSeq.current) setCompare({ ...body, seq, prices: json.prices });
@@ -126,10 +133,21 @@ export default function Page() {
       return failureMessage(e);
     }
   };
-  const closeCompare = () => {
+  /** Drops the comparison and cancels its request, so the Compare button is enabled again at once. */
+  const dropCompare = () => {
     compareSeq.current++;
+    compareAbort.current?.abort();
+    compareAbort.current = null;
     setCompare(null);
-    document.getElementById("compare-button")?.focus();
+  };
+  const closeCompare = () => {
+    dropCompare();
+    setCompareClosed((k) => k + 1);
+  };
+  /** Over an ended run: back to that run, with focus on its heading. */
+  const backToRun = () => {
+    dropCompare();
+    setStartSignal((k) => k + 1);
   };
 
   const running = run !== null && !ENDED.has(run.phase);
@@ -174,8 +192,7 @@ export default function Page() {
             if (failed) setResetError(failed);
             else {
               setResetSignal((k) => k + 1);
-              compareSeq.current++;
-              setCompare(null);
+              dropCompare();
             }
           }}
         >
@@ -240,12 +257,12 @@ export default function Page() {
               const failed = await post("/api/market/run", body);
               if (!failed) {
                 setStartSignal((k) => k + 1);
-                compareSeq.current++;
-                setCompare(null);
+                dropCompare();
               }
               return failed;
             }}
             onCompare={comparePrices}
+            compareClosed={compareClosed}
             onAddKey={() => setPickerOpen(true)}
           />
         </div>
@@ -263,7 +280,7 @@ export default function Page() {
             walletReady={snap?.walletReady ?? { test: false, real: false }}
             post={post}
             send={send}
-            idle={
+            compare={
               compare && (
                 <MarketPrices
                   key={compare.seq}
@@ -271,6 +288,7 @@ export default function Page() {
                   loading={compare.prices === null}
                   heading="h2"
                   onClose={closeCompare}
+                  onBack={run && ENDED.has(run.phase) ? backToRun : undefined}
                   intro={`For ${needText(compare.need)}, ${hoursText(compare.need.hours)}, on the ${MARKET_NAME[compare.market].toLowerCase()}.`}
                   outro="Nothing was rented or paid."
                 />

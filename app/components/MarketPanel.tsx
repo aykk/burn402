@@ -6,7 +6,7 @@ import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
 import { MachinePanel, type Send } from "./MachinePanel";
 import { MarketPrices } from "./MarketPrices";
-import { PHASE_HEADING, endState, fallbackLine, sentence } from "./market-copy";
+import { PHASE_HEADING, endState, fallbackLine, panelBody, sentence } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
 import { TEXT_BTN } from "./ui";
@@ -82,10 +82,7 @@ function StageRow({ run }: { run: MarketRunView | null }) {
 
 const BEFORE_PAYING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "quoting"]);
 const ENDED = new Set<MarketRunView["phase"]>(["released", "failed", "refused"]);
-/**
- * Phases in which market prices may still be on their way (the run fills them a moment after it has
- * ranked plans) and the approval bar can sit under them: the block keeps its place and height here.
- */
+/** Phases in which market prices may still be on their way (the run fills them a moment after it has ranked plans). */
 const PRICES_PENDING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "quoting", "approval"]);
 /** Refusals whose detail only repeats the end sentence above it. */
 const SAID_ALREADY = new Set(["CANCELLED", "STOPPED", "NOTHING_FITS"]);
@@ -105,7 +102,7 @@ export function MarketPanel({
   walletReady,
   post,
   send,
-  idle,
+  compare,
 }: {
   run: MarketRunView | null;
   nowMs: number;
@@ -116,8 +113,11 @@ export function MarketPanel({
   walletReady: { test: boolean; real: boolean };
   post: Post;
   send: Send;
-  /** Shown in place of the intro while there is no run (the prices compared from the form). */
-  idle?: ReactNode;
+  /**
+   * The prices compared from the form, when open: shown in place of the intro while there is no run, and
+   * in place of an ended run's body (that block carries "Back to the last run"). Never over a run in flight.
+   */
+  compare?: ReactNode;
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -145,8 +145,9 @@ export function MarketPanel({
     }
   });
 
+  const body = panelBody(run, !!compare);
+  if (body === "compare") return <div className="space-y-6">{compare}</div>;
   if (!run) {
-    if (idle) return <div className="space-y-6">{idle}</div>;
     return (
       <div className="space-y-6">
         <StageRow run={null} />
@@ -166,6 +167,16 @@ export function MarketPanel({
     setStopping(false);
   };
   const heading = ended ? ended.title : PHASE_HEADING[run.phase];
+  // Once the money is out, the table is history: the lead line stays and the table opens on request.
+  const prices = (
+    <MarketPrices
+      key={run.id}
+      prices={run.prices}
+      loading={run.prices === null && PRICES_PENDING.has(run.phase)}
+      heading="h3"
+      foldable={run.payment !== null}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -215,17 +226,13 @@ export function MarketPanel({
 
       <OffersTable run={run} />
 
-      {/* The wider market before the approval stop. Before paying it holds its place and height while the prices
-          are read, so the Pay button below never moves when they land. */}
-      <MarketPrices
-        key={run.id}
-        prices={run.prices}
-        loading={run.prices === null && PRICES_PENDING.has(run.phase)}
-        heading="h3"
-        reserve={PRICES_PENDING.has(run.phase) ? run.need.kind : null}
-      />
+      {/* The wider market: between the plan table and the next block, except at the approval stop, where it sits
+          under Pay and Cancel so nothing above the Pay button can grow when the prices land. */}
+      {run.phase !== "approval" && prices}
 
       {run.phase === "approval" && <ApprovalBar run={run} walletReady={walletReady[run.market]} post={post} onFocusNext={setFocusNext} />}
+
+      {run.phase === "approval" && prices}
 
       {run.phase === "paying" && !run.payment && run.approval && (
         <p className="border-l-2 border-foreground pl-3 text-foreground tabular-nums">
