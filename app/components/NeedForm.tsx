@@ -25,7 +25,8 @@ export type RunBody = {
 };
 
 /** What "Compare prices" sends: the same market and need a run would use. */
-export type CompareBody = { market: MarketId; need: Need };
+/** The limits go along so the comparison shows the plan a run with these limits would actually pick. */
+export type CompareBody = { market: MarketId; need: Need; budgetUsd: number; rateUsdHr: number };
 
 const START =
   "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-foreground bg-foreground px-5 text-[13.5px] leading-5 font-semibold text-surface enabled:hover:bg-[#2B3644] disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
@@ -267,7 +268,7 @@ export function NeedForm(props: {
   const compare = async () => {
     setCompareError(null);
     setComparing(true);
-    setCompareError(await onCompare({ market, need }));
+    setCompareError(await onCompare({ market, need, budgetUsd: budget, rateUsdHr: rate }));
     setComparing(false);
   };
 
