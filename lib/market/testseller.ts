@@ -15,11 +15,13 @@ export const NO_FAULTS: Faults = { outOfStockRegions: [], quoteBumpPct: 0, wrong
 export type Machine = { id: string; owner: string; plan: string; region: string; ip: string; createdAt: number; expiresAt: number; destroyed: boolean };
 
 type Obj = Record<string, unknown>;
+type Settled = { machineId: string; tx: string };
 type Plan = { id: string; provider: string; our_hourly: number; locations?: string[] | null; is_gpu?: boolean; gpu_type?: string | null; gpu_vram_gb?: number | null };
 
 const WRONG_ASSET = "So11111111111111111111111111111111111111112";
 const MAX_SKEW_MS = 300_000;
 const LOCAL_HOST = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
+const LOCAL_ORIGINS = new Set(["http://127.0.0.1:3000", "http://localhost:3000"]);
 
 const PLANS = plansFeed.plans as Plan[];
 const RULES = plansFeed.hourly;
@@ -48,7 +50,7 @@ function parseFaults(raw: unknown): Partial<Faults> | null {
       if (!Array.isArray(v) || !v.every((r) => typeof r === "string")) return null;
       out.outOfStockRegions = v;
     } else if (k === "quoteBumpPct") {
-      if (typeof v !== "number" || !Number.isFinite(v)) return null;
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100) return null;
       out.quoteBumpPct = v;
     } else if (k === "wrongAsset" || k === "fail5xxOnce" || k === "pending202" || k === "settlementPending409") {
       if (typeof v !== "boolean") return null;
@@ -72,8 +74,12 @@ export class TestSeller {
   private readonly quotes = new Map<string, number>();
   /** the requirement last advertised per request body; the paid request is checked against it */
   private readonly advertised = new Map<string, PaymentRequirements>();
-  /** settled payments by PAYMENT-SIGNATURE header */
-  private readonly paid = new Map<string, { machineId: string; tx: string }>();
+  /**
+   * Paid requests by PAYMENT-SIGNATURE header, registered before any await so a concurrent
+   * duplicate waits for the first instead of settling again. `result` is null when the first
+   * attempt did not settle (the entry is then removed so a resend can try again).
+   */
+  private readonly paid = new Map<string, { body: string; result: Promise<Settled | null> }>();
   private readonly nonces = new Map<string, number>();
   private counter = 0;
 
@@ -133,8 +139,15 @@ export class TestSeller {
   }
 
   private async setFaults(request: Request, url: URL): Promise<Response> {
+    if (process.env.NODE_ENV === "production") return json(404, { error: "not found" });
     const host = request.headers.get("host") ?? url.host;
     if (!LOCAL_HOST.test(host)) return json(403, { error: "fault control is local only" });
+    // a web page can send a simple cross-site POST; it always carries Origin and cannot send JSON without a preflight
+    const origin = request.headers.get("origin");
+    if (origin !== null && !LOCAL_ORIGINS.has(origin)) return json(403, { error: "fault control is local only" });
+    if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+      return json(415, { error: "Content-Type must be application/json" });
+    }
     let raw: unknown;
     try {
       raw = await request.json();
@@ -144,15 +157,23 @@ export class TestSeller {
     const partial = parseFaults(raw);
     if (!partial) return json(400, { error: "body must be a partial Faults object" });
     this.faults = { ...this.faults, ...partial };
+    this.quotes.clear();
     return json(200, this.faults);
   }
 
   private async provision(request: Request): Promise<Response> {
-    const text = await request.text();
-    const signature = request.headers.get("PAYMENT-SIGNATURE");
+    return this.provisionText(await request.text(), request.headers.get("PAYMENT-SIGNATURE"));
+  }
 
-    const done = signature ? this.paid.get(signature) : undefined;
-    if (done) return this.orderResponse(200, done.machineId, done.tx);
+  /** No await may sit between the replay check and registering the paid request below. */
+  private async provisionText(text: string, signature: string | null): Promise<Response> {
+    const prior = signature ? this.paid.get(signature) : undefined;
+    if (prior && signature) {
+      if (prior.body !== text) return json(402, { error: "payment was already used for a different request" });
+      const done = await prior.result;
+      if (done) return this.orderResponse(200, done.machineId, done.tx);
+      return this.provisionText(text, signature);
+    }
 
     let body: unknown;
     try {
@@ -173,7 +194,18 @@ export class TestSeller {
     if (this.faults.outOfStockRegions.includes(region)) return json(503, { error: `plan is out of stock in ${region}` });
 
     if (!signature) return this.quote(text, body, plan, region, hours, kind);
-    return this.settlePaid(text, signature, plan, region, hours, kind);
+
+    let finish!: (s: Settled | null) => void;
+    this.paid.set(signature, { body: text, result: new Promise((resolve) => (finish = resolve)) });
+    let settled: Settled | null = null;
+    try {
+      const out = await this.settlePaid(text, signature, plan, region, hours, kind);
+      settled = out.settled;
+      return out.response;
+    } finally {
+      if (!settled) this.paid.delete(signature);
+      finish(settled);
+    }
   }
 
   private priceUsd(plan: Plan, hours: number, kind: "gpu" | "machine"): number {
@@ -198,24 +230,32 @@ export class TestSeller {
     return json(402, { error: "payment required", quote_usd: quoteUsd }, { "PAYMENT-REQUIRED": header });
   }
 
-  private async settlePaid(text: string, signature: string, plan: Plan, region: string, hours: number, kind: "gpu" | "machine"): Promise<Response> {
+  private async settlePaid(
+    text: string,
+    signature: string,
+    plan: Plan,
+    region: string,
+    hours: number,
+    kind: "gpu" | "machine",
+  ): Promise<{ response: Response; settled: Settled | null }> {
+    const fail = (response: Response) => ({ response, settled: null });
     const requirements = this.advertised.get(text) ?? (await this.processor.requirements(this.priceUsd(plan, hours, kind)));
     let payload: PaymentPayload;
     try {
       payload = this.processor.decode(signature);
     } catch {
-      return json(402, { error: "payment header could not be decoded" });
+      return fail(json(402, { error: "payment header could not be decoded" }));
     }
     const verified = await this.processor.verify(payload, requirements);
-    if (!verified.ok) return json(402, { error: "payment rejected", reason: verified.reason });
+    if (!verified.ok) return fail(json(402, { error: "payment rejected", reason: verified.reason }));
 
     if (this.faults.fail5xxOnce) {
       this.faults = { ...this.faults, fail5xxOnce: false };
-      return json(503, { error: "temporary failure, nothing was charged" });
+      return fail(json(503, { error: "temporary failure, nothing was charged" }));
     }
 
     const settlement = await this.processor.settle(payload, requirements);
-    if (!settlement.ok) return json(402, { error: "settlement failed", reason: settlement.reason });
+    if (!settlement.ok) return fail(json(402, { error: "settlement failed", reason: settlement.reason }));
 
     const n = ++this.counter;
     const createdAt = this.now();
@@ -230,11 +270,11 @@ export class TestSeller {
       destroyed: false,
     };
     this.machines.set(machine.id, machine);
-    this.paid.set(signature, { machineId: machine.id, tx: settlement.tx });
+    const settled = { machineId: machine.id, tx: settlement.tx };
 
-    if (this.faults.settlementPending409) return json(409, { error: "settlement_pending", code: "settlement_pending" });
-    if (this.faults.pending202) return json(202, { pending: true, order: this.view(machine) });
-    return this.orderResponse(200, machine.id, settlement.tx);
+    if (this.faults.settlementPending409) return { response: json(409, { error: "settlement_pending", code: "settlement_pending" }), settled };
+    if (this.faults.pending202) return { response: json(202, { pending: true, order: this.view(machine) }), settled };
+    return { response: this.orderResponse(200, machine.id, settlement.tx), settled };
   }
 
   private orderResponse(status: number, machineId: string, tx: string): Response {
