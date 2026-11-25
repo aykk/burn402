@@ -48,6 +48,20 @@ describe("billedHours", () => {
   });
 });
 
+describe("billedHours without hourly rules", () => {
+  it("bills whole days", () => {
+    const off = { ...R, enabled: false };
+    expect(billedHours(need({ hours: 1 }), offer(), off)).toBe(24);
+    expect(billedHours(need({ hours: 25 }), offer(), off)).toBe(48);
+  });
+  it("bills 23.5 h as 24 h with no surcharge", () => {
+    const o = offer({ hourlyUsd: 0.01 });
+    const h = billedHours(need({ hours: 23.5 }), o, R);
+    expect(h).toBe(24);
+    expect(estimateUsd(o, h, R)).toBeCloseTo(0.24, 6);
+  });
+});
+
 describe("estimateUsd", () => {
   it("adds the machine surcharge below 24 hours", () => {
     expect(estimateUsd(offer({ hourlyUsd: 0.009027 }), 1, R)).toBeCloseTo(0.009027 * 1.15, 6);
@@ -136,6 +150,28 @@ describe("choose", () => {
     expect(reasonOf(rejected, low)).toBe("TOO_SMALL");
   });
 
+  it("never ranks on NaN or bad prices or limits", () => {
+    const ok = offer();
+    const nan = offer({ hourlyUsd: NaN });
+    const neg = offer({ hourlyUsd: -1 });
+    const zero = offer({ hourlyUsd: 0 });
+    const r = choose([ok, nan, neg, zero], need(), BIG, R);
+    expect(r.ranked.map((c) => c.offer)).toEqual([ok]);
+    for (const o of [nan, neg, zero]) expect(reasonOf(r.rejected, o)).toBe("OVER_BUDGET");
+    expect(choose([ok], need(), { budgetUsd: NaN, rateUsdHr: 5 }, R).ranked).toEqual([]);
+    expect(choose([ok], need(), { budgetUsd: 5, rateUsdHr: NaN }, R).ranked).toEqual([]);
+    expect(choose([ok], need({ hours: NaN }), BIG, R).ranked).toEqual([]);
+    expect(choose([ok], need({ hours: Infinity }), BIG, R).ranked).toEqual([]);
+  });
+
+  it("copies offer regions and dedupes the need's", () => {
+    const o = offer({ regions: ["ewr", "lax"] });
+    const c = choose([o], need(), BIG, R).ranked[0];
+    expect(c.regions).toEqual(["ewr", "lax"]);
+    expect(c.regions).not.toBe(o.regions);
+    expect(choose([o], need({ regions: ["lax", "lax", "ewr"] }), BIG, R).ranked[0].regions).toEqual(["lax", "ewr"]);
+  });
+
   it("handles spot offers", () => {
     const s = offer({ spot: true, rentable: false });
     const r = offer({ spot: true, rentable: true });
@@ -165,7 +201,7 @@ describe("choose", () => {
           vcpus: Math.floor(rnd() * 8),
           ramGb: Math.floor(rnd() * 16),
           vramGb: Math.floor(rnd() * 48),
-          hourlyUsd: rnd() * 2 + 0.001,
+          hourlyUsd: rnd() < 0.05 ? NaN : rnd() * 2 + 0.001,
           inStock: rnd() < 0.8,
           spot: rnd() < 0.2,
           rentable: rnd() < 0.8,
@@ -177,14 +213,15 @@ describe("choose", () => {
         vcpus: Math.floor(rnd() * 4),
         ramGb: Math.floor(rnd() * 8),
         vramGb: Math.floor(rnd() * 24),
-        hours: rnd() * 30,
+        hours: rnd() < 0.05 ? NaN : rnd() * 30,
         allowSpot: rnd() < 0.5,
         regions: rnd() < 0.5 ? [] : ["lax"],
       });
-      const lim = { budgetUsd: rnd() * 40, rateUsdHr: rnd() * 2 };
+      const lim = { budgetUsd: rnd() < 0.05 ? NaN : rnd() * 40, rateUsdHr: rnd() < 0.05 ? NaN : rnd() * 2 };
       const { ranked, rejected } = choose(offers, nd, lim, R);
       expect(ranked.length + rejected.length).toBe(offers.length);
       for (const c of ranked) {
+        expect(Number.isFinite(c.estimateUsd)).toBe(true);
         expect(c.estimateUsd).toBeLessThanOrEqual(lim.budgetUsd + 1e-9);
         expect(c.estimateUsd / c.hours).toBeLessThanOrEqual(lim.rateUsdHr + 1e-9);
       }

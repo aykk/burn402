@@ -42,8 +42,8 @@ function fits(offer: Offer, need: Need): boolean {
 }
 
 function regionsFor(offer: Offer, need: Need): string[] {
-  if (need.regions.length === 0) return offer.regions;
-  return need.regions.filter((r) => offer.regions.includes(r));
+  if (need.regions.length === 0) return [...offer.regions];
+  return [...new Set(need.regions)].filter((r) => offer.regions.includes(r));
 }
 
 export function choose(
@@ -63,10 +63,11 @@ export function choose(
     if (!offer.inStock) { reject("OUT_OF_STOCK"); continue; }
     const regions = regionsFor(offer, need);
     if (offer.regions.length === 0 || regions.length === 0) { reject("NO_REGION"); continue; }
+    if (!(Number.isFinite(offer.hourlyUsd) && offer.hourlyUsd > 0)) { reject("OVER_BUDGET"); continue; }
     const hours = billedHours(need, offer, rules);
     const est = estimateUsd(offer, hours, rules);
-    if (est / hours > limits.rateUsdHr + EPS) { reject("OVER_RATE"); continue; }
-    if (est > limits.budgetUsd + EPS) { reject("OVER_BUDGET"); continue; }
+    if (!(est / hours <= limits.rateUsdHr + EPS)) { reject("OVER_RATE"); continue; }
+    if (!(est <= limits.budgetUsd + EPS)) { reject("OVER_BUDGET"); continue; }
     ranked.push({ offer, regions, hours, estimateUsd: est });
   }
   ranked.sort((a, b) => {
