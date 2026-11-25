@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowanceWords, budgetShare, draftLimits, jobGauge, leadingZeros, meterView, shareText, walletReadout, type MeterJob } from "./meter-model";
+import { allowanceWords, budgetShare, draftLimits, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type MeterJob } from "./meter-model";
 
 const HOUR = 3_600_000;
 
@@ -140,6 +140,53 @@ describe("B1: money after a signed payment", () => {
     const v = meterView({ ...base, job: job({ phase: "paying", approval, spent: "maybe", payment: { ...kept, status: "unconfirmed" } }), nowMs: T0 + 5000 });
     expect(v.phase).toBe("paying");
     expect(jobGauge(v)).toMatchObject({ state: "sent", scaleUsd: 0.010382, fill: 1, secondsLeft: null });
+  });
+});
+
+describe("NB1: the headline amount is what was paid, never a drained figure", () => {
+  const kept = { usd: 0.010382, atomic: "10382", tx: "4ZmZ", at: T0, payer: "3Ybt", status: "confirmed" as const };
+  const paidRun = { approval: { ...approval, usd: 0.010382, atomic: "10382", exact: "$0.010382" }, payment: kept, paidAt: T0, spent: "paid" as const };
+  const gone = { id: "tsm-1", ip: null, status: "destroyed", expiresAt: null, destroyAt: T0 + HOUR, ssh: null, port22: "not checked" as const, plan: "vc2-1c-1gb", region: "ewr" };
+  const headlineOf = (over: Partial<MeterJob>, nowMs: number) => {
+    const v = meterView({ ...base, job: job(over), nowMs });
+    const g = jobGauge(v);
+    return { v, g, h: g ? meterHeadline(v, g, 1) : null };
+  };
+
+  it("released after an early destroy: spent on this rental is the paid amount, exactly", () => {
+    const { g, h } = headlineOf({ ...paidRun, phase: "released", machine: gone, releasedAt: T0 + 24_000 }, T0 + 60_000);
+    expect(g?.state).toBe("shut");
+    expect(h).toMatchObject({ label: "Spent on this rental", amount: "$0.010382", time: null, suffix: "machine destroyed" });
+  });
+  it("released after the full time: still the paid amount", () => {
+    const { h } = headlineOf({ ...paidRun, phase: "released", machine: gone, releasedAt: T0 + HOUR }, T0 + 2 * HOUR);
+    expect(h).toMatchObject({ label: "Spent on this rental", amount: "$0.010382" });
+  });
+  it("released with an unconfirmed payment: sent, not spent, and the sent amount", () => {
+    const { h } = headlineOf({ ...paidRun, spent: "maybe", payment: { ...kept, status: "unconfirmed" }, phase: "released", machine: gone, releasedAt: T0 + 24_000 }, T0 + 60_000);
+    expect(h).toMatchObject({ label: "Sent for this rental, not confirmed", amount: "$0.010382" });
+  });
+  it("a payment the seller kept (no machine): the meter's spent figure is the paid amount and the budget drops by it", () => {
+    const { v, g } = headlineOf({ ...paidRun, phase: "failed", error: "The seller took one payment of $0.010382 and did not deliver a machine." }, T0 + 5000);
+    expect(g).toBeNull();
+    expect(walletReadout(v)).toEqual({ label: "Spent", value: "$0.010382" });
+    expect(v.remainingUsd).toBeCloseTo(1 - 0.010382, 9);
+  });
+  it("failed after paying with the machine maybe still running: the paid amount, not what is left of it", () => {
+    const pending = { ...gone, status: "pending" };
+    const { g, h } = headlineOf({ ...paidRun, phase: "failed", error: "x", machine: pending }, T0 + HOUR / 2);
+    expect(g?.state).toBe("held");
+    expect(h).toMatchObject({ label: "Spent on this rental", amount: "$0.010382" });
+  });
+  it("NS2: at the approval stop and while paying, the quote is exact", () => {
+    const quoted = headlineOf({ phase: "approval", approval: paidRun.approval }, T0);
+    expect(quoted.h).toMatchObject({ label: "This rental will use", amount: "$0.010382", suffix: "quoted, not paid yet" });
+    const sent = headlineOf({ phase: "paying", approval: paidRun.approval, spent: "maybe", payment: { ...kept, status: "unconfirmed" } }, T0);
+    expect(sent.h).toMatchObject({ amount: "$0.010382", suffix: "sent, not confirmed yet" });
+  });
+  it("while the machine runs the headline is time left, never dollars", () => {
+    const { h } = headlineOf({ ...paidRun, phase: "ready", machine: { ...gone, status: "active" } }, T0 + HOUR / 2);
+    expect(h).toMatchObject({ label: "Prepaid time left", amount: null, time: "30m 00s", suffix: "of 1 hour" });
   });
 });
 

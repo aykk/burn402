@@ -27,6 +27,8 @@ describe("wording", () => {
     expect(hoursText(1.5)).toBe("1.5 hours");
     expect(hoursText(0.5)).toBe("30 minutes");
     expect(hoursText(1 / 60)).toBe("1 minute");
+    // NN4: a prepaid span a few seconds short of an hour still reads as 1 hour, not "60 minutes"
+    expect(hoursText(3598 / 3600)).toBe("1 hour");
   });
   it("time left switches to hours past an hour", () => {
     expect(timeLeft(45)).toBe("45s");
