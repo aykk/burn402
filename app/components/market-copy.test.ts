@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
 import type { PriceComparison } from "@/lib/market/prices/compare";
 import type { MarketPrice } from "@/lib/market/prices/types";
-import { approvalSentence, buyableWord, cheapestMarks, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalSentence, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -236,9 +236,12 @@ describe("market prices", () => {
     hourlyUsd: 0.089, spotHourlyUsd: 0.08, region: "Quebec, CA", note: null, url: "https://cloud.vast.ai/create/", ...over,
   });
   const comparison = (over: Partial<PriceComparison>): PriceComparison => ({
-    asOf, sources: [src("vultr"), src("vast"), src("runpod"), src("akash")], best: [], cheapestAnywhere: null, buyable: null, premiumPct: null, sentence: "s", basis: "b", ...over,
+    asOf, sources: [src("vultr"), src("vast"), src("runpod"), src("akash")], best: [], cheapestAnywhere: null, buyable: null, premiumPct: null, sameMachine: null, sellerUnreadable: false, buyingSpot: false, sentence: "s", basis: "b", ...over,
   });
-  const buyable = (over: Partial<NonNullable<PriceComparison["buyable"]>> = {}) => ({ seller: "Test seller", plan: "vc2-1c-1gb", hourlyUsd: 0.0104, totalUsd: 0.0104, hours: 1, firm: false, surchargePct: null, surchargeUnderHours: null, minHours: null, askedHours: 1, billedHours: 1, ...over });
+  const buyable = (over: Partial<NonNullable<PriceComparison["buyable"]>> = {}): NonNullable<PriceComparison["buyable"]> => ({
+    seller: "Test seller", plan: "vc2-1c-1gb", hourlyUsd: 0.0104, billedHourlyUsd: 0.0104, totalUsd: 0.0104, hours: 1, firm: false, paid: false, surchargePct: null, surchargeUnderHours: null,
+    minHours: null, askedHours: 1, billedHours: 1, provider: "vultr", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, ...over,
+  });
 
   it("joins names as people write them", () => {
     expect(listJoin(["Vultr"])).toBe("Vultr");
@@ -269,7 +272,50 @@ describe("market prices", () => {
     const failed = { sources: [src("vultr", false, "x")], sentence: "No other provider lists a machine that fits. The cheapest your agent can buy is $0.0104 an hour through Test seller." };
     expect(pricesLead(comparison({ ...failed, buyable: buyable() }))).toBe("The cheapest your agent can buy is an estimated $0.0104 an hour through Test seller.");
     expect(pricesLead(comparison({ ...failed, buyable: buyable({ firm: true }) }))).toBe("The cheapest your agent can buy is a quoted $0.0104 an hour through Test seller.");
+    expect(pricesLead(comparison({ ...failed, buyable: buyable({ firm: true, paid: true }) }))).toBe("Your agent paid $0.0104 an hour through Test seller.");
     expect(pricesLead(comparison({ ...failed, sentence: "No provider lists a machine that fits." }))).toBeNull();
+    expect(pricesLead(comparison({ ...failed, sellerUnreadable: true }))).toBe("The seller's price list could not be read either.");
+    expect(pricesLead(comparison({ ...failed, buyable: buyable(), buyingSpot: true }))).toBe(
+      "The cheapest your agent can buy is an estimated $0.0104 an hour through Test seller. Your agent is buying an interruptible machine; its rate is not compared with list prices.",
+    );
+  });
+
+  it("describes the agent's machine like a provider's", () => {
+    expect(buyableMachine(buyable())).toBe("1 vCPU, 1 GB RAM");
+    expect(buyableMachine(buyable({ plan: "vcg-a16-6c-60g-16vram", kind: "gpu", gpu: "NVIDIA_A16", vramGb: 16, vcpus: 6, ramGb: 60 }))).toBe("NVIDIA A16, 16 GB GPU memory, 6 vCPUs, 60 GB RAM");
+  });
+
+  it("rows: each source's cheapest fit, the same machine marked, and added when it is not its source's cheapest", () => {
+    const vultr = price({ source: "vultr", sourceLabel: "Vultr (direct)", name: "vc2-1c-1gb", kind: "cpu", gpu: null, vramGb: 0, vcpus: 1, ramGb: 1, hourlyUsd: 0.007, spotHourlyUsd: null, region: "ewr", url: "https://www.vultr.com/pricing/" });
+    const same = { source: "vultr" as const, sourceLabel: "Vultr (direct)", name: "vc2-1c-1gb", hourlyUsd: 0.007, premiumPct: 49 };
+    const rows = priceRows(comparison({ best: [vultr], buyable: buyable(), sameMachine: same }));
+    expect(rows.map((r) => [r.name, r.same, r.cheapest, r.region, r.detail])).toEqual([["vc2-1c-1gb", true, true, null, "1 vCPU, 1 GB RAM"]]);
+
+    const a16 = { source: "vultr" as const, sourceLabel: "Vultr (direct)", name: "vcg-a16-6c-60g-16vram", hourlyUsd: 0.471, premiumPct: 58 };
+    const gpuBuy = buyable({ plan: "vcg-a16-6c-60g-16vram", kind: "gpu", gpu: "NVIDIA A16", vramGb: 16, vcpus: 6, ramGb: 60, hourlyUsd: 0.7453 });
+    const cheaperVultr = price({ source: "vultr", sourceLabel: "Vultr (direct)", name: "vcg-x", region: "ewr", hourlyUsd: 0.3 });
+    const vast = price({ outsideRegions: true });
+    const two = priceRows(comparison({ best: [vast, cheaperVultr], buyable: gpuBuy, sameMachine: a16 }));
+    expect(two.map((r) => [r.name, r.same, r.cheapest, r.region, r.outsideRegions])).toEqual([
+      ["RTX A4000", false, true, "Quebec, CA", true],
+      ["vcg-x", false, false, null, false],
+      ["vcg-a16-6c-60g-16vram", true, false, null, false],
+    ]);
+    expect(two[2].detail).toBe("NVIDIA A16, 16 GB GPU memory, 6 vCPUs, 60 GB RAM");
+    expect(two[2].url).toBe("https://www.vultr.com/pricing/");
+  });
+
+  it("the right panel: a comparison over an ended run or no run; never over a run in flight", () => {
+    expect(panelBody(null, false)).toBe("intro");
+    expect(panelBody(null, true)).toBe("compare");
+    for (const phase of ["scanning", "choosing", "quoting", "approval", "paying", "provisioning", "ready"] as const) {
+      expect(panelBody({ phase }, true)).toBe("run");
+      expect(panelBody({ phase }, false)).toBe("run");
+    }
+    for (const phase of ["released", "failed", "refused"] as const) {
+      expect(panelBody({ phase }, true)).toBe("compare");
+      expect(panelBody({ phase }, false)).toBe("run");
+    }
   });
 
   it("describes a machine without repeating its name", () => {
@@ -293,6 +339,7 @@ describe("market prices", () => {
   it("says whether the buyable price is a firm quote or an estimate", () => {
     expect(buyableWord(buyable({ firm: true }))).toBe("Yes, firm quote");
     expect(buyableWord(buyable({ firm: false }))).toBe("Yes, estimate");
+    expect(buyableWord(buyable({ firm: true, paid: true }))).toBe("Yes, paid");
   });
 
   it("links only to https pages", () => {

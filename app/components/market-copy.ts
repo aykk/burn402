@@ -1,6 +1,6 @@
 import { usdExact } from "../../lib/market/money";
 import type { PriceComparison } from "@/lib/market/prices/compare";
-import type { MarketPrice, PriceSource } from "@/lib/market/prices/types";
+import { SOURCE_URLS, type MarketPrice, type PriceSource } from "../../lib/market/prices/types";
 import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
 import { REGIONS, clock, duration, elapsedText, usd4 } from "./format";
@@ -304,11 +304,19 @@ export function priceSourceLines(p: Pick<PriceComparison, "sources" | "asOf">): 
 
 /**
  * The lead line: the comparison's own sentence. When no provider could be read, that sentence would
- * say none lists a fit, which is not known; only what the agent can buy is said then (or nothing).
+ * say none lists a fit, which is not known; only what the agent can buy is said then (or that the
+ * seller's list could not be read either), and whether it is buying an interruptible machine.
  */
 export function pricesLead(p: PriceComparison): string | null {
   if (!pricesAllFailed(p)) return p.sentence;
-  return p.buyable ? `The cheapest your agent can buy is ${p.buyable.firm ? "a quoted" : "an estimated"} ${usd4(p.buyable.hourlyUsd)} an hour through ${p.buyable.seller}.` : null;
+  const parts: string[] = [];
+  const b = p.buyable;
+  if (b) {
+    const rate = `${usd4(b.hourlyUsd)} an hour through ${b.seller}`;
+    parts.push(b.paid ? `Your agent paid ${rate}.` : `The cheapest your agent can buy is ${b.firm ? "a quoted" : "an estimated"} ${rate}.`);
+  } else if (p.sellerUnreadable) parts.push("The seller's price list could not be read either.");
+  if (p.buyingSpot) parts.push("Your agent is buying an interruptible machine; its rate is not compared with list prices.");
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 const squash = (t: string) => t.toLowerCase().replace(/^(nvidia|amd|intel)\s+/, "").replace(/[\s_-]+/g, "");
@@ -334,8 +342,83 @@ export function cheapestMarks(p: Pick<PriceComparison, "best" | "buyable">): { r
 }
 
 /** The buyable row's answer to "Can your agent buy here?". */
-export function buyableWord(b: Pick<NonNullable<PriceComparison["buyable"]>, "firm">): string {
-  return b.firm ? "Yes, firm quote" : "Yes, estimate";
+export function buyableWord(b: Pick<NonNullable<PriceComparison["buyable"]>, "firm"> & { paid?: boolean }): string {
+  return b.paid ? "Yes, paid" : b.firm ? "Yes, firm quote" : "Yes, estimate";
+}
+
+/** The machine the agent can buy, in the same words as a provider's row: "NVIDIA A16, 16 GB GPU memory, 6 vCPUs, 60 GB RAM". */
+export function buyableMachine(b: NonNullable<PriceComparison["buyable"]>): string {
+  return priceMachine({ name: b.plan, kind: b.kind, gpu: b.gpu, vramGb: b.vramGb, vcpus: b.vcpus, ramGb: b.ramGb });
+}
+
+/** One provider row in the market prices table. */
+export type PriceRow = {
+  key: string;
+  sourceLabel: string;
+  name: string;
+  url: string;
+  /** GPU, memory, vCPUs, RAM; secondary */
+  detail: string;
+  /** a Vast.ai host's region, named plainly */
+  region: string | null;
+  outsideRegions: boolean;
+  note: string | null;
+  hourlyUsd: number;
+  spotHourlyUsd: number | null;
+  cheapest: boolean;
+  /** the plan the agent can buy, sold direct by its provider */
+  same: boolean;
+};
+
+/**
+ * The provider rows: each source's cheapest fit, and the same machine bought direct (marked, and added
+ * when it is not its source's cheapest fit). `cheapest` marks the lowest price, the agent's included.
+ */
+export function priceRows(p: Pick<PriceComparison, "best" | "buyable" | "sameMachine">): PriceRow[] {
+  const marks = cheapestMarks(p);
+  const same = p.sameMachine;
+  const isSame = (r: { source: PriceSource; name: string }) => same !== null && r.source === same.source && r.name === same.name;
+  const rows: PriceRow[] = p.best.map((r, i) => ({
+    key: `${r.source}:${r.name}`,
+    sourceLabel: r.sourceLabel,
+    name: r.name,
+    url: r.url,
+    detail: priceMachine(r),
+    region: r.source === "vast" ? r.region : null,
+    outsideRegions: r.outsideRegions === true,
+    note: r.note,
+    hourlyUsd: r.hourlyUsd,
+    spotHourlyUsd: r.spotHourlyUsd,
+    cheapest: marks.rows[i] ?? false,
+    same: isSame(r),
+  }));
+  if (same && p.buyable && !rows.some((r) => r.same)) {
+    const low = Math.min(...p.best.map((r) => r.hourlyUsd), p.buyable.hourlyUsd);
+    rows.push({
+      key: `${same.source}:${same.name}:same`,
+      sourceLabel: same.sourceLabel,
+      name: same.name,
+      url: SOURCE_URLS[same.source],
+      detail: buyableMachine(p.buyable),
+      region: null,
+      outsideRegions: false,
+      note: null,
+      hourlyUsd: same.hourlyUsd,
+      spotHourlyUsd: null,
+      cheapest: same.hourlyUsd <= low + 1e-9,
+      same: true,
+    });
+    rows.sort((a, b) => a.hourlyUsd - b.hourlyUsd);
+  }
+  return rows;
+}
+
+/** What the right panel shows. A run in flight always; a comparison over an ended run or no run; else the run, or the intro. */
+export type PanelBody = "intro" | "compare" | "run";
+export function panelBody(run: Pick<MarketRunView, "phase"> | null, compareOpen: boolean): PanelBody {
+  if (!run) return compareOpen ? "compare" : "intro";
+  if (run.phase !== "released" && run.phase !== "failed" && run.phase !== "refused") return "run";
+  return compareOpen ? "compare" : "run";
 }
 
 /** A provider page is linked only when it is plain https. */

@@ -62,7 +62,10 @@ describe("fetchMarketPrices", () => {
       if (c.url.includes("runpod")) {
         expect(c.init?.method).toBe("POST");
         expect(names).toEqual(["accept", "content-type"]);
-        expect(JSON.parse(String(c.init?.body))).toEqual({ query: "{ gpuTypes { id displayName memoryInGb communityPrice securePrice communitySpotPrice secureSpotPrice } }" });
+        expect(JSON.parse(String(c.init?.body))).toEqual({
+          query:
+            "{ gpuTypes { id displayName memoryInGb communityPrice securePrice communitySpotPrice secureSpotPrice communityCloud secureCloud community: lowestPrice(input: { gpuCount: 1, secureCloud: false }) { stockStatus } secure: lowestPrice(input: { gpuCount: 1, secureCloud: true }) { stockStatus } } }",
+        });
       } else {
         expect(c.init?.method).toBe("GET");
         expect(names).toEqual(["accept"]);

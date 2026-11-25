@@ -344,6 +344,8 @@ export class MarketRun {
   private marketData: MarketPrices | null = null;
   private ranksDone = false;
   private buyable: Buyable | null = null;
+  /** the quote put forward is for an interruptible plan: `buyable` stays the last on-demand estimate */
+  private buyingSpot = false;
   private prices: PriceComparison | null = null;
 
   private starting: Promise<void> | null = null;
@@ -537,7 +539,7 @@ export class MarketRun {
     if (!this.marketData || !this.ranksDone) return;
     try {
       const { prices, sources, asOf } = this.marketData;
-      this.prices = comparePrices({ prices, sources, asOf, need: this.d.need, buyable: this.buyable, limited: true });
+      this.prices = comparePrices({ prices, sources, asOf, need: this.d.need, buyable: this.buyable, limited: true, buyingSpot: this.buyingSpot });
     } catch (e) {
       this.log(`market prices could not be compared: ${msg(e)}`);
     }
@@ -662,7 +664,9 @@ export class MarketRun {
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     this.used.add(q);
     this.current = q;
-    this.setBuyable(this.buyableOf(q.candidate.offer, q.amountUsd, q.hours, true));
+    // a spot rate is not compared with on-demand list prices: keep the last on-demand figure and say so
+    this.buyingSpot = q.candidate.offer.spot;
+    this.setBuyable(q.candidate.offer.spot ? this.buyable : this.buyableOf(q.candidate.offer, q.amountUsd, q.hours, true));
     this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
     this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
@@ -747,6 +751,7 @@ export class MarketRun {
 
     if (outcome.kind === "active" || outcome.kind === "pending") {
       this.confirmPayment(outcome.tx);
+      if (this.buyable?.firm && !this.buyingSpot) this.setBuyable({ ...this.buyable, paid: true });
       if (!outcome.tx) await this.lookUpTx(q);
       const p = this.payment!;
       this.safeAppend(this.entry("paid", q, { usd: p.usd, tx: p.tx, instance: outcome.instance.id }));

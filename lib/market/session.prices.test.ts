@@ -85,19 +85,29 @@ describe("priceComparison", () => {
       seller: SELLERS.test.label,
       plan: "vc2-1c-1gb",
       hourlyUsd: 0.009027 * 1.15,
+      billedHourlyUsd: 0.009027 * 1.15,
       totalUsd: 0.009027 * 1.15,
       hours: 1,
       firm: false,
+      paid: false,
       surchargePct: 15,
       surchargeUnderHours: 24,
       minHours: 1,
       askedHours: 1,
       billedHours: 1,
+      provider: "vultr",
+      kind: "cpu",
+      vcpus: 1,
+      ramGb: 1,
+      vramGb: 0,
+      gpu: null,
     });
-    expect(c.sentence).toContain("an estimated $0.0104 an hour");
-    expect(c.basis).toBe("The agent's price includes the seller's 15% surcharge for rentals under 24 hours and is spread over 1 billed hour; other providers' figures are list prices per hour.");
+    expect(c.sentence).toContain("your agent pays an estimated $0.0104 an hour");
+    expect(c.basis).toBe("The agent's price includes the seller's published 15% surcharge for rentals under 24 hours; other providers' figures are list prices per hour.");
     expect(c.cheapestAnywhere?.name).toBe("vc2-1c-1gb");
-    expect(c.premiumPct).toBe(48);
+    expect(c.sameMachine?.name).toBe("vc2-1c-1gb");
+    expect(c.premiumPct).toBe(49);
+    expect(c.sellerUnreadable).toBe(false);
   });
 
   it("uses generous limits: a 72-hour need still has a buyable plan, priced without the short-rental surcharge", async () => {
@@ -113,14 +123,17 @@ describe("priceComparison", () => {
     expect(inside.buyable?.plan).toBe("vc2-1c-1gb");
     const none = await priceComparison({ market: "test", need: NEED, limits: { budgetUsd: 1, rateUsdHr: 0.001 } }, { prices: async () => MARKET, seller: testSellerClient() });
     expect(none.buyable).toBeNull();
-    expect(none.sentence).toBe("The cheapest fit anywhere is $0.0070 an hour at Vultr (direct). Your agent has no seller it can buy this from inside your limits.");
+    expect(none.sentence).toMatch(/Your agent has no seller it can buy this from inside your limits\.$/);
   });
 
-  it("a GPU need shows the minimum and surcharge in the basis", async () => {
+  it("a GPU need for 1 hour: the 2-hour minimum raises the per-hour figure, and the basis says so", async () => {
     const c = await priceComparison({ market: "test", need: { ...NEED, kind: "gpu", vramGb: 16, hours: 1 } }, { prices: async () => MARKET, seller: testSellerClient() });
-    expect(c.buyable?.billedHours).toBe(2);
-    expect(c.basis).toBe(
-      "The agent's price includes the seller's 20% surcharge for rentals under 24 hours and a 2-hour minimum, so 2 hours are billed for the 1 you asked for; other providers' figures are list prices per hour.",
+    const b = c.buyable!;
+    expect(b.billedHours).toBe(2);
+    expect(b.hourlyUsd).toBeCloseTo(b.totalUsd, 12); // total over the 1 hour asked for
+    expect(b.billedHourlyUsd).toBeCloseTo(b.totalUsd / 2, 12);
+    expect(c.basis).toMatch(
+      /^The agent's price includes the seller's published 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated \$[\d.]+ in total; other providers' figures are list prices per hour\.$/,
     );
   });
 
@@ -128,10 +141,22 @@ describe("priceComparison", () => {
     const broken = new SellerClient(SELLERS.test, { fetch: (async () => new Response("no", { status: 500 })) as unknown as typeof fetch, signer: null });
     const c = await priceComparison({ market: "test", need: NEED }, { prices: async () => MARKET, seller: broken });
     expect(c.buyable).toBeNull();
-    expect(c.sentence).toBe("The cheapest fit anywhere is $0.0070 an hour at Vultr (direct). Your agent has no seller it can buy this from.");
+    expect(c.sellerUnreadable).toBe(true);
+    expect(c.sentence).toMatch(/The seller's price list could not be read, so this shows other providers only\.$/);
+    expect(c.sentence).not.toMatch(/no seller/);
 
     const d = await priceComparison({ market: "test", need: NEED }, { prices: async () => Promise.reject(new Error("x")), seller: testSellerClient() });
     expect(d.best).toEqual([]);
     expect(d.buyable?.plan).toBe("vc2-1c-1gb");
+  });
+
+  it("the seller's price list gets its own timeout: a seller that never answers is named as unread, not as none", async () => {
+    const hanging = { config: SELLERS.test, catalog: () => new Promise<never>(() => {}) } as unknown as SellerClient;
+    const started = Date.now();
+    const c = await priceComparison({ market: "test", need: NEED, limits: { budgetUsd: 1, rateUsdHr: 0.05 } }, { prices: async () => MARKET, seller: hanging, sellerTimeoutMs: 20 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(c.sellerUnreadable).toBe(true);
+    expect(c.buyable).toBeNull();
+    expect(c.sentence).not.toMatch(/no seller/);
   });
 });

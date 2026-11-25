@@ -200,28 +200,50 @@ export function marketPricesFeed(): Promise<MarketPrices> {
   return fetchMarketPrices();
 }
 
+/** The seller's price list read for a comparison gets its own limit, well under the 30 s a run allows it. */
+const COMPARE_SELLER_TIMEOUT_MS = 10_000;
+
+/** Rejects after `ms`; the timer never keeps the process alive. */
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("did not answer in time")), ms);
+    (t as { unref?: () => void }).unref?.();
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 /** Generous limits used, when the owner gave none, only to find the cheapest plan that fits; nothing is quoted or paid with them. */
 const COMPARE_LIMITS = { budgetUsd: 20, rateUsdHr: 20 };
 
 /**
  * The comparison without a run: market prices beside the plan a run would rank first (the
  * chooser's estimate, not a quote), inside the owner's limits when given, else generous ones.
- * Spot offers are never the buyable figure. Reads the seller's price list only;
- * never quotes, never pays, never touches the session's run.
+ * Spot offers are never the buyable figure. Reads the seller's price list only (within 10 s; a list that
+ * cannot be read is said plainly, never as "no seller"); never quotes, never pays, never touches the session's run.
  */
 export async function priceComparison(
   input: PricesInput,
-  deps: { prices?: () => Promise<MarketPrices>; seller?: SellerClient } = {},
+  deps: { prices?: () => Promise<MarketPrices>; seller?: SellerClient; /** tests only */ sellerTimeoutMs?: number } = {},
 ): Promise<PriceComparison> {
-  const seller = deps.seller ?? sellerFor(input.market, null);
+  const timeoutMs = deps.sellerTimeoutMs ?? COMPARE_SELLER_TIMEOUT_MS;
+  const seller = deps.seller ?? new SellerClient(SELLERS[input.market], { signer: null, timeouts: { read: timeoutMs, paid: timeoutMs } });
   const [market, catalog] = await Promise.all([
     (deps.prices ?? marketPricesFeed)().catch((): MarketPrices => ({ prices: [], sources: [], asOf: Date.now() })),
-    seller.catalog().catch(() => null),
+    within(Promise.resolve().then(() => seller.catalog()), timeoutMs).catch(() => null),
   ]);
   const top = catalog ? choose(catalog.offers, input.need, input.limits ?? COMPARE_LIMITS, catalog.rules).ranked.find((c) => !c.offer.spot && c.offer.rentable) : undefined;
   const buyable =
     top && catalog
       ? buyableFor({ seller: seller.config.label, offer: top.offer, totalUsd: top.estimateUsd, billedHours: top.hours, askedHours: input.need.hours, rules: catalog.rules, firm: false })
       : null;
-  return comparePrices({ prices: market.prices, sources: market.sources, asOf: market.asOf, need: input.need, buyable, limited: !!input.limits && !!catalog });
+  return comparePrices({ prices: market.prices, sources: market.sources, asOf: market.asOf, need: input.need, buyable, limited: !!input.limits && !!catalog, sellerUnreadable: !catalog });
 }
