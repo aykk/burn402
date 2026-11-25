@@ -1,7 +1,9 @@
 import { usdExact } from "../../lib/market/money";
+import type { PriceComparison } from "@/lib/market/prices/compare";
+import type { MarketPrice, PriceSource } from "@/lib/market/prices/types";
 import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
-import { REGIONS, duration, elapsedText } from "./format";
+import { REGIONS, clock, duration, elapsedText, usd4 } from "./format";
 
 /** "The last problem: The seller" reads "The last problem: the seller": no capital after a colon mid-sentence. */
 export const colonCase = (t: string) => t.replace(/: (The|A|An|No|Nothing|It|This) /g, (_, w: string) => `: ${w.toLowerCase()} `);
@@ -269,4 +271,74 @@ export function endState(run: EndRun, opts: { listed?: boolean } = {}): EndState
     return { title: "Run failed", sentence: said, next, tone: "bad" };
   }
   return null;
+}
+
+/** "a", "a and b", "a, b and c" (or "or"). */
+export function listJoin(items: string[], word: "and" | "or" = "and"): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} ${word} ${items[items.length - 1]}`;
+}
+
+/** Providers by their short names in running text; the table uses the full source label. */
+const SOURCE_SHORT: Record<PriceSource, string> = { vultr: "Vultr", vast: "Vast.ai", runpod: "RunPod", akash: "Akash" };
+const shortName = (s: { source: PriceSource; label: string }) => SOURCE_SHORT[s.source] ?? s.label;
+
+/** True when no provider's prices could be read (or none were asked). */
+export function pricesAllFailed(p: Pick<PriceComparison, "sources">): boolean {
+  return !p.sources.some((s) => s.ok);
+}
+
+/**
+ * "Live prices from Vultr, Vast.ai and Akash, read at 19:42 UTC." then one line per source that failed
+ * ("RunPod did not answer in time."). When none could be read, one line saying so.
+ */
+export function priceSourceLines(p: Pick<PriceComparison, "sources" | "asOf">): { text: string; ok: boolean }[] {
+  if (pricesAllFailed(p)) {
+    const names = p.sources.map(shortName);
+    return [{ text: `No live prices could be read${names.length > 0 ? ` from ${listJoin(names, "or")}` : ""}. The rental itself is unaffected.`, ok: false }];
+  }
+  const read = { text: `Live prices from ${listJoin(p.sources.filter((s) => s.ok).map(shortName))}, read at ${clock(p.asOf).slice(0, 5)} UTC.`, ok: true };
+  const failed = p.sources.filter((s) => !s.ok).map((s) => ({ text: sentence(`${shortName(s)} ${s.note?.trim() || "could not be read"}`), ok: false }));
+  return [read, ...failed];
+}
+
+/**
+ * The lead line: the comparison's own sentence. When no provider could be read, that sentence would
+ * say none lists a fit, which is not known; only what the agent can buy is said then (or nothing).
+ */
+export function pricesLead(p: PriceComparison): string | null {
+  if (!pricesAllFailed(p)) return p.sentence;
+  return p.buyable ? `The cheapest your agent can buy is ${p.buyable.firm ? "a quoted" : "an estimated"} ${usd4(p.buyable.hourlyUsd)} an hour through ${p.buyable.seller}.` : null;
+}
+
+const squash = (t: string) => t.toLowerCase().replace(/^(nvidia|amd|intel)\s+/, "").replace(/[\s_-]+/g, "");
+
+/** "NVIDIA A16, 16 GB GPU memory, 6 vCPUs, 60 GB RAM": the GPU model only when the name does not already say it; 0 = not stated. */
+export function priceMachine(p: Pick<MarketPrice, "name" | "kind" | "gpu" | "vramGb" | "vcpus" | "ramGb">): string {
+  const parts: string[] = [];
+  if (p.kind === "gpu") {
+    if (p.gpu && !squash(p.name).startsWith(squash(p.gpu))) parts.push(p.gpu.replace(/_/g, " "));
+    if (p.vramGb > 0) parts.push(`${p.vramGb} GB GPU memory`);
+  }
+  if (p.vcpus > 0) parts.push(`${p.vcpus} vCPU${p.vcpus === 1 ? "" : "s"}`);
+  if (p.ramGb > 0) parts.push(`${p.ramGb} GB RAM`);
+  return parts.join(", ");
+}
+
+/** Which rows are the cheapest fit anywhere, the buyable plan included; ties are all marked. */
+export function cheapestMarks(p: Pick<PriceComparison, "best" | "buyable">): { rows: boolean[]; buyable: boolean } {
+  const rates = [...p.best.map((r) => r.hourlyUsd), ...(p.buyable ? [p.buyable.hourlyUsd] : [])];
+  if (rates.length === 0) return { rows: [], buyable: false };
+  const low = Math.min(...rates) + 1e-9;
+  return { rows: p.best.map((r) => r.hourlyUsd <= low), buyable: p.buyable !== null && p.buyable.hourlyUsd <= low };
+}
+
+/** The buyable row's answer to "Can your agent buy here?". */
+export function buyableWord(b: Pick<NonNullable<PriceComparison["buyable"]>, "firm">): string {
+  return b.firm ? "Yes, firm quote" : "Yes, estimate";
+}
+
+/** A provider page is linked only when it is plain https. */
+export function safeLink(url: string): string | null {
+  return url.startsWith("https://") ? url : null;
 }

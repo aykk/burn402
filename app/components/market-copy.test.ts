@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
-import { approvalSentence, endState, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import type { PriceComparison } from "@/lib/market/prices/compare";
+import type { MarketPrice } from "@/lib/market/prices/types";
+import { approvalSentence, buyableWord, cheapestMarks, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -223,5 +225,80 @@ describe("NN6: plain names", () => {
   it("region codes in a fallback note are named by city", () => {
     expect(fallbackLine("ewr was out of stock, so the agent used ord.")).toBe("New Jersey (ewr) was out of stock, so the agent used Chicago (ord).");
     expect(fallbackLine("ams3 was out of stock, so the agent used fra1.")).toBe("Ams3 was out of stock, so the agent used fra1.");
+  });
+});
+
+describe("market prices", () => {
+  const asOf = Date.UTC(2026, 10, 25, 19, 42, 10);
+  const src = (source: "vultr" | "vast" | "runpod" | "akash", ok = true, note: string | null = null) => ({ source, label: source, ok, count: ok ? 5 : 0, note });
+  const price = (over: Partial<MarketPrice>): MarketPrice => ({
+    source: "vast", sourceLabel: "Vast.ai marketplace", name: "RTX A4000", kind: "gpu", vcpus: 8, ramGb: 15.5, gpu: "RTX A4000", vramGb: 16,
+    hourlyUsd: 0.089, spotHourlyUsd: 0.08, region: "Quebec, CA", note: null, url: "https://cloud.vast.ai/create/", ...over,
+  });
+  const comparison = (over: Partial<PriceComparison>): PriceComparison => ({
+    asOf, sources: [src("vultr"), src("vast"), src("runpod"), src("akash")], best: [], cheapestAnywhere: null, buyable: null, premiumPct: null, sentence: "s", basis: "b", ...over,
+  });
+  const buyable = (over: Partial<NonNullable<PriceComparison["buyable"]>> = {}) => ({ seller: "Test seller", plan: "vc2-1c-1gb", hourlyUsd: 0.0104, totalUsd: 0.0104, hours: 1, firm: false, surchargePct: null, surchargeUnderHours: null, minHours: null, askedHours: 1, billedHours: 1, ...over });
+
+  it("joins names as people write them", () => {
+    expect(listJoin(["Vultr"])).toBe("Vultr");
+    expect(listJoin(["Vultr", "Akash"])).toBe("Vultr and Akash");
+    expect(listJoin(["Vultr", "Vast.ai", "RunPod", "Akash"])).toBe("Vultr, Vast.ai, RunPod and Akash");
+    expect(listJoin(["Vultr", "Vast.ai", "Akash"], "or")).toBe("Vultr, Vast.ai or Akash");
+  });
+
+  it("names the sources read and the time, and each failed source plainly", () => {
+    expect(priceSourceLines(comparison({}))).toEqual([{ text: "Live prices from Vultr, Vast.ai, RunPod and Akash, read at 19:42 UTC.", ok: true }]);
+    expect(priceSourceLines(comparison({ sources: [src("vultr"), src("vast"), src("runpod", false, "did not answer in time"), src("akash")] }))).toEqual([
+      { text: "Live prices from Vultr, Vast.ai and Akash, read at 19:42 UTC.", ok: true },
+      { text: "RunPod did not answer in time.", ok: false },
+    ]);
+    expect(priceSourceLines(comparison({ sources: [src("vultr"), src("vast", false, null)] }))[1]).toEqual({ text: "Vast.ai could not be read.", ok: false });
+  });
+
+  it("says when no source could be read, and that the rental is unaffected", () => {
+    const all = comparison({ sources: [src("vultr", false, "x"), src("vast", false, "x"), src("runpod", false, "x"), src("akash", false, "x")] });
+    expect(pricesAllFailed(all)).toBe(true);
+    expect(priceSourceLines(all)).toEqual([{ text: "No live prices could be read from Vultr, Vast.ai, RunPod or Akash. The rental itself is unaffected.", ok: false }]);
+    expect(priceSourceLines(comparison({ sources: [] }))).toEqual([{ text: "No live prices could be read. The rental itself is unaffected.", ok: false }]);
+    expect(pricesAllFailed(comparison({}))).toBe(false);
+  });
+
+  it("leads with the backend's sentence, never a 'no provider lists' claim when none could be read", () => {
+    expect(pricesLead(comparison({ sentence: "The cheapest fit anywhere is $0.0890 an hour." }))).toBe("The cheapest fit anywhere is $0.0890 an hour.");
+    const failed = { sources: [src("vultr", false, "x")], sentence: "No other provider lists a machine that fits. The cheapest your agent can buy is $0.0104 an hour through Test seller." };
+    expect(pricesLead(comparison({ ...failed, buyable: buyable() }))).toBe("The cheapest your agent can buy is an estimated $0.0104 an hour through Test seller.");
+    expect(pricesLead(comparison({ ...failed, buyable: buyable({ firm: true }) }))).toBe("The cheapest your agent can buy is a quoted $0.0104 an hour through Test seller.");
+    expect(pricesLead(comparison({ ...failed, sentence: "No provider lists a machine that fits." }))).toBeNull();
+  });
+
+  it("describes a machine without repeating its name", () => {
+    expect(priceMachine(price({}))).toBe("16 GB GPU memory, 8 vCPUs, 15.5 GB RAM");
+    expect(priceMachine(price({ name: "RTX A5000", gpu: "NVIDIA RTX A5000", vramGb: 24, vcpus: 0, ramGb: 0 }))).toBe("24 GB GPU memory");
+    expect(priceMachine(price({ name: "rtx3090 24Gi PCIe", gpu: "nvidia rtx3090", vramGb: 24, vcpus: 0, ramGb: 0 }))).toBe("24 GB GPU memory");
+    expect(priceMachine(price({ name: "vcg-a16-6c-60g-16vram", gpu: "NVIDIA A16", vcpus: 6, ramGb: 60 }))).toBe("NVIDIA A16, 16 GB GPU memory, 6 vCPUs, 60 GB RAM");
+    expect(priceMachine(price({ name: "vc2-1c-1gb", kind: "cpu", gpu: null, vramGb: 0, vcpus: 1, ramGb: 1 }))).toBe("1 vCPU, 1 GB RAM");
+    expect(priceMachine(price({ kind: "cpu", gpu: null, vramGb: 0, vcpus: 0, ramGb: 0 }))).toBe("");
+  });
+
+  it("marks the cheapest row anywhere, the buyable one too when it is as cheap", () => {
+    const best = [price({ hourlyUsd: 0.089 }), price({ source: "runpod", hourlyUsd: 0.16 })];
+    expect(cheapestMarks(comparison({ best, buyable: buyable({ hourlyUsd: 0.7453 }) }))).toEqual({ rows: [true, false], buyable: false });
+    expect(cheapestMarks(comparison({ best, buyable: buyable({ hourlyUsd: 0.05 }) }))).toEqual({ rows: [false, false], buyable: true });
+    expect(cheapestMarks(comparison({ best, buyable: buyable({ hourlyUsd: 0.089 }) }))).toEqual({ rows: [true, false], buyable: true });
+    expect(cheapestMarks(comparison({ best: [], buyable: buyable() }))).toEqual({ rows: [], buyable: true });
+    expect(cheapestMarks(comparison({ best: [] }))).toEqual({ rows: [], buyable: false });
+  });
+
+  it("says whether the buyable price is a firm quote or an estimate", () => {
+    expect(buyableWord(buyable({ firm: true }))).toBe("Yes, firm quote");
+    expect(buyableWord(buyable({ firm: false }))).toBe("Yes, estimate");
+  });
+
+  it("links only to https pages", () => {
+    expect(safeLink("https://cloud.vast.ai/create/")).toBe("https://cloud.vast.ai/create/");
+    expect(safeLink("http://example.com")).toBeNull();
+    expect(safeLink("javascript:alert(1)")).toBeNull();
+    expect(safeLink(" https://x")).toBeNull();
   });
 });

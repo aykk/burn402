@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Nav } from "@/app/nav";
 import type { Snapshot } from "@/lib/demo/snapshot";
+import type { PriceComparison } from "@/lib/market/prices/compare";
 import type { MarketRunView } from "@/lib/market/run";
 import { BudgetMeter } from "@/app/components/BudgetMeter";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import type { Send } from "@/app/components/MachinePanel";
 import { MarketPanel } from "@/app/components/MarketPanel";
 import { ModelPicker } from "@/app/components/ModelPicker";
-import { NeedForm, type NeedDraft } from "@/app/components/NeedForm";
+import { MarketPrices } from "@/app/components/MarketPrices";
+import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
+import { MARKET_NAME, hoursText } from "@/app/components/market-copy";
 import { OpenPurchases } from "@/app/components/OpenPurchases";
-import { ActionError, UNREACHABLE, type Post } from "@/app/components/ActionError";
+import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/components/ActionError";
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
 
 const ENDED = new Set<MarketRunView["phase"]>(["released", "failed", "refused"]);
@@ -33,6 +36,10 @@ export default function Page() {
   // Server clock minus client clock (ms), refreshed on every poll, so the meter ticks in server time.
   const clockOffset = useRef(0);
   const [tick, setTick] = useState(0);
+  // Prices compared from the form without a run: shown in the right column until closed, a run starts, or Reset.
+  const [compare, setCompare] = useState<(CompareBody & { seq: number; prices: PriceComparison | null }) | null>(null);
+  // Only the latest comparison may land; a closed or replaced one is dropped.
+  const compareSeq = useRef(0);
 
   const load = useCallback(async () => {
     let res: Response;
@@ -103,6 +110,28 @@ export default function Page() {
 
   const closeDrawer = useCallback(() => setDrawer(false), []);
 
+  /** Reads market prices for a need. Starts no run, quotes nothing, pays nothing. */
+  const comparePrices = async (body: CompareBody): Promise<string | null> => {
+    const seq = ++compareSeq.current;
+    setCompare({ ...body, seq, prices: null });
+    try {
+      const res = await fetch("/api/market/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const json = (await res.json()) as { prices?: PriceComparison; error?: string };
+      if (!res.ok || !json.prices) throw new Error(json.error ?? `The server answered HTTP ${res.status}`);
+      if (seq === compareSeq.current) setCompare({ ...body, seq, prices: json.prices });
+      return null;
+    } catch (e) {
+      if (seq !== compareSeq.current) return null;
+      setCompare(null);
+      return failureMessage(e);
+    }
+  };
+  const closeCompare = () => {
+    compareSeq.current++;
+    setCompare(null);
+    document.getElementById("compare-button")?.focus();
+  };
+
   const running = run !== null && !ENDED.has(run.phase);
 
   // While a run is live (and the server answers), tick once a second so the meter and the time left move between polls.
@@ -143,7 +172,11 @@ export default function Page() {
             const failed = await post("/api/demo/reset");
             // A refused reset keeps the form as it was, so it still matches what the server holds.
             if (failed) setResetError(failed);
-            else setResetSignal((k) => k + 1);
+            else {
+              setResetSignal((k) => k + 1);
+              compareSeq.current++;
+              setCompare(null);
+            }
           }}
         >
           Reset
@@ -205,9 +238,14 @@ export default function Page() {
             onDraftChange={setDraft}
             onStart={async (body) => {
               const failed = await post("/api/market/run", body);
-              if (!failed) setStartSignal((k) => k + 1);
+              if (!failed) {
+                setStartSignal((k) => k + 1);
+                compareSeq.current++;
+                setCompare(null);
+              }
               return failed;
             }}
+            onCompare={comparePrices}
             onAddKey={() => setPickerOpen(true)}
           />
         </div>
@@ -217,7 +255,28 @@ export default function Page() {
             run ? "order-first lg:order-none" : "border-t pt-8 lg:border-t-0"
           }`}
         >
-          <MarketPanel run={run} nowMs={nowMs} listed={listed} focusSignal={startSignal} walletReady={snap?.walletReady ?? { test: false, real: false }} post={post} send={send} />
+          <MarketPanel
+            run={run}
+            nowMs={nowMs}
+            listed={listed}
+            focusSignal={startSignal}
+            walletReady={snap?.walletReady ?? { test: false, real: false }}
+            post={post}
+            send={send}
+            idle={
+              compare && (
+                <MarketPrices
+                  key={compare.seq}
+                  prices={compare.prices}
+                  loading={compare.prices === null}
+                  heading="h2"
+                  onClose={closeCompare}
+                  intro={`For ${needText(compare.need)}, ${hoursText(compare.need.hours)}, on the ${MARKET_NAME[compare.market].toLowerCase()}.`}
+                  outro="Nothing was rented or paid."
+                />
+              )
+            }
+          />
         </div>
       </section>
 
