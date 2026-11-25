@@ -10,15 +10,20 @@ export type RecoverResult = { ok: true; destroyed: string[]; message: string } |
 
 /**
  * Destroys the machine behind a journal purchase that is still open (a restart left it, or the
- * run lost track of it). With no machine id on record (only an intent, or an unknown outcome),
- * the wallet's live machines with the same plan and region are destroyed instead, except any
+ * run lost track of it). With no machine id on record and a last event of intent or unknown (the
+ * payment's outcome was never learned), the wallet's live machines with the same plan and region are destroyed instead, except any
  * id in `exclude` (machines that belong to other runs). When none match and only an intent was
  * recorded, the purchase is closed in the journal as failed: nothing is running for it. A payment
- * that was sent (paid or unknown) with no machine stays open: the money may be out.
+ * that was sent (unknown) with no machine stays open: the money may be out. A paid entry with no
+ * machine (the seller kept the payment) is never searched: nothing is destroyed or journaled.
  */
 export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, journal: Journal, opts: { exclude?: Set<string>; now?: () => number } = {}): Promise<RecoverResult> {
   const now = opts.now ?? Date.now;
   const exclude = opts.exclude ?? new Set<string>();
+  if (!open.instance && open.lastEvent !== "intent" && open.lastEvent !== "unknown") {
+    // the app learned the seller kept the payment and sent no machine: any matching machine is someone else's
+    return { ok: true, destroyed: [], message: "The seller kept this payment and delivered no machine, so there is nothing to destroy. Use Dismiss to clear it from this list." };
+  }
   let ids: string[];
   try {
     ids = open.instance
