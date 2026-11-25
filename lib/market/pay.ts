@@ -6,6 +6,7 @@ import { decodePaymentSignatureHeader } from "@x402/core/http";
 import { createKeyPairSignerFromBytes } from "@solana/kit";
 import { base58Decode } from "../x402/client";
 import { base58Encode, signerFromSecret, type Signer } from "./auth";
+import { MAX_PAYMENT_USD } from "./guard";
 
 export type PaymentRequired = X402PaymentRequired;
 export type Payer = { address: string; signer: Signer; payHeaders(required: PaymentRequired): Promise<Record<string, string>> };
@@ -17,7 +18,10 @@ export type Payer = { address: string; signer: Signer; payHeaders(required: Paym
 export async function makePayer(secretKeyBase58: string): Promise<Payer> {
   const signer = await signerFromSecret(secretKeyBase58);
   const svmSigner = toClientSvmSigner(await createKeyPairSignerFromBytes(base58Decode(secretKeyBase58)));
-  const http = new x402HTTPClient(new x402Client().register("solana:*", new ExactSvmScheme(svmSigner)));
+  // The library's own per-payment cap defaults to $1; raise it to this app's cap. The guard has already
+  // checked the amount against the approved quote, the budget, the hourly limit and the same cap.
+  const client = new x402Client().register("solana:*", new ExactSvmScheme(svmSigner)).setSpendControls({ maxAmountPerPayment: `$${MAX_PAYMENT_USD}` });
+  const http = new x402HTTPClient(client);
   return {
     address: signer.address,
     signer,
