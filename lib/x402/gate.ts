@@ -26,6 +26,8 @@ export type TransactionRecord = {
   usd: number | null;
   tx: string | null;
   server: string | null;
+  /** Which Solana cluster `tx` is on; set by market purchases, absent on older records. */
+  cluster?: "devnet" | "mainnet";
 };
 
 export type GateOptions = {

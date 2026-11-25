@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getSession } from "@/lib/demo/session";
-import { describePurchase } from "@/lib/market/record";
+import { clusterOf, describePurchase } from "@/lib/market/record";
 import { fromCompact, verifyJws } from "@/lib/mandate";
 import { DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict } from "@/lib/verify";
 
@@ -102,6 +102,8 @@ type StoredRecord = {
   steps: Step[];
   /** The payment's transaction signature, when the record says a payment was signed and the chain gave one. */
   paymentTx?: string | null;
+  /** The Solana cluster of `paymentTx`, when the record says (market purchases); null for older records. */
+  paymentCluster?: "devnet" | "mainnet" | null;
 };
 
 export async function GET(request: Request) {
@@ -154,10 +156,11 @@ export async function GET(request: Request) {
         let outcome = transactionOutcome(tagOf(item.tags, "Outcome"));
         let reason: string | null = null;
         let paymentTx: string | null = null;
+        let paymentCluster: "devnet" | "mainnet" | null = null;
         let verified = false;
         try {
           const body = JSON.parse(new TextDecoder().decode(await gateway.fetchData(item.id))) as {
-            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null; tx?: string | null };
+            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null; tx?: string | null; cluster?: string };
             jws?: string;
           };
           steps.push({ name: "arweave item", ok: true, detail: `uploaded by ${item.ownerKey}` });
@@ -171,6 +174,7 @@ export async function GET(request: Request) {
             outcome = words ? { label: words.label, tone: words.tone } : transactionOutcome(t.outcome ?? null);
             reason = words ? words.reason : plainRefusal(t.reason);
             paymentTx = typeof t.usd === "number" && typeof t.tx === "string" && t.tx ? t.tx : null;
+            paymentCluster = clusterOf(t.cluster);
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {
@@ -197,6 +201,7 @@ export async function GET(request: Request) {
           verified,
           steps,
           paymentTx,
+          paymentCluster,
         };
       }),
       ...conversations.map(async (item): Promise<StoredRecord> => {

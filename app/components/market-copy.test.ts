@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
-import { approvalSentence, endState, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalSentence, endState, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -188,5 +188,18 @@ describe("marketStage", () => {
     expect(marketStage(run({ phase: "refused", rows: [row], refusal: { code: "NOTHING_FITS", detail: "" } }))).toBe(1);
     expect(marketStage(run({ phase: "refused", approval, refusal: { code: "CANCELLED", detail: "" } }))).toBe(2);
     expect(marketStage(run({ phase: "failed", payment: { usd: 0.01, atomic: "10000", tx: null, at: 1, payer: "p", status: "confirmed" } }))).toBe(3);
+  });
+});
+
+describe("solscanUrlForCluster (the records page)", () => {
+  const sig = "5".repeat(88);
+  it("links by cluster, devnet with ?cluster=devnet", () => {
+    expect(solscanUrlForCluster(sig, "devnet")).toBe(`https://solscan.io/tx/${sig}?cluster=devnet`);
+    expect(solscanUrlForCluster(sig, "mainnet")).toBe(`https://solscan.io/tx/${sig}`);
+  });
+  it("no link when the cluster is unknown (older records) or the signature is malformed", () => {
+    expect(solscanUrlForCluster(sig, null)).toBeNull();
+    expect(solscanUrlForCluster(sig, undefined)).toBeNull();
+    expect(solscanUrlForCluster("not a signature", "devnet")).toBeNull();
   });
 });

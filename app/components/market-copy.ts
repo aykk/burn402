@@ -39,8 +39,13 @@ const SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 
 /** A Solscan link only for a tx id of the expected shape; anything else gets no link (null). */
 export function solscanUrl(tx: string | null | undefined, market: MarketId): string | null {
-  if (!tx || !SIGNATURE_RE.test(tx)) return null;
-  return `https://solscan.io/tx/${tx}${market === "test" ? "?cluster=devnet" : ""}`;
+  return solscanUrlForCluster(tx, market === "test" ? "devnet" : "mainnet");
+}
+
+/** The same link by cluster, for stored records; no link when the cluster is not known. */
+export function solscanUrlForCluster(tx: string | null | undefined, cluster: "devnet" | "mainnet" | null | undefined): string | null {
+  if (!tx || !SIGNATURE_RE.test(tx) || !cluster) return null;
+  return `https://solscan.io/tx/${tx}${cluster === "devnet" ? "?cluster=devnet" : ""}`;
 }
 
 export const MARKET_NAME: Record<MarketId, string> = { test: "Test market (devnet)", real: "Real market (mainnet)" };

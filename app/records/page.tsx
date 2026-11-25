@@ -3,6 +3,7 @@
 import { Nav } from "@/app/nav";
 import { isUnreachable } from "../components/verify-state";
 import { Segmented } from "@/app/components/Segmented";
+import { solscanUrlForCluster } from "@/app/components/market-copy";
 import { usd2, usd4 } from "@/app/components/format";
 import { BTN, INPUT, MONO, TEXT_BTN } from "@/app/components/ui";
 import { useEffect, useState } from "react";
@@ -25,6 +26,7 @@ type Record = {
   verified: boolean;
   steps: Step[];
   paymentTx?: string | null;
+  paymentCluster?: "devnet" | "mainnet" | null;
 };
 type Response = { network: string; fqdn: string | null; gatewayUrl?: string; records?: Record[]; error?: string };
 
@@ -321,7 +323,18 @@ export default function RecordsPage() {
                   {r.reason && <div className="text-muted">{sentence(moneyCopy(r.reason))}</div>}
                   {r.paymentTx && (
                     <div className="text-muted">
-                      Payment transaction <span className={`text-foreground [overflow-wrap:anywhere] ${MONO}`}>{r.paymentTx}</span>
+                      Payment transaction{" "}
+                      {(() => {
+                        const href = solscanUrlForCluster(r.paymentTx, r.paymentCluster);
+                        const sig = <span className={`text-foreground [overflow-wrap:anywhere] ${MONO}`}>{r.paymentTx}</span>;
+                        return href ? (
+                          <a href={href} target="_blank" rel="noreferrer">
+                            {sig}
+                          </a>
+                        ) : (
+                          sig
+                        );
+                      })()}
                     </div>
                   )}
                   {r.subject && <div className={`mt-0.5 break-all text-muted ${MONO}`}>{shortAgent(r.subject)}</div>}
