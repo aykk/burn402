@@ -11,6 +11,7 @@
     "register-agents": "tsx scripts/register-agents.ts",
     "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_VULTR=1 BURN402_LIVE_X402=1 BURN402_LIVE_TRUST=1 BURN402_LIVE_E2E=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/burn/vultr.live.test.ts lib/x402/live.test.ts lib/trust/live.test.ts lib/verify/e2e.live.test.ts",
     "vultr:sweep": "tsx scripts/vultr-sweep.ts",
+    "market:sweep": "tsx scripts/market-sweep.ts",
     "trust-index": "agent-trust-discovery/bin/agent-trust-discovery -config config/trust-index/runtime.yaml",
     "burn402": "tsx cli/burn402.ts",
     "demo": "tsx scripts/demo.ts",
