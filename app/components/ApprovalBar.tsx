@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
-import { approvalSentence, surchargeLine } from "./market-copy";
+import { approvalSentence, billedHoursLine, surchargeLine } from "./market-copy";
 import type { FocusNext } from "./MarketPanel";
 import { BTN } from "./ui";
 
@@ -62,6 +62,8 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
     }
   };
   const surcharge = surchargeLine(a.surcharge);
+  // "2 hours" in the sentence above, when 1 was asked for, is explained rather than left to surprise.
+  const billed = billedHoursLine(run.need.hours, a.hours);
 
   const reason = walletReady ? null : real ? "Fund a mainnet wallet to pay on the real market." : "Set up the devnet wallet to pay on the test market.";
 
@@ -72,6 +74,7 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
           Your approval
         </h3>
         <p className="mt-1 max-w-[60ch] text-[16px] leading-[22px] font-semibold text-foreground tabular-nums [overflow-wrap:anywhere]">{approvalSentence(a)}</p>
+        {billed && <p className="mt-1 max-w-[64ch] text-foreground">{billed}</p>}
         {surcharge && <p className="mt-1 max-w-[64ch] text-foreground">{surcharge}</p>}
         <p className="mt-1 max-w-[64ch] text-[12px] leading-4 text-muted">
           A firm quote from the seller. Your agent checks the seller&apos;s payment request against this amount and your limits before it signs.

@@ -12,7 +12,7 @@ import { MarketPanel } from "@/app/components/MarketPanel";
 import { ModelPicker } from "@/app/components/ModelPicker";
 import { MarketPrices } from "@/app/components/MarketPrices";
 import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
-import { MARKET_NAME, hoursText } from "@/app/components/market-copy";
+import { MARKET_NAME, hoursText, panelBody } from "@/app/components/market-copy";
 import { OpenPurchases } from "@/app/components/OpenPurchases";
 import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/components/ActionError";
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
@@ -288,7 +288,8 @@ export default function Page() {
                   loading={compare.prices === null}
                   heading="h2"
                   onClose={closeCompare}
-                  onBack={run && ENDED.has(run.phase) ? backToRun : undefined}
+                  onBack={run && panelBody(run, true) === "compare" ? backToRun : undefined}
+                  focusOnShow
                   intro={`For ${needText(compare.need)}, ${hoursText(compare.need.hours)}, on the ${MARKET_NAME[compare.market].toLowerCase()}.`}
                   outro="Nothing was rented or paid."
                 />

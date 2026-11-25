@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PriceComparison } from "@/lib/market/prices/compare";
 import { Fold } from "./Fold";
 import { usd4 } from "./format";
@@ -29,6 +29,7 @@ export function MarketPrices({
   onBack,
   intro,
   outro,
+  focusOnShow = false,
 }: {
   prices: PriceComparison | null;
   /** Prices are on their way: shows "Reading live prices…" in the block's place. */
@@ -44,11 +45,25 @@ export function MarketPrices({
   intro?: string;
   /** A line at the end (what was not done). */
   outro?: string;
+  /**
+   * The block answers a button elsewhere on the page (Compare prices): when it first shows and again when
+   * the prices arrive, it is scrolled to the top of the view and focus moves to its heading, at every width.
+   */
+  focusOnShow?: boolean;
 }) {
   // Said once to screen readers, when the prices arrive after the block was seen waiting for them.
   const [waited, setWaited] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const hasPrices = prices !== null;
+  useEffect(() => {
+    const h = headingRef.current;
+    if (!focusOnShow || !h) return;
+    // "auto": an instant jump, never an animation (so reduced motion is respected too).
+    h.scrollIntoView({ block: "start", behavior: "auto" });
+    h.focus({ preventScroll: true });
+  }, [focusOnShow, hasPrices]);
   if (!prices && loading && !waited) setWaited(true);
   if (prices && waited && said === null) setSaid(`Market prices read. ${pricesLead(prices) ?? priceSourceLines(prices)[0].text}`);
 
@@ -69,7 +84,12 @@ export function MarketPrices({
     <section aria-labelledby={headingId} className="space-y-2">
       <div>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <H id={headingId} className={H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[13.5px] leading-5 font-semibold text-foreground"}>
+          <H
+            ref={headingRef}
+            id={headingId}
+            tabIndex={focusOnShow ? -1 : undefined}
+            className={`${H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[13.5px] leading-5 font-semibold text-foreground"} focus:outline-none`}
+          >
             Market prices
           </H>
           {onClose && (

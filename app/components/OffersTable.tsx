@@ -16,9 +16,9 @@ const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote 
  * one line counting what was left out and why. "Show all" opens every plan, left-out ones included, in
  * the same table. Columns follow the width the table actually has (a container query), so the firm quote
  * and the status are always in view without scrolling: under 30rem the status sits under the plan name,
- * Provider and the monthly list price join from 37rem, Size from 43rem. The list price here is the seller's
- * figure (the provider's monthly price ÷ 720 hours), so it can differ by a few hundredths of a cent from the hourly
- * price the provider publishes, which Market prices shows; the header and its title say which is which.
+ * Provider and the list price join from 37rem, Size from 43rem. The list price here is the seller's figure
+ * (the provider's monthly price ÷ 720 hours), so it can differ by a few hundredths of a cent from the hourly
+ * price the provider publishes, which Market prices shows; a visible line under the table says so.
  */
 export function OffersTable({ run }: { run: MarketRunView }) {
   const [all, setAll] = useState(false);
@@ -74,7 +74,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                   className={`hidden ${PAD} text-right font-medium @min-[37rem]:table-cell`}
                   title="The seller's figure: the provider's monthly price divided by 720 hours. Market prices shows the hourly price the provider publishes."
                 >
-                  Monthly list/h
+                  List price/h
                 </th>
                 <th className={`${PAD} text-right font-medium`}>Seller price/h</th>
                 <th className={`${PAD} text-right font-medium`}>Firm quote</th>
@@ -122,6 +122,10 @@ export function OffersTable({ run }: { run: MarketRunView }) {
               })}
             </tbody>
           </table>
+          {/* Only where the List price/h column shows (the same container width). */}
+          <p className="mt-2 hidden max-w-[64ch] text-[12px] leading-4 text-muted @min-[37rem]:block">
+            List price here is the provider&apos;s monthly price spread over a 30-day month; the provider&apos;s own hourly price is in Market prices.
+          </p>
         </div>
       )}
 

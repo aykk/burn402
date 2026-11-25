@@ -115,7 +115,8 @@ export function MarketPanel({
   send: Send;
   /**
    * The prices compared from the form, when open: shown in place of the intro while there is no run, and
-   * in place of an ended run's body (that block carries "Back to the last run"). Never over a run in flight.
+   * in place of an ended run's body when that run needs nothing more (that block carries "Back to the last
+   * run"); under the body of an ended run that still does (a machine, a payment). Never over a run in flight.
    */
   compare?: ReactNode;
 }) {
@@ -132,7 +133,9 @@ export function MarketPanel({
   useEffect(() => {
     if (focusSignal === focusedSignal.current || !headingRef.current) return;
     focusedSignal.current = focusSignal;
-    headingRef.current.focus();
+    // At narrow widths the heading can be far from the control that was pressed: bring it to the top, without animating.
+    headingRef.current.scrollIntoView({ block: "start", behavior: "auto" });
+    headingRef.current.focus({ preventScroll: true });
   });
   useEffect(() => {
     if (!focusNext.current || !run) return;
@@ -241,6 +244,9 @@ export function MarketPanel({
       )}
 
       <MachinePanel run={run} nowMs={nowMs} send={send} headingRef={machineHeadingRef} onFocusNext={setFocusNext} />
+
+      {/* An ended run that still needs the owner keeps Destroy now and its money message in view; the comparison goes under it. */}
+      {body === "run+compare" && compare}
     </div>
   );
 }
