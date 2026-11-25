@@ -1,4 +1,5 @@
 import type { Journal, OpenPurchase } from "./journal";
+import { usdPlain } from "./money";
 import type { MarketPhase, MarketRun, MarketRunView } from "./run";
 import type { SellerClient } from "./seller";
 
@@ -11,8 +12,9 @@ export type RecoverResult = { ok: true; destroyed: string[]; message: string } |
  * Destroys the machine behind a journal purchase that is still open (a restart left it, or the
  * run lost track of it). With no machine id on record (only an intent, or an unknown outcome),
  * the wallet's live machines with the same plan and region are destroyed instead, except any
- * id in `exclude` (machines that belong to other runs). When none match, the purchase is closed
- * in the journal as failed: nothing is running for it.
+ * id in `exclude` (machines that belong to other runs). When none match and only an intent was
+ * recorded, the purchase is closed in the journal as failed: nothing is running for it. A payment
+ * that was sent (paid or unknown) with no machine stays open: the money may be out.
  */
 export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, journal: Journal, opts: { exclude?: Set<string>; now?: () => number } = {}): Promise<RecoverResult> {
   const now = opts.now ?? Date.now;
@@ -26,6 +28,11 @@ export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, jo
     return { ok: false, error: `Could not list the wallet's machines: ${(error as Error).message}` };
   }
   const base = { run: open.run, market: open.market, seller: open.seller, plan: open.plan, region: open.region, usd: open.usd, tx: open.tx };
+  if (ids.length === 0 && (open.lastEvent === "paid" || open.lastEvent === "unknown")) {
+    const usd = usdPlain(open.usd);
+    const which = open.lastEvent === "paid" ? `The seller kept the payment of ${usd} and delivered no machine.` : `The payment of ${usd} may have gone through; no machine was found for it.`;
+    return { ok: true, destroyed: [], message: `There is no machine to destroy for this purchase. ${which} It stays on the list.` };
+  }
   if (ids.length === 0) {
     journal.append({ ...base, at: now(), event: "failed", instance: null, detail: "no machine found for this payment" });
     return { ok: true, destroyed: [], message: `No machine is running for that payment (${open.plan} in ${open.region}); it is closed` };

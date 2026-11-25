@@ -234,6 +234,7 @@ describe("TestSeller faults", () => {
     const raw = await seller.handle(post(q.body, signed));
     expect(raw.status).toBe(402);
     expect(raw.headers.get("PAYMENT-REQUIRED")).toBeTruthy();
+    expect(await raw.json()).toEqual({ error: "payment rejected" }); // short, and no quote_usd to look like a price cap
     expect(seller.settlements).toHaveLength(2);
   });
 

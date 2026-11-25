@@ -101,3 +101,52 @@ describe("conversions", () => {
   });
   it("usdToAtomic rejects junk", () => expect(() => usdToAtomic(NaN)).toThrow());
 });
+
+describe("checkPayment details are plain", () => {
+  const detail = (over: Record<string, unknown>) => {
+    const r = checkPayment({ ...base, ...over } as never);
+    return r.ok ? "ok" : r.detail;
+  };
+  const detailAcc = (over: Record<string, unknown>) => detail({ accepts: { ...real, ...over } });
+
+  it("names the token the seller asked for", () => {
+    expect(detailAcc({ asset: "So11111111111111111111111111111111111111112" })).toBe("The seller asked to be paid in SOL instead of USDC on Solana mainnet.");
+    expect(detailAcc({ asset: "Abcd1111111111111111111111111111111111Wxyz" })).toBe("The seller asked to be paid in another token (Abcd…Wxyz) instead of USDC on Solana mainnet.");
+    expect(detailAcc({ asset: NETWORKS.test.usdc })).toBe("The seller asked to be paid in USDC from Solana devnet instead of USDC on Solana mainnet.");
+  });
+
+  it("names the network the seller asked for", () => {
+    expect(detailAcc({ network: SOLANA_DEVNET })).toBe("The seller asked to be paid on Solana devnet instead of Solana mainnet.");
+    expect(detailAcc({ scheme: "upto" })).toBe('The seller asked for a kind of payment this agent does not make ("upto"); it pays only exact amounts.');
+  });
+
+  it("says the new price and the approved one in exact dollars", () => {
+    expect(detail({ accepts: { ...real, amount: "12458" }, approvedAtomic: BigInt(10382) })).toBe("The seller now asks $0.012458, more than the $0.010382 you approved.");
+  });
+
+  it("says budget and hourly limit in dollars", () => {
+    expect(detail({ budgetLeftUsd: 0.005 })).toBe("$0.0100 is more than the $0.005 left in your budget.");
+    expect(detail({ rateUsdHr: 0.009 })).toBe("$0.01 an hour is more than your hourly limit of $0.009.");
+  });
+
+  it("uses no codes or atomic units in any detail", () => {
+    const cases = [
+      detailAcc({ asset: "So11111111111111111111111111111111111111112" }),
+      detail({ accepts: { ...real, amount: "12458" }, approvedAtomic: BigInt(10382) }),
+      detail({ budgetLeftUsd: 0.005 }),
+      detail({ rateUsdHr: 0.009 }),
+      detail({ alreadyPaid: true }),
+      detailAcc({ payTo: "" }),
+    ];
+    for (const d of cases) {
+      expect(d).not.toMatch(/[A-Z]{3,}_[A-Z]+|atomic|So1111/);
+    }
+  });
+});
+
+describe("NETWORKS rpcUrl", () => {
+  it("has a public RPC per market", () => {
+    expect(NETWORKS.test.rpcUrl).toBe("https://api.devnet.solana.com");
+    expect(NETWORKS.real.rpcUrl).toBe("https://api.mainnet-beta.solana.com");
+  });
+});

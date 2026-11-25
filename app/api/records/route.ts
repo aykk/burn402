@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getSession } from "@/lib/demo/session";
+import { describePurchase } from "@/lib/market/record";
 import { fromCompact, verifyJws } from "@/lib/mandate";
 import { DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict } from "@/lib/verify";
 
@@ -153,16 +154,19 @@ export async function GET(request: Request) {
         let verified = false;
         try {
           const body = JSON.parse(new TextDecoder().decode(await gateway.fetchData(item.id))) as {
-            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null };
+            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null; tx?: string | null };
             jws?: string;
           };
           steps.push({ name: "arweave item", ok: true, detail: `uploaded by ${item.ownerKey}` });
           if (body.transaction) {
             issuedAt = body.transaction.at ? Math.floor(body.transaction.at) : issuedAt;
             subject = body.transaction.subject ?? subject;
-            headline = plainTransaction(body.transaction.outcome ?? null, body.transaction.plan ?? null, body.transaction.usd);
-            outcome = transactionOutcome(body.transaction.outcome ?? null);
-            reason = plainRefusal(body.transaction.reason);
+            const t = body.transaction;
+            // a payment the seller kept, an unconfirmed payment, or the owner's own cancel: worded by the market code
+            const words = describePurchase({ outcome: t.outcome ?? null, plan: t.plan ?? null, usd: t.usd, tx: t.tx, reason: t.reason });
+            headline = words?.headline ?? plainTransaction(t.outcome ?? null, t.plan ?? null, t.usd);
+            outcome = words ? { label: words.label, tone: words.tone } : transactionOutcome(t.outcome ?? null);
+            reason = words ? words.reason : plainRefusal(t.reason);
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {

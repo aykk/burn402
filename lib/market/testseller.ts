@@ -267,7 +267,7 @@ export class TestSeller {
       // dishonest: keep the money, build nothing, and ask to be paid again as if the payment had been rejected
       const again = await this.processor.requirements(this.priceUsd(plan, hours, kind));
       const header = await this.processor.paymentRequiredHeader(again, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
-      return fail(json(402, { error: "payment rejected, pay again", quote_usd: Number(again.amount) / 1e6 }, { "PAYMENT-REQUIRED": header }));
+      return fail(json(402, { error: "payment rejected" }, { "PAYMENT-REQUIRED": header }));
     }
 
     const n = ++this.counter;

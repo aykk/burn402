@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { usdPlain } from "./money";
 import type { MarketId } from "./types";
 
 export type JournalEvent = "intent" | "paid" | "unknown" | "active" | "released" | "failed";
@@ -29,7 +30,23 @@ export type OpenPurchase = {
   tx: string | null;
   state: "paid" | "unknown" | "active";
   at: number;
+  /** the latest journal event: "intent" means the outcome was never recorded */
+  lastEvent: "intent" | "paid" | "unknown" | "active";
+  /** one plain sentence on what this purchase is */
+  what: string;
+  /** a purchase the overspend test made (its runs are named ovs_...), not one of the owner's */
+  overspendTest: boolean;
 };
+
+/** One plain sentence for an open purchase. */
+function describeOpen(p: Pick<OpenPurchase, "plan" | "region" | "usd" | "instance" | "lastEvent">): string {
+  const usd = usdPlain(p.usd);
+  const what = `${p.plan} in ${p.region}`;
+  if (p.instance) return `Paid ${usd} for ${what}. Machine ${p.instance} may still be running.`;
+  if (p.lastEvent === "paid" || p.lastEvent === "active") return `The seller kept a payment of ${usd} for ${what} and delivered no machine.`;
+  if (p.lastEvent === "unknown") return `A payment of ${usd} for ${what} was signed and sent, and it is not known whether it went through. No machine is known for it.`;
+  return `A purchase of ${what} was started and its outcome was never recorded. A payment of up to ${usd} may have been made.`;
+}
 
 const EVENTS: readonly string[] = ["intent", "paid", "unknown", "active", "released", "failed"];
 
@@ -71,7 +88,7 @@ export class Journal {
 
   /** Runs whose money may be out: latest event is intent (reported unknown), paid, unknown or active. */
   open(): OpenPurchase[] {
-    const runs = new Map<string, OpenPurchase & { event: JournalEvent }>();
+    const runs = new Map<string, Omit<OpenPurchase, "lastEvent" | "what" | "overspendTest"> & { event: JournalEvent }>();
     for (const x of this.all()) {
       const prev = runs.get(x.run);
       runs.set(x.run, {
@@ -91,7 +108,14 @@ export class Journal {
     const open: OpenPurchase[] = [];
     for (const { event, ...p } of runs.values()) {
       if (event === "released" || event === "failed") continue;
-      open.push({ ...p, state: event === "paid" || event === "active" ? event : "unknown" });
+      const lastEvent = event;
+      open.push({
+        ...p,
+        state: event === "paid" || event === "active" ? event : "unknown",
+        lastEvent,
+        what: describeOpen({ ...p, lastEvent }),
+        overspendTest: p.run.startsWith("ovs_"),
+      });
     }
     return open;
   }

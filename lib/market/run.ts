@@ -1,8 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 import { DEFAULT_RULES } from "./types";
-import { choose, summarize, type Candidate, type Rejection } from "./choose";
+import { choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
 import { checkPayment, NETWORKS, type Accepts } from "./guard";
+import { usdExact } from "./money";
 import type { Journal, JournalEntry } from "./journal";
 import type { Payer, PaymentRequired } from "./pay";
 import { QuoteError, type Instance, type ProvisionOutcome, type Quote, type SellerClient } from "./seller";
@@ -26,8 +27,13 @@ export type OfferRow = {
   hourlyUsd: number;
   estimateUsd: number | null;
   quoteUsd: number | null;
+  /** the firm quote in exact dollars ("$0.010382"), when quoted */
+  quoteExact: string | null;
   state: "chosen" | "quoted" | "candidate" | "quote failed" | "left out";
+  /** plain words for the owner */
   note: string | null;
+  /** machine code behind the note (a RejectReason, guard or quote error code) */
+  code: string | null;
 };
 
 export type PurchaseRecord = { at: number; outcome: "accepted" | "refused" | "failed"; reason: string | null; plan: string; region: string; usd: number | null; tx: string | null; server: string | null };
@@ -44,8 +50,33 @@ export type MarketRunView = {
   sources: { name: string; ok: boolean; count: number; note: string | null }[];
   rows: OfferRow[];
   leftOut: { reason: string; count: number }[];
-  approval: { code: string; usd: number; atomic: string; token: "USDC"; network: string; payTo: string; plan: string; region: string; hours: number; seller: string } | null;
-  payment: { usd: number; tx: string | null; at: number; payer: string } | null;
+  approval: {
+    code: string;
+    usd: number;
+    atomic: string;
+    /** the exact amount in dollars, e.g. "$0.010382" */
+    exact: string;
+    /** the seller's short-rental surcharge included in the amount, if any */
+    surcharge: { pct: number; underHours: number } | null;
+    token: "USDC";
+    network: string;
+    payTo: string;
+    plan: string;
+    region: string;
+    hours: number;
+    seller: string;
+  } | null;
+  /**
+   * Set as soon as the signed payment is sent ("unconfirmed"); "confirmed" once the seller reports
+   * success or the transfer is found on chain. `usd` is the signed amount.
+   */
+  payment: { usd: number; atomic: string; tx: string | null; at: number; payer: string; status: "confirmed" | "unconfirmed" } | null;
+  /** "nothing" only when no payment was ever signed; "paid" when confirmed; "maybe" otherwise. */
+  spent: "nothing" | "paid" | "maybe";
+  /** plain notes when the agent used another region or plan than its first choice */
+  fallbacks: string[];
+  /** true for the runs the overspend test makes; the owner's runs are false */
+  overspendTest: boolean;
   machine: {
     id: string;
     ip: string | null;
@@ -57,7 +88,7 @@ export type MarketRunView = {
     plan: string;
     region: string;
   } | null;
-  attempts: { at: number; plan: string; region: string; what: string; ok: boolean }[];
+  attempts: { at: number; plan: string; region: string; what: string; ok: boolean; code: string | null }[];
   startedAt: number;
   paidAt: number | null;
   readyAt: number | null;
@@ -85,6 +116,13 @@ export type MarketRunDeps = {
   newCode?: () => string;
   onRecord?: (record: PurchaseRecord) => void;
   log?: (line: string) => void;
+  /**
+   * Looks on chain for this run's transfer to the seller. Absent means the run cannot check.
+   * Never asked to pay; read-only.
+   */
+  findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number }) => Promise<{ tx: string } | null>;
+  /** marks the overspend test's runs so they can never pass for the owner's */
+  overspendTest?: boolean;
 };
 
 const MAX_QUOTES = 3;
@@ -100,21 +138,72 @@ const PROBE_GAP_MS = 10_000;
 const PROBE_TIMEOUT_MS = 5_000;
 const EXPIRY_SLACK_MS = 120_000;
 const MAX_TIMER_MS = 2_147_483_647;
-const NO_WALLET = "no wallet is set up for this market";
-const UNKNOWN_OUTCOME = "payment outcome unknown; check the journal";
+const NO_WALLET = "Nothing was paid: no wallet is set up for this market.";
+const CHAIN_CHECKS = 6;
+const CHAIN_GAP_MS = 5_000;
 const FALLBACK_CODES = new Set(["OUT_OF_STOCK", "SELLER_ERROR"]);
 const TEST_NET_3 = /^203\.0\.113\.\d{1,3}$/;
 const DESTROY_RETRY_MS = 60_000;
 const DESTROY_RETRIES = 10;
-const STOPPED = "Stopped on request before anything was paid";
+const STOPPED = "You stopped the run before anything was paid.";
+const CANCELLED = "You cancelled before paying. Nothing was spent.";
+const ALREADY_PAID = "This run already made a payment, so the agent will not pay again.";
+
+/** Why a chooser left a plan out, in words. */
+export function leftOutWords(reason: RejectReason | string, need: Pick<Need, "kind">): string {
+  switch (reason) {
+    case "WRONG_KIND":
+      return need.kind === "cpu" ? "GPU plans (you asked for CPU)" : "CPU plans (you asked for a GPU)";
+    case "TOO_SMALL":
+      return "too small";
+    case "OUT_OF_STOCK":
+      return "out of stock";
+    case "NO_REGION":
+      return "not in your regions";
+    case "SPOT_NOT_ALLOWED":
+      return "interruptible (you did not allow that)";
+    case "NOT_RENTABLE":
+      return "not for rent by an agent";
+    case "OVER_RATE":
+      return "over your hourly limit";
+    case "OVER_BUDGET":
+      return "over your budget";
+    default:
+      return String(reason).toLowerCase().replace(/_/g, " ");
+  }
+}
+
+/** How a failed quote or purchase reads in a fallback note ("ewr was out of stock"). */
+function failedWords(code: string): string {
+  switch (code) {
+    case "OUT_OF_STOCK":
+      return "was out of stock";
+    case "PRICE_CAP":
+    case "OVER_BUDGET":
+    case "OVER_RATE":
+      return "was over your limits";
+    case "OVER_QUOTE":
+      return "raised its price";
+    case "WRONG_ASSET":
+    case "WRONG_NETWORK":
+    case "MALFORMED":
+    case "NO_402":
+      return "asked for a payment the agent will not make";
+    case "UNREACHABLE":
+      return "could not be reached";
+    default:
+      return "could not be bought";
+  }
+}
+
+const listWords = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 /** A seller-supplied address is used only when it is a plain IP address. */
 const validIp = (ip: string | null): string | null => (ip && net.isIP(ip) ? ip : null);
 
 /**
- * Addresses the port-22 probe must never connect to: loopback, private, shared (CGNAT), link-local,
- * documentation, benchmarking, multicast, reserved, unique-local, unspecified and the IPv6
- * translation/6to4 prefixes that can lead back into IPv4 space.
+ * IPv4 addresses the port-22 probe must never connect to: unspecified, private, shared (CGNAT),
+ * loopback, link-local, protocol assignments, documentation, benchmarking, multicast and reserved.
  */
 const NOT_PUBLIC = (() => {
   const list = new net.BlockList();
@@ -135,17 +224,32 @@ const NOT_PUBLIC = (() => {
     ["240.0.0.0", 4],
   ];
   for (const [base, bits] of v4) list.addSubnet(base, bits, "ipv4");
+  return list;
+})();
+
+/** IPv6 is an allowlist: only global unicast (2000::/3) is probed. */
+const GLOBAL_V6 = (() => {
+  const list = new net.BlockList();
+  list.addSubnet("2000::", 3, "ipv6");
+  return list;
+})();
+
+/**
+ * Special blocks the probe never connects to, even inside 2000::/3: the IETF block (Teredo and
+ * others), documentation (both prefixes), 6to4, and the NAT64 prefixes (outside 2000::/3 anyway;
+ * listed so the table says so).
+ */
+const SPECIAL_V6 = (() => {
+  const list = new net.BlockList();
   const v6: [string, number][] = [
-    ["::", 96], // unspecified, loopback and the deprecated IPv4-compatible block
-    ["64:ff9b::", 96],
-    ["2002::", 16],
+    ["2001::", 23],
     ["2001:db8::", 32],
-    ["fe80::", 10],
-    ["fc00::", 7],
-    ["ff00::", 8],
+    ["3fff::", 20],
+    ["2002::", 16],
+    ["64:ff9b::", 96],
+    ["64:ff9b:1::", 48],
   ];
   for (const [base, bits] of v6) list.addSubnet(base, bits, "ipv6");
-  list.addAddress("::1", "ipv6");
   return list;
 })();
 
@@ -156,7 +260,7 @@ export function probeable(ip: string): boolean {
     if (ip.includes("%")) return false; // a zone id only makes sense on a local link
     const mapped = mappedIpv4(ip);
     if (mapped) return !NOT_PUBLIC.check(mapped, "ipv4");
-    return !NOT_PUBLIC.check(ip, "ipv6");
+    return GLOBAL_V6.check(ip, "ipv6") && !SPECIAL_V6.check(ip, "ipv6");
   } catch {
     return false; // anything that cannot be checked is not probed
   }
@@ -233,7 +337,14 @@ export class MarketRun {
   private readonly tried = new Set<string>();
   private quoteFailures = 0;
   private lastQuoteError = "";
-  private fallbacks = 0;
+  private fallbackCount = 0;
+  private fallbackNotes: string[] = [];
+  /** plan key -> the regions that failed for it, with the code */
+  private readonly failures = new Map<string, { region: string; code: string }[]>();
+  private ranked: Candidate[] = [];
+  private rules: HourlyRules = DEFAULT_RULES;
+  /** when the purchase intent was written, just before signing: the chain is searched from here */
+  private intentAt: number | null = null;
   /** the quote shown at the approval stop, or being paid */
   private current: Quote | null = null;
   /** true once the payer has been asked to sign: no fallback and no second payment after this */
@@ -274,7 +385,7 @@ export class MarketRun {
 
   cancel(): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "approval") return { ok: false, error: "only a run waiting for approval can be cancelled" };
-    this.refuse("CANCELLED", "The owner cancelled at the approval stop; nothing was signed");
+    this.refuse("CANCELLED", CANCELLED);
     this.current = null;
     return { ok: true };
   }
@@ -314,6 +425,9 @@ export class MarketRun {
       leftOut: this.leftOut,
       approval: this.approval,
       payment: this.payment,
+      spent: !this.alreadyPaid ? "nothing" : this.payment?.status === "confirmed" ? "paid" : "maybe",
+      fallbacks: this.fallbackNotes,
+      overspendTest: this.d.overspendTest === true,
       machine: this.machine,
       attempts: this.attempts,
       startedAt: this.startedAt,
@@ -332,7 +446,16 @@ export class MarketRun {
     try {
       await step();
     } catch (e) {
-      this.fail(`Unexpected error: ${msg(e)}`);
+      this.log(`unexpected error: ${msg(e)}`);
+      // a signed payment with no machine to show for it: never say nothing was spent
+      if (this.alreadyPaid && !this.ended && !this.machine && this.current) {
+        try {
+          return await this.afterSignature(this.current, "unclear", `the run stopped on an unexpected error: ${msg(e)}`);
+        } catch (e2) {
+          return this.fail(this.unconfirmedText("unclear"), "PAYMENT_UNCONFIRMED", `after-payment check failed: ${msg(e2)}`);
+        }
+      }
+      this.fail(`The run stopped on an unexpected error: ${msg(e)}`);
     }
   }
 
@@ -359,6 +482,7 @@ export class MarketRun {
       }
     }
     if (!this.sources.some((s) => s.ok)) return this.fail(`No price list could be read: ${this.sources.map((s) => s.note).join("; ")}`);
+    this.rules = rules;
     return this.choose(offers, rules);
   }
 
@@ -366,11 +490,12 @@ export class MarketRun {
     if (this.stopped) return;
     this.setPhase("choosing");
     const { ranked, rejected } = choose(offers, this.d.need, this.d.limits, rules);
+    this.ranked = ranked;
     this.leftOut = summarize(rejected);
     this.rows = [...ranked.map((c) => this.candidateRow(c)), ...rejected.map((r) => this.leftOutRow(r))];
     if (ranked.length === 0) {
-      const counts = this.leftOut.map((l) => `${l.count} ${l.reason}`).join(", ");
-      return this.refuse("NOTHING_FITS", `No plan fits the need inside the limits${counts ? ` (${counts})` : ""}`);
+      const counts = this.leftOut.map((l) => `${l.count} ${leftOutWords(l.reason, this.d.need)}`).join(", ");
+      return this.refuse("NOTHING_FITS", counts ? `No plan fits what you asked for inside your limits: ${counts}.` : "No plan fits what you asked for inside your limits: the price list was empty.");
     }
     return this.quote(ranked);
   }
@@ -395,7 +520,7 @@ export class MarketRun {
       }
     }
     if (this.stopped) return;
-    if (this.quotes.length === 0) return this.fail(`No usable quote: ${this.lastQuoteError || "no seller answered"}`);
+    if (this.quotes.length === 0) return this.fail(`No seller gave a usable quote. The last problem: ${this.lastQuoteError || "no seller answered."}`);
     this.quotes.sort((a, b) => a.amountUsd - b.amountUsd); // stable: ties keep the chooser's order
     return this.offer(this.quotes[0]);
   }
@@ -409,8 +534,7 @@ export class MarketRun {
     try {
       q = await this.d.seller.quote(c, region, { sshPublicKey: this.key.publicKey, maxTotalUsd: this.d.limits.budgetUsd });
     } catch (e) {
-      const why = e instanceof QuoteError ? `${e.code}: ${e.message}` : msg(e);
-      return this.quoteFailed(c, region, why);
+      return e instanceof QuoteError ? this.quoteFailed(c, region, e.message, e.code) : this.quoteFailed(c, region, msg(e), "SELLER_ERROR");
     }
     const g = checkPayment({
       accepts: q.accepts,
@@ -421,18 +545,54 @@ export class MarketRun {
       hours: q.hours,
       alreadyPaid: this.alreadyPaid,
     });
-    if (!g.ok) return this.quoteFailed(c, region, `${g.code}: ${g.detail}`, q.amountUsd);
-    this.attempt(c.offer.id, region, `quoted $${q.amountUsd}`, true);
-    this.updateRow(c.offer, { state: "quoted", region, hours: q.hours, quoteUsd: q.amountUsd, note: null });
+    if (!g.ok) return this.quoteFailed(c, region, g.detail, g.code, q.amountUsd, q.atomic);
+    this.attempt(c.offer.id, region, `quoted ${usdExact(q.atomic)}`, true);
+    this.updateRow(c.offer, { state: "quoted", region, hours: q.hours, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
     return q;
   }
 
-  private quoteFailed(c: Candidate, region: string, why: string, quoteUsd: number | null = null): null {
+  private quoteFailed(c: Candidate, region: string, why: string, code: string, quoteUsd: number | null = null, atomic: string | null = null): null {
     this.quoteFailures++;
     this.lastQuoteError = why;
-    this.attempt(c.offer.id, region, `quote failed: ${why}`, false);
-    this.updateRow(c.offer, { state: "quote failed", region, quoteUsd, note: why });
+    this.noteFailure(c.offer, region, code);
+    this.attempt(c.offer.id, region, `Quote failed: ${why}`, false, code);
+    this.updateRow(c.offer, { state: "quote failed", region, quoteUsd, quoteExact: atomic ? usdExact(atomic) : null, note: why, code });
     return null;
+  }
+
+  private noteFailure(o: Offer, region: string, code: string): void {
+    const k = keyOf(o.seller, o.id);
+    const list = this.failures.get(k) ?? [];
+    if (!list.some((f) => f.region === region)) list.push({ region, code });
+    this.failures.set(k, list);
+  }
+
+  /** Plain notes for the regions and plans tried before `q` that could not be bought. */
+  private fallbackNotesFor(q: Quote): string[] {
+    const notes: string[] = [];
+    const mine = keyOf(q.candidate.offer.seller, q.candidate.offer.id);
+    const at = this.ranked.findIndex((c) => keyOf(c.offer.seller, c.offer.id) === mine);
+    for (const [i, c] of this.ranked.entries()) {
+      const k = keyOf(c.offer.seller, c.offer.id);
+      const failed = this.failures.get(k) ?? [];
+      if (k === mine || failed.length === 0 || (at >= 0 && i > at)) continue;
+      // a plan with a quote still unused was not given up on; it was just dearer
+      if (this.quotes.some((x) => keyOf(x.candidate.offer.seller, x.candidate.offer.id) === k && !this.used.has(x))) continue;
+      const codes = [...new Set(failed.map((f) => f.code))];
+      const why = codes.length === 1 ? failedWords(codes[0]) : "could not be bought";
+      notes.push(`${c.offer.id} ${why} in ${listWords(failed.map((f) => f.region))}, so the agent used ${q.candidate.offer.id}.`);
+    }
+    for (const f of this.failures.get(mine) ?? []) {
+      if (f.region !== q.region) notes.push(`${f.region} ${failedWords(f.code)}, so the agent used ${q.region}.`);
+    }
+    return notes;
+  }
+
+  private surchargeFor(q: Quote): { pct: number; underHours: number } | null {
+    const r = this.rules;
+    if (q.candidate.offer.spot || !r.enabled || !(q.hours < r.surchargeBelowHours)) return null;
+    const pct = q.candidate.offer.kind === "gpu" ? r.surchargePct.gpu : r.surchargePct.machine;
+    return Number.isFinite(pct) && pct > 0 ? { pct, underHours: r.surchargeBelowHours } : null;
   }
 
   /** Puts a quote forward: stop for approval when it applies, else pay. */
@@ -442,13 +602,16 @@ export class MarketRun {
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     this.used.add(q);
     this.current = q;
+    this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
-    this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, note: null });
+    this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
     if (this.d.market === "real" || this.d.askBeforePaying) {
       this.approval = {
         code: this.newCode(),
         usd: q.amountUsd,
         atomic: q.atomic,
+        exact: usdExact(q.atomic),
+        surcharge: this.surchargeFor(q),
         token: "USDC",
         network: NETWORKS[this.d.market].label,
         payTo: q.accepts.payTo,
@@ -468,7 +631,7 @@ export class MarketRun {
     this.setPhase("paying");
     const payer = this.d.payer;
     if (!payer) return this.fail(NO_WALLET);
-    if (this.alreadyPaid || this.signing) return this.fail("This run already has a payment; refusing to pay again");
+    if (this.alreadyPaid || this.signing) return this.fail(ALREADY_PAID);
 
     // machines that exist before this payment cannot be the one it buys
     let before = new Set<string>();
@@ -485,9 +648,9 @@ export class MarketRun {
     } catch (e) {
       return this.fail(`Could not write the purchase journal, so nothing was paid: ${msg(e)}`);
     }
-    this.attempt(q.candidate.offer.id, q.region, `paying $${q.amountUsd}`, true);
+    this.intentAt = intentAt;
+    this.attempt(q.candidate.offer.id, q.region, `paying ${usdExact(q.atomic)}`, true);
 
-    let signedUsd: number | null = null;
     const payFn = async (required: PaymentRequired, accepts: Accepts): Promise<Record<string, string> | { refused: string }> => {
       const g = checkPayment({
         accepts,
@@ -501,56 +664,115 @@ export class MarketRun {
       });
       if (!g.ok) {
         this.refusal = { code: g.code, detail: g.detail };
-        return { refused: `${g.code}: ${g.detail}` };
+        return { refused: g.detail };
       }
       this.signing = true;
       const headers = await payer.payHeaders(required);
       this.alreadyPaid = true;
-      signedUsd = g.usd;
+      // from here the money may be out: the payment shows as sent until it is confirmed
+      this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.address, status: "unconfirmed" };
       return headers;
     };
 
     const outcome: ProvisionOutcome = await this.d.seller.provision(q, payFn);
-    const paidUsd = signedUsd ?? q.amountUsd;
 
     if (outcome.kind === "active" || outcome.kind === "pending") {
-      this.recordPayment(paidUsd, outcome.tx, payer.address);
-      this.safeAppend(this.entry("paid", q, { usd: paidUsd, tx: outcome.tx, instance: outcome.instance.id }));
+      this.confirmPayment(outcome.tx);
+      if (!outcome.tx) await this.lookUpTx(q);
+      const p = this.payment!;
+      this.safeAppend(this.entry("paid", q, { usd: p.usd, tx: p.tx, instance: outcome.instance.id }));
       return this.provision(q, outcome.instance);
     }
 
     if (outcome.kind === "not_charged") {
-      const why = `${outcome.code}: ${outcome.detail}`;
-      this.safeAppend(this.entry("failed", q, { detail: why }));
-      this.attempt(q.candidate.offer.id, q.region, `not charged: ${why}`, false);
+      // a signed payment was sent: whatever the seller says, it may have kept the money
+      if (this.alreadyPaid) {
+        const refused = outcome.code === "PAYMENT_REJECTED" || outcome.code === "PRICE_CAP";
+        this.attempt(q.candidate.offer.id, q.region, outcome.detail, false, outcome.code);
+        return this.afterSignature(q, refused ? "rejected" : "unclear", outcome.detail);
+      }
+      this.safeAppend(this.entry("failed", q, { detail: `${outcome.code}: ${outcome.detail}` }));
+      this.attempt(q.candidate.offer.id, q.region, `Not charged: ${outcome.detail}`, false, outcome.code);
       if (outcome.code === "REFUSED_BY_GUARD" && this.refusal) {
-        this.updateRow(q.candidate.offer, { state: "quote failed", note: why });
+        this.updateRow(q.candidate.offer, { state: "quote failed", note: this.refusal.detail, code: this.refusal.code });
         return this.refuse(this.refusal.code, this.refusal.detail);
       }
       // the owner asked to stop while this attempt was in flight: no fallback purchase
       if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
-      if (FALLBACK_CODES.has(outcome.code) && !this.signing && this.fallbacks < MAX_FALLBACKS) {
-        this.updateRow(q.candidate.offer, { state: "quote failed", note: why });
+      if (FALLBACK_CODES.has(outcome.code) && !this.signing && this.fallbackCount < MAX_FALLBACKS) {
+        this.noteFailure(q.candidate.offer, q.region, outcome.code);
+        this.updateRow(q.candidate.offer, { state: "quote failed", note: outcome.detail, code: outcome.code });
         const next = await this.nextOption(q);
         if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
         if (next) {
-          this.fallbacks++;
+          this.fallbackCount++;
           this.approval = null;
           return this.offer(next);
         }
       }
-      return this.fail(why);
+      return this.fail(outcome.detail);
     }
 
     // unknown: never sign again; look for the machine
     if (outcome.kind !== "unknown") return this.fail("Unexpected provision outcome");
+    const paidUsd = this.payment?.usd ?? q.amountUsd;
     this.safeAppend(this.entry("unknown", q, { usd: paidUsd, detail: outcome.detail }));
-    this.attempt(q.candidate.offer.id, q.region, `outcome unknown: ${outcome.detail}`, false);
+    this.attempt(q.candidate.offer.id, q.region, outcome.detail, false, "UNKNOWN");
     const found = await this.findMachine(q, intentAt, before);
-    if (!found) return this.fail(`${UNKNOWN_OUTCOME} (${outcome.detail})`);
-    this.recordPayment(paidUsd, null, payer.address);
-    this.safeAppend(this.entry("paid", q, { usd: paidUsd, tx: null, instance: found.id, detail: "adopted from the instance list" }));
+    if (!found) return this.afterSignature(q, "unclear", outcome.detail, true);
+    this.paidAt = this.now();
+    await this.lookUpTx(q);
+    this.safeAppend(this.entry("paid", q, { usd: paidUsd, tx: this.payment?.tx ?? null, instance: found.id, detail: "adopted from the instance list" }));
     return this.provision(q, found);
+  }
+
+  /**
+   * A signed payment was sent and no machine came of it. The run never pays again: it looks for the
+   * transfer on chain (up to 6 times, 5 s apart), then ends failed with what it found. The journal
+   * keeps the purchase open either way (paid when found, unknown when not).
+   */
+  private async afterSignature(q: Quote, kind: "rejected" | "unclear", detail: string, unknownWritten = false): Promise<void> {
+    if (this.ended) return;
+    const usd = this.payment?.usd ?? q.amountUsd;
+    if (!unknownWritten) this.safeAppend(this.entry("unknown", q, { usd, detail }));
+    this.updateRow(q.candidate.offer, { note: detail });
+    const found = await this.checkChain(q, CHAIN_CHECKS);
+    if (found && this.payment) {
+      this.confirmPayment(found.tx);
+      this.safeAppend(this.entry("paid", q, { usd, tx: found.tx, instance: null, detail: "the seller kept the payment and delivered no machine" }));
+      return this.fail(`The seller took one payment of ${usdExact(this.payment.atomic)} and did not deliver a machine.`, "SELLER_KEPT_PAYMENT");
+    }
+    return this.fail(this.unconfirmedText(kind), "PAYMENT_UNCONFIRMED");
+  }
+
+  private unconfirmedText(kind: "rejected" | "unclear"): string {
+    const amount = this.payment ? usdExact(this.payment.atomic) : this.current ? usdExact(this.current.atomic) : "an unknown amount";
+    const seller = kind === "rejected" ? "The seller says it was not accepted" : "The seller did not confirm it";
+    return `A payment of ${amount} was signed and sent. ${seller}, and no transfer was found on chain yet. Check again later before paying anyone else.`;
+  }
+
+  /** Looks for this run's transfer on chain; null when the run cannot check or nothing turns up. */
+  private async checkChain(q: Quote, tries: number): Promise<{ tx: string } | null> {
+    const find = this.d.findPayment;
+    const p = this.payment;
+    if (!find || !p) return null;
+    for (let i = 0; i < tries; i++) {
+      if (i > 0) await this.sleep(CHAIN_GAP_MS);
+      try {
+        const r = await find({ payer: p.payer, payTo: q.accepts.payTo, atomic: p.atomic, sinceMs: this.intentAt ?? this.startedAt });
+        if (r && typeof r.tx === "string" && r.tx) return r;
+      } catch (e) {
+        this.log(`chain check failed: ${msg(e)}`);
+      }
+    }
+    return null;
+  }
+
+  /** One chain check to fill in a transaction id the seller did not report. */
+  private async lookUpTx(q: Quote): Promise<void> {
+    if (this.payment?.tx) return;
+    const found = await this.checkChain(q, 1);
+    if (found) this.confirmPayment(found.tx);
   }
 
   /** After a not-charged failure: the candidate's next region, else the next quoted candidate. */
@@ -709,11 +931,13 @@ export class MarketRun {
 
   // ---- end states --------------------------------------------------------
 
-  private fail(error: string): void {
+  /** `code` goes in front of the record's reason ("SELLER_KEPT_PAYMENT: ..."), so /records can word it. */
+  private fail(error: string, code?: string, logLine?: string): void {
     if (this.ended) return;
+    if (logLine) this.log(logLine);
     this.error = error;
     this.setPhase("failed");
-    this.record("failed", error);
+    this.record("failed", code ? `${code}: ${error}` : error);
     this.end();
     // a machine the run knows of is never left without an armed destroy
     this.armDestroyRetry();
@@ -743,7 +967,8 @@ export class MarketRun {
       reason,
       plan: q?.candidate.offer.id ?? "",
       region: q?.region ?? "",
-      usd: this.payment?.usd ?? q?.amountUsd ?? null,
+      // an amount only when a payment was signed: a quote that was never paid is not money spent
+      usd: this.alreadyPaid ? (this.payment?.usd ?? q?.amountUsd ?? null) : null,
       tx: this.payment?.tx ?? null,
       server: this.machine?.id ?? null,
     };
@@ -770,13 +995,15 @@ export class MarketRun {
     }
   }
 
-  private attempt(plan: string, region: string, what: string, ok: boolean): void {
-    this.attempts.push({ at: this.now(), plan, region, what, ok });
+  private attempt(plan: string, region: string, what: string, ok: boolean, code: string | null = null): void {
+    this.attempts.push({ at: this.now(), plan, region, what, ok, code });
   }
 
-  private recordPayment(usd: number, tx: string | null, payer: string): void {
-    this.paidAt = this.now();
-    this.payment = { usd, tx, at: this.paidAt, payer };
+  /** The seller reported success, or the transfer was found on chain. */
+  private confirmPayment(tx: string | null): void {
+    if (!this.payment) return;
+    this.paidAt ??= this.now();
+    this.payment = { ...this.payment, tx: tx ?? this.payment.tx, status: "confirmed" };
   }
 
   private setMachine(q: Quote, inst: Instance): void {
@@ -817,11 +1044,11 @@ export class MarketRun {
   }
 
   private candidateRow(c: Candidate): OfferRow {
-    return { ...this.baseRow(c.offer), region: null, hours: c.hours, estimateUsd: c.estimateUsd, quoteUsd: null, state: "candidate", note: null };
+    return { ...this.baseRow(c.offer), region: null, hours: c.hours, estimateUsd: c.estimateUsd, quoteUsd: null, quoteExact: null, state: "candidate", note: null, code: null };
   }
 
   private leftOutRow(r: Rejection): OfferRow {
-    return { ...this.baseRow(r.offer), region: null, hours: null, estimateUsd: null, quoteUsd: null, state: "left out", note: r.reason };
+    return { ...this.baseRow(r.offer), region: null, hours: null, estimateUsd: null, quoteUsd: null, quoteExact: null, state: "left out", note: leftOutWords(r.reason, this.d.need), code: r.reason };
   }
 
   private baseRow(o: Offer) {

@@ -90,7 +90,7 @@ describe("settleOnReset (the reset rule)", () => {
   });
 });
 
-const OPEN: OpenPurchase = { run: "mkt_old", market: "test", seller: "testseller", plan: "vc2-1c-1gb", region: "ewr", usd: 0.0104, instance: null, tx: null, state: "unknown", at: 1 };
+const OPEN: OpenPurchase = { run: "mkt_old", market: "test", seller: "testseller", plan: "vc2-1c-1gb", region: "ewr", usd: 0.0104, instance: null, tx: null, state: "unknown", at: 1, lastEvent: "intent", what: "", overspendTest: false };
 
 /** A seller stub that can only list, read and destroy: any other call would be a bug. */
 function fakeSeller(list: Instance[]) {
@@ -146,6 +146,27 @@ describe("destroyOpenPurchase", () => {
     expect(s.destroy).not.toHaveBeenCalled();
     expect(j.all().at(-1)).toMatchObject({ event: "failed", detail: "no machine found for this payment" });
     expect(j.open()).toEqual([]);
+  });
+
+  it("a payment the seller kept, with no machine: says there is nothing to destroy and stays listed", async () => {
+    const j = journalIn();
+    j.append({ at: 2, run: OPEN.run, market: "test", seller: "testseller", event: "unknown", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    j.append({ at: 3, run: OPEN.run, market: "test", seller: "testseller", event: "paid", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd, tx: "t1", instance: null });
+    const s = fakeSeller([inst("x", "vc2-2c-4gb")]);
+    const open = j.open()[0];
+    const r = await destroyOpenPurchase(open, s, j);
+    expect(r).toEqual({ ok: true, destroyed: [], message: "There is no machine to destroy for this purchase. The seller kept the payment of $0.0104 and delivered no machine. It stays on the list." });
+    expect(s.destroy).not.toHaveBeenCalled();
+    expect(j.open()).toHaveLength(1);
+  });
+
+  it("a payment that may have gone through, with no machine: says so and stays listed", async () => {
+    const j = journalIn();
+    j.append({ at: 2, run: OPEN.run, market: "test", seller: "testseller", event: "unknown", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    const s = fakeSeller([]);
+    const r = await destroyOpenPurchase(j.open()[0], s, j);
+    expect(r).toEqual({ ok: true, destroyed: [], message: "There is no machine to destroy for this purchase. The payment of $0.0104 may have gone through; no machine was found for it. It stays on the list." });
+    expect(j.open()).toHaveLength(1);
   });
 
   it("a destroy the seller does not confirm is reported and the purchase stays open", async () => {

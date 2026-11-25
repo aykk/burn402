@@ -462,3 +462,61 @@ describe("managing machines", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("seller text is plain", () => {
+  const okPay = () => vi.fn<(r: PaymentRequired, a: Accepts) => Promise<Record<string, string>>>(async () => ({ ...PAID }));
+  const noRaw = (s: string) => {
+    expect(s).not.toMatch(/[{}[\]]|<html|quote_usd|atomic/);
+  };
+
+  it("402 on the paid request names the seller's short reason, never the body", async () => {
+    const q = await quoteWith();
+    const rejected = new Response(JSON.stringify({ error: "payment rejected, pay again", quote_usd: 0.010382 }), { status: 402 });
+    const { fetch } = fakeFetch([required402(), rejected]);
+    const out = await new SellerClient(config, { fetch }).provision(q, okPay());
+    expect(out).toMatchObject({ kind: "not_charged", code: "PAYMENT_REJECTED" });
+    if (out.kind === "not_charged") {
+      expect(out.detail).toBe("x402layer said the payment was not accepted: payment rejected, pay again.");
+      noRaw(out.detail);
+    }
+  });
+
+  it("402 after payment is PAYMENT_REJECTED even when the body carries quote_usd", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([required402(), json(402, { quote_usd: 0.5 })]);
+    const out = await new SellerClient(config, { fetch }).provision(q, okPay());
+    expect(out).toMatchObject({ kind: "not_charged", code: "PAYMENT_REJECTED", detail: "x402layer said the payment was not accepted: the seller gave no reason." });
+  });
+
+  it("a price cap names dollars", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([required402(), json(409, { error: "too much", quote_usd: 0.2 })]);
+    const out = await new SellerClient(config, { fetch }).provision(q, okPay());
+    expect(out).toMatchObject({ kind: "not_charged", code: "PRICE_CAP", detail: "x402layer now asks $0.20, more than your budget allows." });
+  });
+
+  it("unknown outcomes and errors carry no raw body", async () => {
+    const q = await quoteWith();
+    const html = new Response("<html><body>502 Bad Gateway {stuff}</body></html>", { status: 502 });
+    const { fetch } = fakeFetch([required402(), html, new Response("<html>", { status: 502 }), new Response("<html>", { status: 502 })]);
+    const out = await new SellerClient(config, { fetch, sleep: async () => {} }).provision(q, okPay());
+    expect(out.kind).toBe("unknown");
+    if (out.kind === "unknown") {
+      expect(out.detail).toBe("x402layer did not give a clear answer to the paid request after 3 tries (last: error 502, the seller gave no reason).");
+      noRaw(out.detail);
+    }
+  });
+
+  it("an out-of-stock refusal is short", async () => {
+    const { fetch } = fakeFetch([json(503, { error: "plan is out of stock in ewr", extra: { a: 1 } })]);
+    const err = await new SellerClient(config, { fetch }).quote(candidate(), "ewr", opts).catch((e) => e);
+    expect(err.code).toBe("OUT_OF_STOCK");
+    expect(err.message).toBe("x402layer could not sell it (error 503): plan is out of stock in ewr.");
+  });
+
+  it("the plans feed error carries no body", async () => {
+    const { fetch } = fakeFetch([new Response("<html>oops</html>", { status: 500 })]);
+    const err = await new SellerClient(config, { fetch }).catalog().catch((e) => e);
+    expect(err.message).toBe("x402layer's price list could not be read (error 500): the seller gave no reason.");
+  });
+});

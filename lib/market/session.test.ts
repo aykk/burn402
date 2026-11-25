@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, isLocalHost, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, findPaymentFor, isLocalHost, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
 
 const good = {
   market: "test",
@@ -92,5 +92,20 @@ describe("needFromModelReply", () => {
   });
   it("survives a reply with no JSON", () => {
     expect(needFromModelReply("I cannot help").need).toEqual({});
+  });
+});
+
+describe("findPaymentFor", () => {
+  it("reads the market's own RPC and USDC mint", async () => {
+    const seen: { url: string; method: string; params: unknown[] }[] = [];
+    const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { method, params } = JSON.parse(String(init?.body));
+      seen.push({ url: String(input), method, params });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: [] } }));
+    }) as typeof fetch;
+    expect(await findPaymentFor("test", f)({ payer: "P", payTo: "R", atomic: "10382", sinceMs: 1 })).toBeNull();
+    expect(seen).toEqual([{ url: "https://api.devnet.solana.com", method: "getTokenAccountsByOwner", params: ["P", { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }, { encoding: "jsonParsed" }] }]);
+    await findPaymentFor("real", f)({ payer: "P", payTo: "R", atomic: "1", sinceMs: 1 });
+    expect(seen[1]).toMatchObject({ url: "https://api.mainnet-beta.solana.com", params: ["P", { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }, { encoding: "jsonParsed" }] });
   });
 });

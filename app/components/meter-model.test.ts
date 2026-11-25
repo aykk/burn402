@@ -4,7 +4,7 @@ import { budgetShare, jobGauge, leadingZeros, meterView, shareText, type MeterJo
 const HOUR = 3_600_000;
 
 const approval = {
-  code: "c0de", usd: 0.01, atomic: "10000", token: "USDC" as const, network: "Solana devnet",
+  code: "c0de", usd: 0.01, atomic: "10000", exact: "$0.0100", surcharge: null, token: "USDC" as const, network: "Solana devnet",
   payTo: "ELT2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "testseller",
 };
 
@@ -19,7 +19,7 @@ function job(over: Partial<MeterJob>): MeterJob {
 }
 
 const T0 = 1_795_000_000_000;
-const paid = { approval, payment: { usd: 0.01, tx: "5xTx", at: T0, payer: "3Ybt" }, paidAt: T0 };
+const paid = { approval, payment: { usd: 0.01, atomic: "10000", tx: "5xTx", at: T0, payer: "3Ybt", status: "confirmed" as const }, paidAt: T0 };
 const base = { formBudgetUsd: 1, formRateUsdHr: 0.05 };
 
 describe("meterView", () => {

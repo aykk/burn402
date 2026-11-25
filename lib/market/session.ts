@@ -1,7 +1,10 @@
 import { join } from "node:path";
 import { parseNuzaFeed } from "./catalog";
+import { findPayment } from "./chain";
+import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
 import { makePayer, type Payer } from "./pay";
+import type { MarketRunDeps } from "./run";
 import { SELLERS, SellerClient } from "./seller";
 import type { Limits, MarketId, Need, Offer } from "./types";
 
@@ -45,6 +48,12 @@ export async function payerFor(market: MarketId): Promise<Payer | null> {
 
 export function sellerFor(market: MarketId, payer: Payer | null): SellerClient {
   return new SellerClient(SELLERS[market], { signer: payer?.signer ?? null });
+}
+
+/** The read-only chain check a run uses after a signed payment: this market's RPC and USDC mint. */
+export function findPaymentFor(market: MarketId, fetchImpl?: typeof fetch): NonNullable<MarketRunDeps["findPayment"]> {
+  const net = NETWORKS[market];
+  return (q) => findPayment({ rpcUrl: net.rpcUrl, mint: net.usdc, ...q, fetch: fetchImpl });
 }
 
 export function marketJournal(root: string = process.cwd()): Journal {
