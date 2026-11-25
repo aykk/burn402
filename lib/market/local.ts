@@ -34,12 +34,11 @@ export function localVerdict(h: LocalHeaders, opts: { origin: boolean }, env: En
 }
 
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
-const HOST_CHECKED_READS = /^\/api\/(testseller|market)(\/|$)/;
 
-/** The proxy's rule for a request under /api: writes get host and origin checks; reads of the market and test seller get the host check. */
-export function proxyVerdict(method: string, pathname: string, h: LocalHeaders, env: Env = process.env): string | null {
+/** The proxy's rule for a request under /api: writes get host and origin checks; every GET and HEAD gets the host check (a DNS-rebinding page must not read state, records or prices). */
+export function proxyVerdict(method: string, _pathname: string, h: LocalHeaders, env: Env = process.env): string | null {
   const m = method.toUpperCase();
   if (!READS.has(m)) return localVerdict(h, { origin: true }, env);
-  if (m !== "OPTIONS" && HOST_CHECKED_READS.test(pathname)) return localVerdict(h, { origin: false }, env);
+  if (m !== "OPTIONS") return localVerdict(h, { origin: false }, env);
   return null;
 }

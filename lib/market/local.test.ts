@@ -37,14 +37,14 @@ describe("local-only rule (I2)", () => {
     }
   });
 
-  it("proxy: GET under /api/testseller and /api/market gets the host check only; other reads pass", () => {
+  it("proxy: every GET and HEAD under /api gets the host check (no Origin check); OPTIONS passes", () => {
     const rebinding = { host: "evil.example:3000", origin: null };
     for (const method of ["GET", "HEAD"]) {
-      expect(proxyVerdict(method, "/api/testseller/compute/plans", rebinding, {})).not.toBeNull();
-      expect(proxyVerdict(method, "/api/market/run", rebinding, {})).not.toBeNull();
+      for (const path of ["/api/testseller/compute/plans", "/api/market/run", "/api/demo/state", "/api/records", "/api/marketing"]) {
+        expect(proxyVerdict(method, path, rebinding, {})).not.toBeNull();
+        expect(proxyVerdict(method, path, { host: "127.0.0.1:3000", origin: null }, {})).toBeNull();
+      }
       expect(proxyVerdict(method, "/api/market/run", { host: "localhost:3000", origin: "https://evil.example" }, {})).toBeNull();
-      expect(proxyVerdict(method, "/api/demo/state", rebinding, {})).toBeNull();
-      expect(proxyVerdict(method, "/api/marketing", rebinding, {})).toBeNull();
     }
     expect(proxyVerdict("OPTIONS", "/api/demo/reset", { host: "evil.example:3000", origin: "https://evil.example" }, {})).toBeNull();
   });
