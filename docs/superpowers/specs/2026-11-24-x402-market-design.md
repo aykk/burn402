@@ -167,3 +167,14 @@ Decisions made by the designer (owner asked for improvements): firm quotes befor
 - How the old training code is unhooked from the session with the least churn.
 - Exact x402 client calls for "build a payment for these requirements" (read `node_modules/@x402/core` and `@x402/fetch` types).
 - Polling intervals and timeouts (provisioning usually takes 2–3 minutes on the real seller).
+
+## Answers to the builder check (designer's calls)
+
+- **Devnet money exists.** The devnet buyer wallet (`AGENT_SOLANA_*`) and receiver wallet (`SOLANA_RECEIVER_*`) are already in `.env.local`, each holding 20 devnet USDC (checked 2026-11-24). No faucet step is needed. Only the mainnet wallet is the owner's to fund; the real market falls back to the same keypair when `MAINNET_SOLANA_SECRET_KEY` is unset.
+- **The mandate stays local.** It sets the guard's limits and is named in the purchase record. It is never sent to a seller, and the test seller does not check it.
+- **Bypass `wrapFetchWithPayment`.** Use `x402Client` / `x402HTTPClient` directly so the guard runs between reading the 402 and signing. `lib/x402/client.ts` is left as is.
+- **Old routes stay live but unused** (`/api/provision`, `/api/plans`, `/api/demo/job` and friends). `app/components/AttemptLedger.tsx` exists and is reused by the new overspend test.
+- **A restart drops an unapproved quote.** Approval codes live in memory only. Paid machines are recovered through the journal.
+- **RunPod and DigitalOcean.** `os_id` per provider as in the plan. A failed port-22 check is reported ("closed") and never fails a run.
+- **Destroy now is allowed at any time**, including seconds after renting. The seller's 1-hour minimum is a charge, not a lock.
+- **Cancel at the approval stop** ends the run `refused` with code `CANCELLED`; nothing was signed, so nothing is owed.
