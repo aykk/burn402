@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { networkName, sellerReason, tokenName, usdExact, usdMoreThan, usdPlain } from "./money";
+import { networkName, sellerReason, tokenName, usdExact, usdMoreThan, usdPerHour, usdPlain } from "./money";
 
 describe("usdExact", () => {
   it.each([
@@ -94,6 +94,20 @@ describe("sellerReason", () => {
     for (const t of ["", "<html>502 Bad Gateway</html>", '{"quote_usd":1}', "[1,2]", '{"error":{"nested":true}}']) {
       expect(sellerReason(t)).toBe("the seller gave no reason");
     }
+  });
+});
+
+describe("usdPerHour", () => {
+  it.each([
+    [0.010382, "$0.0104"],
+    [0.007, "$0.0070"],
+    [1.49, "$1.4900"],
+    [1234.5, "$1,234.5000"],
+    [0, "$0.0000"],
+  ])("%s is %s", (usd, words) => expect(usdPerHour(usd)).toBe(words));
+
+  it("never prints NaN", () => {
+    expect(usdPerHour(NaN)).toBe("an unreadable amount");
   });
 });
 

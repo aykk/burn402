@@ -1,0 +1,87 @@
+{
+  "data": {
+    "gpuTypes": [
+      {
+        "id": "NVIDIA A100-SXM4-40GB",
+        "displayName": "A100 SXM 40GB",
+        "memoryInGb": 40,
+        "communityPrice": 1,
+        "securePrice": 0,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA A40",
+        "displayName": "A40",
+        "memoryInGb": 48,
+        "communityPrice": 0.35,
+        "securePrice": 0.59,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA GeForce RTX 3070",
+        "displayName": "RTX 3070",
+        "memoryInGb": 8,
+        "communityPrice": 0.13,
+        "securePrice": 0,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA GeForce RTX 4090",
+        "displayName": "RTX 4090",
+        "memoryInGb": 24,
+        "communityPrice": 0.34,
+        "securePrice": 0.89,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA H100 80GB HBM3",
+        "displayName": "H100 SXM",
+        "memoryInGb": 80,
+        "communityPrice": 2.69,
+        "securePrice": 4.39,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA RTX 2000 Ada Generation",
+        "displayName": "RTX 2000 Ada",
+        "memoryInGb": 16,
+        "communityPrice": 0.5,
+        "securePrice": 0.24,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "NVIDIA RTX A4000",
+        "displayName": "RTX A4000",
+        "memoryInGb": 16,
+        "communityPrice": 0.17,
+        "securePrice": 0.25,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "Tesla V100-SXM2-16GB",
+        "displayName": "V100 SXM2",
+        "memoryInGb": 16,
+        "communityPrice": 0.23,
+        "securePrice": 0,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      },
+      {
+        "id": "unknown",
+        "displayName": "unknown",
+        "memoryInGb": 0,
+        "communityPrice": 0,
+        "securePrice": 0,
+        "communitySpotPrice": null,
+        "secureSpotPrice": null
+      }
+    ]
+  }
+}
