@@ -70,9 +70,9 @@ describe("wording", () => {
     expect(paymentLine({ atomic: "10382", status: "unconfirmed" }, "real")).toBe("Sent $0.010382 over x402 on Solana mainnet, not confirmed yet.");
   });
   it("after an early destroy, one line on what was paid and that unused time is not refunded", () => {
-    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, 51)).toBe("Paid $0.010382 for 1 hour. Destroyed after 51 s. The seller does not refund unused time.");
-    expect(prepaidLine({ atomic: "10382", status: "unconfirmed" }, 2, 125)).toBe("Sent $0.010382 for 2 hours, not confirmed yet. Destroyed after 2 min 5 s. The seller does not refund unused time.");
-    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, null)).toBe("Paid $0.010382 for 1 hour. The seller does not refund unused time.");
+    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, 51)).toBe("Paid $0.010382 for 1 hour. Destroyed after 51 s. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
+    expect(prepaidLine({ atomic: "10382", status: "unconfirmed" }, 2, 125)).toBe("Sent $0.010382 for 2 hours, not confirmed yet. Destroyed after 2 min 5 s. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
+    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, null)).toBe("Paid $0.010382 for 1 hour. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
   });
   it("sources: plans, spot offers and failures", () => {
     expect(
