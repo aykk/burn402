@@ -60,6 +60,20 @@ describe("checkPayment", () => {
     expect(code({ budgetLeftUsd: NaN })).toBe("MALFORMED");
     expect(code({ rateUsdHr: "1" })).toBe("MALFORMED");
   });
+  it("fails closed when alreadyPaid is not a boolean", () => {
+    for (const v of [undefined, null, 0, "false", ""]) expect(code({ alreadyPaid: v })).toBe("MALFORMED");
+  });
+  it("clips seller text in details to 64 characters", () => {
+    const long = "x".repeat(500);
+    for (const over of [{ network: long }, { scheme: long }, { asset: long }]) {
+      const r = checkPayment({ ...base, accepts: { ...real, ...over } });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.detail).not.toContain("x".repeat(65));
+    }
+    const r = checkPayment({ ...base, payTo: "a", accepts: { ...real, payTo: long } });
+    if (!r.ok) expect(r.detail).not.toContain("x".repeat(65));
+    expect(r.ok).toBe(false);
+  });
   it("never throws on junk input", () => {
     expect(code({ approvedAtomic: 10000 })).toBe("MALFORMED");
     expect(code({ market: "nope" })).toBe("MALFORMED");

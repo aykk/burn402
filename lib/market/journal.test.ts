@@ -38,6 +38,15 @@ describe("Journal", () => {
     expect(j.all().map((x) => x.event)).toEqual(["intent", "paid"]);
   });
 
+  it("keeps the next entry after a cut-off last line", () => {
+    const j = new Journal(file);
+    j.append(e("r1", "intent"));
+    fs.appendFileSync(file, '{"at":5,"run":"r2","ev'); // torn write, no newline
+    j.append(e("r3", "intent"));
+    expect(j.hasPayment("r3")).toBe(true);
+    expect(j.all().map((x) => x.run)).toEqual(["r1", "r3"]);
+  });
+
   it("reports intent only as unknown", () => {
     const j = new Journal(file);
     j.append(e("r1", "intent"));
