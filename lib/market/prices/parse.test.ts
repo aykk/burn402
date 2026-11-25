@@ -183,7 +183,7 @@ describe("parseAkash", () => {
     expect(prices.every((p) => p.source === "akash" && p.kind === "gpu" && p.vcpus === 0 && p.ramGb === 0)).toBe(true);
   });
 
-  it("reads ram as GPU memory, the average price, and a range note", () => {
+  it("reads ram as GPU memory, the cheapest listed price, and the average and range in the note", () => {
     const p = prices.find((x) => x.name === "a100 80Gi SXM4")!;
     expect(p).toEqual({
       source: "akash",
@@ -194,10 +194,10 @@ describe("parseAkash", () => {
       ramGb: 0,
       gpu: "nvidia a100",
       vramGb: 80,
-      hourlyUsd: 1.49,
+      hourlyUsd: 1.07,
       spotHourlyUsd: null,
       region: null,
-      note: "$1.07 to $1.91 across providers, 27 of 120 available",
+      note: "average $1.49, up to $1.91 across providers; 27 of 120 available",
       url: "https://console.akash.network/",
     });
   });
@@ -206,11 +206,26 @@ describe("parseAkash", () => {
     expect(prices.find((x) => x.name === "a100 40Gi SXM4")!.note).toBe("1 of 1 available");
   });
 
-  it("falls back to the minimum when the average is not positive; skips bad prices", () => {
+  it("falls back to the average when the minimum is not positive; skips bad prices", () => {
     const row = (price: unknown) => ({ models: [{ vendor: "nvidia", model: "x", ram: "16Gi", interface: "PCIe", availability: { total: 2, available: 1 }, price }] });
-    expect(parseAkash(row({ min: 0.2, max: 0.3, avg: 0 }))[0].hourlyUsd).toBe(0.2);
+    expect(parseAkash(row({ min: 0, max: 0.3, avg: 0.25 }))[0].hourlyUsd).toBe(0.25);
+    expect(parseAkash(row({ min: 0.2, max: 0.3 }))[0].note).toBe("up to $0.30 across providers; 1 of 2 available");
     for (const price of [null, {}, { min: -1, avg: NaN }, { min: 0, avg: 0 }]) expect(parseAkash(row(price))).toEqual([]);
     expect(parseAkash({ models: [{ vendor: "nvidia", model: "x", ram: "16Gi", availability: { total: 2, available: 1 }, price: { min: 0.2, max: 0.2, avg: 0.2 } }] })[0]).toMatchObject({ name: "x 16Gi", vramGb: 16 });
     expect(parseAkash({ models: [{ vendor: "nvidia", model: "x", ram: "lots", availability: { total: 2, available: 1 }, price: { min: 0.2, avg: 0.2 } }] })[0].vramGb).toBe(0);
+  });
+});
+
+describe("provider text is capped at 80 characters", () => {
+  const long = "x".repeat(200);
+  it.each([
+    ["vultr", () => parseVultr({ plans: [{ id: long, vcpu_count: 1, ram: 1024, hourly_cost: 0.01, gpu_type: long, locations: [long] }] })[0]],
+    ["vast", () => parseVast({ offers: [{ gpu_name: long, gpu_ram: 8192, dph_total: 0.1, geolocation: long }] })[0]],
+    ["runpod", () => parseRunpod({ data: { gpuTypes: [{ id: long, displayName: long, memoryInGb: 8, communityPrice: 0.1 }] } })[0]],
+    ["akash", () => parseAkash({ models: [{ vendor: long, model: long, ram: "8Gi", availability: { total: 1, available: 1 }, price: { min: 0.1, max: 0.1, avg: 0.1 } }] })[0]],
+  ])("%s", (_name, get) => {
+    const p = get();
+    for (const v of [p.name, p.gpu, p.region, p.note]) if (v !== null) expect(v.length).toBeLessThanOrEqual(80);
+    expect(p.name.length).toBe(80);
   });
 });

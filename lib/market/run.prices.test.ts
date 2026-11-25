@@ -9,7 +9,7 @@ import { MarketRun, type MarketRunDeps } from "./run";
 import { SELLERS, SellerClient } from "./seller";
 import { FakeProcessor, fakePayer, inProcess } from "./testing";
 import { TestSeller } from "./testseller";
-import type { Need } from "./types";
+import type { Need, Offer } from "./types";
 
 const T0 = 1_700_000_000_000;
 const NEED: Need = { kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -42,6 +42,10 @@ const MARKET: MarketPrices = {
   asOf: T0,
 };
 
+/** the test seller's rules for vc2-1c-1gb, 1 hour: 15% surcharge under 24 hours, 1-hour minimum */
+const PLAIN = { seller: SELLER, plan: "vc2-1c-1gb", hours: 1, surchargePct: 15, surchargeUnderHours: 24, minHours: 1, askedHours: 1, billedHours: 1 };
+const BASIS = "The agent's price includes the seller's 15% surcharge for rentals under 24 hours and is spread over 1 billed hour; other providers' figures are list prices per hour.";
+
 const dirs: string[] = [];
 const payers: { calls: number }[] = [];
 afterEach(() => {
@@ -50,7 +54,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
-function setup(marketPrices: MarketRunDeps["marketPrices"], wrap?: (f: typeof fetch) => typeof fetch) {
+function setup(marketPrices: MarketRunDeps["marketPrices"], wrap?: (f: typeof fetch) => typeof fetch, o: { need?: Partial<Need>; limits?: { budgetUsd: number; rateUsdHr: number }; spotFeed?: () => Promise<Offer[]> } = {}) {
   let t = T0;
   const now = () => t;
   const sleep = async (ms: number) => void (t += ms);
@@ -68,8 +72,9 @@ function setup(marketPrices: MarketRunDeps["marketPrices"], wrap?: (f: typeof fe
     seller: client,
     payer,
     journal: new Journal(path.join(dir, "purchases.jsonl")),
-    need: NEED,
-    limits: { budgetUsd: 1, rateUsdHr: 1 },
+    need: { ...NEED, ...o.need },
+    spotFeed: o.spotFeed,
+    limits: o.limits ?? { budgetUsd: 1, rateUsdHr: 1 },
     askBeforePaying: true,
     agent: { name: "Buyer", ansName: "buyer.agents.test" },
     keyDir: path.join(dir, "keys"),
@@ -108,7 +113,9 @@ describe("MarketRun with market prices", () => {
     const before = run.view();
     expect(before.phase).toBe("quoting");
     expect(before.prices).not.toBeNull();
-    expect(before.prices!.buyable).toEqual({ seller: SELLER, plan: "vc2-1c-1gb", hourlyUsd: ESTIMATE_USD, totalUsd: ESTIMATE_USD, hours: 1, firm: false });
+    expect(before.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: ESTIMATE_USD, totalUsd: ESTIMATE_USD, firm: false });
+    expect(before.prices!.sentence).toContain("The cheapest it can buy is an estimated $0.0104 an hour");
+    expect(before.prices!.basis).toBe(BASIS);
     expect(before.prices!.cheapestAnywhere?.name).toBe("vc2-1c-1gb");
     expect(before.prices!.sources).toEqual(MARKET.sources);
     expect(before.prices!.asOf).toBe(T0);
@@ -116,10 +123,11 @@ describe("MarketRun with market prices", () => {
     g.release();
     await waitPhase(run, "approval");
     const after = run.view();
-    expect(after.prices!.buyable).toEqual({ seller: SELLER, plan: "vc2-1c-1gb", hourlyUsd: QUOTE_USD, totalUsd: QUOTE_USD, hours: 1, firm: true });
+    expect(after.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: QUOTE_USD, totalUsd: QUOTE_USD, firm: true });
+    expect(after.prices!.basis).toBe(BASIS);
     expect(after.prices!.premiumPct).toBe(48);
     expect(after.prices!.sentence).toBe(
-      `The cheapest fit anywhere is $0.0070 an hour at Vultr (direct), which your agent cannot buy from yet. The cheapest it can buy is $0.0104 an hour through ${SELLER}, 48% more.`,
+      `The cheapest fit anywhere is $0.0070 an hour at Vultr (direct), which your agent cannot buy from yet. The cheapest it can buy is a quoted $0.0104 an hour through ${SELLER}, 48% more.`,
     );
     // the comparison never changes what is approved
     expect(after.approval?.usd).toBe(QUOTE_USD);
@@ -134,6 +142,35 @@ describe("MarketRun with market prices", () => {
     expect(v.phase).toBe("approval");
     expect(v.approval?.plan).toBe("vc2-1c-1gb");
     expect(v.rows.some((r) => r.id === "vc2-1c-2gb" && r.seller !== "testseller")).toBe(false);
+  });
+
+  it("a spot offer ranked first is never the buyable figure: the best non-spot plan is", async () => {
+    const spot: Offer = { seller: "nuza", id: "spot-cpu", provider: "nuza", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.001, listHourlyUsd: null, inStock: true, spot: true, rentable: true };
+    const g = gateQuote();
+    const { run } = setup(async () => MARKET, g.wrap, { need: { allowSpot: true }, spotFeed: async () => [spot] });
+    void run.start();
+    await vi.waitFor(() => expect(g.waiting()).toBe(true));
+    const v = run.view();
+    expect(v.rows[0].id).toBe("spot-cpu"); // the chooser still ranks it first
+    expect(v.prices!.buyable?.plan).toBe("vc2-1c-1gb");
+    expect(v.prices!.buyable?.firm).toBe(false);
+    g.release();
+    await vi.waitFor(() => expect(["approval", "failed"]).toContain(run.view().phase));
+  });
+
+  it("nothing inside the limits: no buyable, and the sentence says inside your limits", async () => {
+    const { run } = setup(async () => MARKET, undefined, { limits: { budgetUsd: 1, rateUsdHr: 0.001 } });
+    await run.start();
+    await vi.waitFor(() => expect(run.view().prices).not.toBeNull());
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().prices!.buyable).toBeNull();
+    expect(run.view().prices!.sentence).toBe("The cheapest fit anywhere is $0.0070 an hour at Vultr (direct). Your agent has no seller it can buy this from inside your limits.");
+  });
+
+  it("regions asked for: the basis says other providers' prices are for any region", async () => {
+    const { run } = setup(async () => MARKET, undefined, { need: { regions: ["ewr"] } });
+    await run.start();
+    expect(run.view().prices!.basis).toBe(`${BASIS} Other providers' prices are for any region.`);
   });
 
   it("without marketPrices there is no comparison", async () => {
@@ -170,7 +207,7 @@ describe("MarketRun with market prices", () => {
     await vi.waitFor(() => expect(run.view().prices).not.toBeNull());
     const p = run.view().prices!;
     expect(p.sources.every((s) => !s.ok)).toBe(true);
-    expect(p.sentence).toBe(`No other provider lists a machine that fits. The cheapest your agent can buy is $0.0104 an hour through ${SELLER}.`);
+    expect(p.sentence).toBe(`No other provider lists a machine that fits. The cheapest your agent can buy is a quoted $0.0104 an hour through ${SELLER}.`);
     expect(run.view().phase).toBe("approval");
   });
 });

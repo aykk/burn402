@@ -6,7 +6,7 @@ import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
 import { localHosts, localVerdict } from "./local";
 import { makePayer, type Payer } from "./pay";
-import { buyableFrom, comparePrices, type PriceComparison } from "./prices/compare";
+import { buyableFor, comparePrices, type PriceComparison } from "./prices/compare";
 import { fetchMarketPrices, type MarketPrices } from "./prices/fetch";
 import type { MarketRunDeps } from "./run";
 import { SELLERS, SellerClient } from "./seller";
@@ -129,21 +129,28 @@ export function parseNeed(need: unknown): { ok: true; value: Need } | { ok: fals
   return { ok: true, value: { kind: n.kind, vcpus: n.vcpus, ramGb: n.ramGb, vramGb: n.vramGb, hours: n.hours, regions: [...n.regions], allowSpot: n.allowSpot } };
 }
 
+/** The one rule for a budget and an hourly limit, shared by a run and the price comparison. */
+export function parseLimits(budgetUsd: unknown, rateUsdHr: unknown): { ok: true; value: Limits } | { ok: false; error: string } {
+  if (!inRange(budgetUsd, 0.01, 20)) return { ok: false, error: "the budget must be from $0.01 to $20" };
+  if (!inRange(rateUsdHr, 0.001, Math.min(budgetUsd, 20))) return { ok: false, error: "the hourly limit must be from $0.001 up to the budget" };
+  return { ok: true, value: { budgetUsd, rateUsdHr } };
+}
+
 export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
   if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
   const { market, budgetUsd, rateUsdHr, askBeforePaying } = body;
   if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
   const need = parseNeed(body.need);
   if (!need.ok) return need;
-  if (!inRange(budgetUsd, 0.01, 20)) return { ok: false, error: "the budget must be from $0.01 to $20" };
-  if (!inRange(rateUsdHr, 0.001, Math.min(budgetUsd, 20))) return { ok: false, error: "the hourly limit must be from $0.001 up to the budget" };
+  const limits = parseLimits(budgetUsd, rateUsdHr);
+  if (!limits.ok) return limits;
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
   return {
     ok: true,
     value: {
       market,
       need: need.value,
-      limits: { budgetUsd, rateUsdHr },
+      limits: limits.value,
       askBeforePaying,
     },
   };
@@ -171,16 +178,21 @@ export function needFromModelReply(text: string): { need: Partial<Need>; note: s
   return { need, note: note || (Object.keys(need).length ? "filled from your description; check the fields" : "nothing in the description matched the form") };
 }
 
-export type PricesInput = { market: MarketId; need: Need };
+export type PricesInput = { market: MarketId; need: Need; limits?: Limits };
 
-/** Body of POST /api/market/prices: a market and a need, checked with the run's own rules. */
+/** Body of POST /api/market/prices: a market, a need and optional limits, checked with the run's own rules. */
 export function parsePricesInput(body: unknown): { ok: true; value: PricesInput } | { ok: false; error: string } {
   if (!isObj(body)) return { ok: false, error: "send the request as a JSON object" };
   const { market } = body;
   if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
   const need = parseNeed(body.need);
   if (!need.ok) return need;
-  return { ok: true, value: { market, need: need.value } };
+  const { budgetUsd, rateUsdHr } = body;
+  if (budgetUsd === undefined && rateUsdHr === undefined) return { ok: true, value: { market, need: need.value } };
+  if (budgetUsd === undefined || rateUsdHr === undefined) return { ok: false, error: "send both the budget and the hourly limit, or neither" };
+  const limits = parseLimits(budgetUsd, rateUsdHr);
+  if (!limits.ok) return limits;
+  return { ok: true, value: { market, need: need.value, limits: limits.value } };
 }
 
 /** Live prices from other providers for a run (cached for 60 s, never throws). */
@@ -188,12 +200,13 @@ export function marketPricesFeed(): Promise<MarketPrices> {
   return fetchMarketPrices();
 }
 
-/** Generous limits used only to find the cheapest plan that fits; nothing is quoted or paid with them. */
+/** Generous limits used, when the owner gave none, only to find the cheapest plan that fits; nothing is quoted or paid with them. */
 const COMPARE_LIMITS = { budgetUsd: 20, rateUsdHr: 20 };
 
 /**
- * The comparison without a run: market prices beside the cheapest plan the chosen market's seller
- * lists for the need (the chooser's estimate, not a quote). Reads the seller's price list only;
+ * The comparison without a run: market prices beside the plan a run would rank first (the
+ * chooser's estimate, not a quote), inside the owner's limits when given, else generous ones.
+ * Spot offers are never the buyable figure. Reads the seller's price list only;
  * never quotes, never pays, never touches the session's run.
  */
 export async function priceComparison(
@@ -205,7 +218,10 @@ export async function priceComparison(
     (deps.prices ?? marketPricesFeed)().catch((): MarketPrices => ({ prices: [], sources: [], asOf: Date.now() })),
     seller.catalog().catch(() => null),
   ]);
-  const top = catalog ? choose(catalog.offers, input.need, COMPARE_LIMITS, catalog.rules).ranked[0] : undefined;
-  const buyable = top ? buyableFrom({ seller: seller.config.label, plan: top.offer.id, totalUsd: top.estimateUsd, hours: top.hours, firm: false }) : null;
-  return comparePrices({ prices: market.prices, sources: market.sources, asOf: market.asOf, need: input.need, buyable });
+  const top = catalog ? choose(catalog.offers, input.need, input.limits ?? COMPARE_LIMITS, catalog.rules).ranked.find((c) => !c.offer.spot && c.offer.rentable) : undefined;
+  const buyable =
+    top && catalog
+      ? buyableFor({ seller: seller.config.label, offer: top.offer, totalUsd: top.estimateUsd, billedHours: top.hours, askedHours: input.need.hours, rules: catalog.rules, firm: false })
+      : null;
+  return comparePrices({ prices: market.prices, sources: market.sources, asOf: market.asOf, need: input.need, buyable, limited: !!input.limits && !!catalog });
 }

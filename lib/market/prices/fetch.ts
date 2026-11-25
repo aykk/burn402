@@ -31,12 +31,14 @@ const UNREADABLE = "sent something this app could not read";
 class SourceError extends Error {}
 
 function requestFor(source: PriceSource, signal: AbortSignal): RequestInit {
-  const common = { credentials: "omit" as const, cache: "no-store" as const, signal };
+  const common = { credentials: "omit" as const, cache: "no-store" as const, redirect: "error" as const, signal };
   if (source === "runpod") return { ...common, method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(RUNPOD_QUERY) };
   return { ...common, method: "GET", headers: { accept: "application/json" } };
 }
 
-async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutMs: number): Promise<MarketPrice[]> {
+type Parsers = Partial<Record<PriceSource, (raw: unknown) => MarketPrice[]>>;
+
+async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutMs: number, parsers: Parsers): Promise<MarketPrice[]> {
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
@@ -54,13 +56,18 @@ async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutM
   } catch {
     throw new SourceError(signal.aborted ? "did not answer in time" : UNREADABLE);
   }
-  const prices = PARSERS[source](raw);
-  if (prices.length === 0) throw new SourceError(UNREADABLE);
+  let prices: MarketPrice[];
+  try {
+    prices = (parsers[source] ?? PARSERS[source])(raw);
+  } catch {
+    throw new SourceError(UNREADABLE);
+  }
+  if (!Array.isArray(prices) || prices.length === 0) throw new SourceError(UNREADABLE);
   return prices;
 }
 
-async function fetchAll(fetchImpl: typeof fetch, timeoutMs: number, now: () => number): Promise<MarketPrices> {
-  const results = await Promise.allSettled(SOURCES.map((s) => Promise.resolve().then(() => readSource(s, fetchImpl, timeoutMs))));
+async function fetchAll(fetchImpl: typeof fetch, timeoutMs: number, now: () => number, parsers: Parsers): Promise<MarketPrices> {
+  const results = await Promise.allSettled(SOURCES.map((s) => Promise.resolve().then(() => readSource(s, fetchImpl, timeoutMs, parsers))));
   const prices: MarketPrice[] = [];
   const sources: SourceStatus[] = results.map((r, i) => {
     const source = SOURCES[i];
@@ -83,13 +90,15 @@ const defaultCache: PriceCache = ((globalThis as unknown as { __burn402PriceCach
  * request in flight is shared, so a run and the Compare action do not hammer the providers.
  * Never throws.
  */
-export function fetchMarketPrices(deps: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; cache?: PriceCache } = {}): Promise<MarketPrices> {
+export function fetchMarketPrices(
+  deps: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; cache?: PriceCache; /** tests only */ parsers?: Parsers } = {},
+): Promise<MarketPrices> {
   const fetchImpl = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const cache = deps.cache ?? defaultCache;
   const t = now();
   if (cache.entry && t - cache.entry.at < CACHE_MS && t >= cache.entry.at) return cache.entry.promise;
-  const promise = fetchAll(fetchImpl, deps.timeoutMs ?? TIMEOUT_MS, now);
+  const promise = fetchAll(fetchImpl, deps.timeoutMs ?? TIMEOUT_MS, now, deps.parsers ?? {});
   const entry = { at: t, promise };
   cache.entry = entry;
   void promise.then((r) => {

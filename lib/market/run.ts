@@ -8,7 +8,7 @@ import type { Journal, JournalEntry } from "./journal";
 import { payerSignatureOf, type Payer, type PaymentRequired } from "./pay";
 import { QuoteError, type Instance, type ProvisionOutcome, type Quote, type SellerClient } from "./seller";
 import { newSshKey } from "./sshkey";
-import { buyableFrom, comparePrices, type Buyable, type PriceComparison } from "./prices/compare";
+import { buyableFor, comparePrices, type Buyable, type PriceComparison } from "./prices/compare";
 import type { MarketPrices } from "./prices/fetch";
 import type { HourlyRules, Limits, MarketId, Need, Offer } from "./types";
 
@@ -523,6 +523,10 @@ export class MarketRun {
       );
   }
 
+  private buyableOf(offer: Offer, totalUsd: number, billedHours: number, firm: boolean): Buyable | null {
+    return buyableFor({ seller: this.d.seller.config.label, offer, totalUsd, billedHours, askedHours: this.d.need.hours, rules: this.rules, firm });
+  }
+
   private setBuyable(b: Buyable | null): void {
     this.ranksDone = true;
     this.buyable = b;
@@ -533,7 +537,7 @@ export class MarketRun {
     if (!this.marketData || !this.ranksDone) return;
     try {
       const { prices, sources, asOf } = this.marketData;
-      this.prices = comparePrices({ prices, sources, asOf, need: this.d.need, buyable: this.buyable });
+      this.prices = comparePrices({ prices, sources, asOf, need: this.d.need, buyable: this.buyable, limited: true });
     } catch (e) {
       this.log(`market prices could not be compared: ${msg(e)}`);
     }
@@ -545,8 +549,9 @@ export class MarketRun {
     const { ranked, rejected } = choose(offers, this.d.need, this.d.limits, rules);
     this.ranked = ranked;
     this.leftOut = summarize(rejected);
-    const top = ranked[0];
-    this.setBuyable(top ? buyableFrom({ seller: this.d.seller.config.label, plan: top.offer.id, totalUsd: top.estimateUsd, hours: top.hours, firm: false }) : null);
+    // a spot rate is not compared with on-demand list prices: the best rentable on-demand plan is the figure
+    const top = ranked.find((c) => !c.offer.spot && c.offer.rentable);
+    this.setBuyable(top ? this.buyableOf(top.offer, top.estimateUsd, top.hours, false) : null);
     this.rows = [...ranked.map((c) => this.candidateRow(c)), ...rejected.map((r) => this.leftOutRow(r))];
     if (ranked.length === 0) {
       const counts = this.leftOut.map((l) => `${l.count} ${leftOutWords(l.reason, this.d.need)}`).join(", ");
@@ -657,7 +662,7 @@ export class MarketRun {
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     this.used.add(q);
     this.current = q;
-    this.setBuyable(buyableFrom({ seller: this.d.seller.config.label, plan: q.candidate.offer.id, totalUsd: q.amountUsd, hours: q.hours, firm: true }));
+    this.setBuyable(this.buyableOf(q.candidate.offer, q.amountUsd, q.hours, true));
     this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
     this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
