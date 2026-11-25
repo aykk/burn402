@@ -98,9 +98,19 @@ describe("jobGauge", () => {
     const end = jobGauge(view({ ...paid, phase: "ready" }, T0 + HOUR))!;
     expect(end).toMatchObject({ leftUsd: 0, fill: 0, secondsLeft: 0 });
   });
-  it("released, or failed after paying, shows the machine gone, empty", () => {
+  it("released, or failed after paying with no machine known, shows the machine gone, empty", () => {
     expect(jobGauge(view({ ...paid, phase: "released", releasedAt: T0 + 1000 }, T0 + HOUR))).toMatchObject({ state: "shut", scaleUsd: 0.01, leftUsd: 0, fill: 0 });
     expect(jobGauge(view({ ...paid, phase: "failed", error: "x" }, T0 + 1000))).toMatchObject({ state: "shut", fill: 0 });
+  });
+  it("failed after paying with a machine still known is held, not shut: it may still be running", () => {
+    const machine = { id: "m", ip: null, status: "pending", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "p", region: "ewr" };
+    const v = view({ ...paid, phase: "failed", error: "did not become active", machine }, T0 + HOUR / 2);
+    expect(v.machineMayRun).toBe(true);
+    const g = jobGauge(v)!;
+    expect(g.state).toBe("held");
+    expect(g.scaleUsd).toBe(0.01);
+    expect(g.leftUsd).toBeCloseTo(0.005, 9);
+    expect(view({ ...paid, phase: "released", releasedAt: T0 + 1000, machine }, T0 + HOUR).machineMayRun).toBe(false);
   });
 });
 

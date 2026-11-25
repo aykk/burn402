@@ -32,6 +32,7 @@ function walletReadout(v: MeterView): Readout {
 /** Zoomed to the rental, the readout is machine time: what the quote buys, what is left, how long it ran. */
 function jobReadout(v: MeterView, j: JobGauge): Readout {
   if (j.state === "quoted") return { label: "Buys machine time", value: v.quotedHours !== null ? hoursText(v.quotedHours) : usd4(j.scaleUsd) };
+  if (j.state === "held") return { label: "Machine", value: "may still be running", quiet: true };
   if (j.state === "draining") {
     if (j.leftUsd <= 0) return { label: "Paid time", value: "used up", quiet: true };
     return j.secondsLeft !== null ? { label: "Destroyed in", value: timeLeft(j.secondsLeft) } : { label: "Paid", value: usd4(j.scaleUsd) };
@@ -230,7 +231,7 @@ export function BudgetMeter(props: {
   // Before payment the quote is carved out of the allowance; after it, the payment already left it.
   const allowanceLeft = j.state === "quoted" ? v.budgetUsd - jobUsd : v.remainingUsd;
   const share = budgetShare(jobUsd, v.budgetUsd);
-  const solscan = props.job?.payment?.tx ? solscanUrl(props.job.payment.tx, props.job.market) : null;
+  const solscan = props.job ? solscanUrl(props.job.payment?.tx, props.job.market) : null;
   const used = v.usedUsd ?? 0;
 
   return (
@@ -265,15 +266,17 @@ export function BudgetMeter(props: {
       <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
         {/* The release lands here, where the drain ends: the label turns to ink once the amber is gone. */}
         <p
-          className={`motion-safe:transition-colors motion-safe:duration-300 ${shut ? "font-medium text-foreground motion-safe:delay-500" : "text-muted"}`}
+          className={`motion-safe:transition-colors motion-safe:duration-300 ${shut ? "font-medium text-foreground motion-safe:delay-500" : j.state === "held" ? "font-medium text-foreground" : "text-muted"}`}
         >
           {j.state === "quoted"
             ? "$0"
-            : shut
-              ? v.phase === "released"
-                ? `Spent ${usd4(jobUsd)}, machine destroyed`
-                : `Spent ${usd4(jobUsd)}`
-              : "$0, machine is destroyed"}
+            : j.state === "held"
+              ? `Paid ${usd4(jobUsd)}. The machine may still be running.`
+              : shut
+                ? v.phase === "released"
+                  ? `Spent ${usd4(jobUsd)}, machine destroyed`
+                  : `Spent ${usd4(jobUsd)}`
+                : "$0, machine is destroyed"}
         </p>
         <p className="text-muted">
           {j.state === "quoted" ? `This rental: ${usd4(jobUsd)}` : j.state === "draining" ? `Time used ${usd4(used)} of ${usd4(jobUsd)}` : usd4(jobUsd)}

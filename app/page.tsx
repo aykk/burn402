@@ -6,6 +6,7 @@ import type { Snapshot } from "@/lib/demo/snapshot";
 import type { MarketRunView } from "@/lib/market/run";
 import { BudgetMeter } from "@/app/components/BudgetMeter";
 import { LogDrawer } from "@/app/components/LogDrawer";
+import type { Send } from "@/app/components/MachinePanel";
 import { MarketPanel } from "@/app/components/MarketPanel";
 import { ModelPicker } from "@/app/components/ModelPicker";
 import { NeedForm, type NeedDraft } from "@/app/components/NeedForm";
@@ -71,7 +72,8 @@ export default function Page() {
     if (said) setAnnouncement(said);
   }, [snap, run]);
 
-  const post: Post = async (path, body) => {
+  /** Posts and reloads; resolves to the failure, or to the server's own note on success (destroy can say "nothing is running"). */
+  const send: Send = async (path, body) => {
     let res: Response;
     try {
       res = await fetch(path, {
@@ -80,13 +82,14 @@ export default function Page() {
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      return UNREACHABLE;
+      return { error: UNREACHABLE, message: null };
     }
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) return json.error ?? `The server answered HTTP ${res.status}`;
+    const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    if (!res.ok) return { error: json.error ?? `The server answered HTTP ${res.status}`, message: null };
     await load();
-    return null;
+    return { error: null, message: typeof json.message === "string" && json.message.trim() ? json.message : null };
   };
+  const post: Post = async (path, body) => (await send(path, body)).error;
 
   const closeDrawer = useCallback(() => setDrawer(false), []);
 
@@ -156,7 +159,7 @@ export default function Page() {
 
       {snap && snap.openPurchases.length > 0 && (
         <div className="mt-6 shrink-0">
-          <OpenPurchases purchases={snap.openPurchases} post={post} />
+          <OpenPurchases purchases={snap.openPurchases} send={send} />
         </div>
       )}
 
@@ -203,7 +206,7 @@ export default function Page() {
             run ? "order-first lg:order-none" : "border-t pt-8 lg:border-t-0"
           }`}
         >
-          <MarketPanel run={run} nowMs={nowMs} walletReady={snap?.walletReady ?? { test: false, real: false }} post={post} />
+          <MarketPanel run={run} nowMs={nowMs} walletReady={snap?.walletReady ?? { test: false, real: false }} post={post} send={send} />
         </div>
       </section>
 

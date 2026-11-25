@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { approvalSentence } from "./market-copy";
@@ -22,21 +22,29 @@ export function ApprovalBar({ run, walletReady, post }: { run: MarketRunView; wa
   const [busy, setBusy] = useState<"pay" | "cancel" | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // Blocks a second Pay or Cancel in the same tick, before the busy state has rendered.
+  const inFlight = useRef(false);
   const a = run.approval;
   if (!a) return null;
   const real = run.market === "real";
 
   const pay = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPayError(null);
     setBusy("pay");
     setPayError(await post("/api/market/approve", { run: run.id, code: a.code }));
     setBusy(null);
+    inFlight.current = false;
   };
   const cancel = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setCancelError(null);
     setBusy("cancel");
     setCancelError(await post("/api/market/destroy", { run: run.id, cancel: true }));
     setBusy(null);
+    inFlight.current = false;
   };
 
   const reason = walletReady ? null : real ? "Fund a mainnet wallet to pay on the real market." : "Set up the devnet wallet to pay on the test market.";
