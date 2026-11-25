@@ -2,41 +2,44 @@
 
 import { useState } from "react";
 import type { PriceComparison } from "@/lib/market/prices/compare";
+import { Fold } from "./Fold";
 import { usd4 } from "./format";
-import { buyableWord, cheapestMarks, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink } from "./market-copy";
+import { buyableMachine, buyableWord, cheapestMarks, priceRows, priceSourceLines, pricesAllFailed, pricesLead, safeLink } from "./market-copy";
 import { TEXT_BTN } from "./ui";
 
 /** Cell padding, as in the offers table: a little tighter while the table is narrow. */
 const PAD = "py-2 pr-3 @min-[30rem]:pr-4";
 
-/**
- * Height kept for the block before its prices arrive, so nothing under it (the approval bar's Pay button)
- * moves when they land. Rows: the buyable plan plus one per provider with a fit; only Vultr lists CPU
- * machines, so a CPU need has at most two rows and a GPU need at most five.
- */
-const reserveHeight = (kind: "cpu" | "gpu") => `${13.75 + (kind === "cpu" ? 2 : 5) * 3.5}rem`;
+/** A short mark under a cell's main text ("cheapest", "same machine, direct"): text, never colour alone. */
+function Mark({ children }: { children: string }) {
+  return <span className="block text-[12px] leading-4 font-medium text-foreground">{children}</span>;
+}
 
 /**
  * Live list prices from providers the agent cannot buy from, beside the plan it can buy. Read-only:
  * nothing here is a quote, and only the buyable plan's firm quote may carry the money colour.
+ * Provider text (names, regions, notes) is rendered as text only.
  */
 export function MarketPrices({
   prices,
   loading,
   heading,
-  reserve = null,
+  foldable = false,
   onClose,
+  onBack,
   intro,
   outro,
 }: {
   prices: PriceComparison | null;
   /** Prices are on their way: shows "Reading live prices…" in the block's place. */
   loading: boolean;
-  /** h3 inside a run (beside "Your approval"), h2 when it is the panel's own content. */
+  /** h3 inside a run, h2 when it is the panel's own content. */
   heading: "h2" | "h3";
-  /** Keeps the block at least as tall as a full result for this kind of need. */
-  reserve?: "cpu" | "gpu" | null;
+  /** Once the money is spent the table is history: the lead stays, the table opens on request. */
+  foldable?: boolean;
   onClose?: () => void;
+  /** Shown over an ended run: goes back to that run. */
+  onBack?: () => void;
   /** A line under the heading (what the prices are for). */
   intro?: string;
   /** A line at the end (what was not done). */
@@ -45,6 +48,7 @@ export function MarketPrices({
   // Said once to screen readers, when the prices arrive after the block was seen waiting for them.
   const [waited, setWaited] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   if (!prices && loading && !waited) setWaited(true);
   if (prices && waited && said === null) setSaid(`Market prices read. ${pricesLead(prices) ?? priceSourceLines(prices)[0].text}`);
 
@@ -53,14 +57,16 @@ export function MarketPrices({
   const H = heading;
   const headingId = `market-prices-heading-${heading}`;
   const lead = prices ? pricesLead(prices) : null;
-  const marks = prices ? cheapestMarks(prices) : { rows: [], buyable: false };
   const b = prices?.buyable ?? null;
-  const hasRows = prices !== null && (prices.best.length > 0 || b !== null);
-
-  const cheapest = <span className="block text-[12px] leading-4 font-medium text-foreground">cheapest</span>;
+  const rows = prices ? priceRows(prices) : [];
+  const buyableCheapest = prices ? cheapestMarks(prices).buyable : false;
+  const hasRows = prices !== null && (rows.length > 0 || b !== null);
+  const showTable = hasRows && (!foldable || open);
+  // The interruptible column only when some row has an interruptible price.
+  const spotColumn = rows.some((r) => r.spotHourlyUsd !== null);
 
   return (
-    <section aria-labelledby={headingId} className="space-y-2" style={reserve ? { minHeight: reserveHeight(reserve) } : undefined}>
+    <section aria-labelledby={headingId} className="space-y-2">
       <div>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <H id={headingId} className={H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[13.5px] leading-5 font-semibold text-foreground"}>
@@ -69,6 +75,11 @@ export function MarketPrices({
           {onClose && (
             <button type="button" className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={onClose}>
               Close
+            </button>
+          )}
+          {onBack && (
+            <button type="button" className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={onBack}>
+              Back to the last run
             </button>
           )}
         </div>
@@ -90,13 +101,15 @@ export function MarketPrices({
 
           {lead && (
             <div>
-              <p className="max-w-[64ch] text-foreground tabular-nums">{lead}</p>
-              {/* What the two figures include (surcharge, billed hours, regions), so they are compared fairly. */}
+              <p className="max-w-[64ch] text-foreground tabular-nums [overflow-wrap:anywhere]">{lead}</p>
+              {/* What the two figures include (surcharge, minimum, total, regions), so they are compared fairly. */}
               {hasRows && !pricesAllFailed(prices) && prices.basis && <p className="mt-0.5 max-w-[64ch] text-[12px] leading-4 text-muted tabular-nums">{prices.basis}</p>}
             </div>
           )}
 
-          {hasRows && (
+          {hasRows && foldable && <Fold label="the market prices table" open={open} onToggle={() => setOpen(!open)} />}
+
+          {showTable && (
             // relative: the visually hidden caption is positioned against this wrapper, so it cannot widen the page.
             <div className="@container relative overflow-x-auto">
               <table className="w-full border-collapse text-[13.5px] leading-5">
@@ -112,9 +125,11 @@ export function MarketPrices({
                     <th scope="col" className={`${PAD} text-right font-medium`}>
                       Price an hour
                     </th>
-                    <th scope="col" className={`hidden ${PAD} text-right font-medium @min-[43rem]:table-cell`}>
-                      Interruptible price an hour
-                    </th>
+                    {spotColumn && (
+                      <th scope="col" className={`hidden ${PAD} text-right font-medium @min-[43rem]:table-cell`}>
+                        Interruptible price an hour
+                      </th>
+                    )}
                     <th scope="col" className="py-2 font-medium">
                       Can your agent buy here?
                     </th>
@@ -125,58 +140,74 @@ export function MarketPrices({
                     <tr className="border-b border-rule">
                       <th scope="row" className={`border-l-2 border-foreground ${PAD} pl-2 text-left font-semibold`}>
                         Through {b.seller}
-                        {/* Narrow tables: the plan under the seller instead of a column that would scroll out of view. */}
-                        <span className="block text-[12px] leading-4 font-normal whitespace-nowrap text-muted @min-[37rem]:hidden">{b.plan}</span>
+                        {/* Narrow tables: the plan and its size under the seller instead of a column that would scroll out of view. */}
+                        <span className="block text-[12px] leading-4 font-normal text-muted @min-[37rem]:hidden">
+                          <span className="whitespace-nowrap">{b.plan}</span>
+                          {buyableMachine(b) && <span className="block">{buyableMachine(b)}</span>}
+                        </span>
                       </th>
                       <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>
                         {/* Plan ids never break mid-word. */}
                         <span className="whitespace-nowrap">{b.plan}</span>
+                        {buyableMachine(b) && <span className="block text-[12px] leading-4 text-muted">{buyableMachine(b)}</span>}
                       </td>
                       <td className={`${PAD} text-right`}>
                         {b.firm ? (
-                          <span className="font-semibold text-foreground underline decoration-amber decoration-2 underline-offset-4" title="The firm quote divided by the hours it buys">
+                          <span className="font-semibold text-foreground underline decoration-amber decoration-2 underline-offset-4" title="The firm quote divided by the hours you asked for">
                             {usd4(b.hourlyUsd)}
                           </span>
                         ) : (
                           usd4(b.hourlyUsd)
                         )}
-                        {marks.buyable && cheapest}
+                        {buyableCheapest && <Mark>cheapest</Mark>}
                       </td>
-                      <td className={`hidden ${PAD} text-right @min-[43rem]:table-cell`}>
-                        <span className="sr-only">does not apply</span>
-                      </td>
+                      {spotColumn && (
+                        <td className={`hidden ${PAD} text-right @min-[43rem]:table-cell`}>
+                          <span className="sr-only">does not apply</span>
+                        </td>
+                      )}
                       <td className="py-2 font-medium text-foreground">{buyableWord(b)}</td>
                     </tr>
                   )}
-                  {prices.best.map((p, i) => {
-                    const href = safeLink(p.url);
-                    const detail = priceMachine(p);
+                  {rows.map((r) => {
+                    const href = safeLink(r.url);
+                    const place = r.region ? `host in ${r.region}${r.outsideRegions ? ", outside the regions you asked for" : ""}` : null;
                     return (
-                      <tr key={`${p.source}:${p.name}`} className="border-b border-rule">
+                      <tr key={r.key} className="border-b border-rule">
                         <th scope="row" className={`border-l-2 border-transparent ${PAD} pl-2 text-left font-normal`}>
                           {href ? (
                             <a href={href} target="_blank" rel="noreferrer noopener">
-                              {p.sourceLabel}
+                              {r.sourceLabel}
                               <span className="sr-only"> (opens in a new tab)</span>
                             </a>
                           ) : (
-                            p.sourceLabel
+                            r.sourceLabel
                           )}
-                          <span className="block text-[12px] leading-4 whitespace-nowrap text-muted @min-[37rem]:hidden">{p.name}</span>
-                          {p.note && <span className="block max-w-[32ch] text-[12px] leading-4 text-muted">{p.note}</span>}
+                          {r.same && <Mark>same machine, direct</Mark>}
+                          {/* Narrow tables: the machine, its size, its place and its interruptible price under the provider. */}
+                          <span className="block text-[12px] leading-4 text-muted @min-[37rem]:hidden">
+                            <span>{r.name}</span>
+                            {r.detail && <span className="block">{r.detail}</span>}
+                            {place && <span className="block">{place}</span>}
+                            {r.spotHourlyUsd !== null && <span className="block tabular-nums">interruptible {usd4(r.spotHourlyUsd)} an hour</span>}
+                          </span>
+                          {r.note && <span className="block max-w-[32ch] text-[12px] leading-4 text-muted">{r.note}</span>}
                         </th>
                         <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>
-                          <span className="whitespace-nowrap">{p.name}</span>
-                          {p.region && <span className="whitespace-nowrap text-muted"> {p.region}</span>}
-                          {detail && <span className="block text-[12px] leading-4 text-muted">{detail}</span>}
+                          <span className="whitespace-nowrap">{r.name}</span>
+                          {r.detail && <span className="block text-[12px] leading-4 text-muted">{r.detail}</span>}
+                          {place && <span className="block text-[12px] leading-4 text-muted">{place}</span>}
+                          {spotColumn && r.spotHourlyUsd !== null && <span className="block text-[12px] leading-4 text-muted tabular-nums @min-[43rem]:hidden">interruptible {usd4(r.spotHourlyUsd)} an hour</span>}
                         </td>
                         <td className={`${PAD} text-right`}>
-                          {usd4(p.hourlyUsd)}
-                          {marks.rows[i] && cheapest}
+                          {usd4(r.hourlyUsd)}
+                          {r.cheapest && <Mark>cheapest</Mark>}
                         </td>
-                        <td className={`hidden ${PAD} text-right @min-[43rem]:table-cell`}>
-                          {p.spotHourlyUsd !== null ? usd4(p.spotHourlyUsd) : <span className="sr-only">not published</span>}
-                        </td>
+                        {spotColumn && (
+                          <td className={`hidden ${PAD} text-right @min-[43rem]:table-cell`}>
+                            {r.spotHourlyUsd !== null ? usd4(r.spotHourlyUsd) : <span className="sr-only">not published</span>}
+                          </td>
+                        )}
                         <td className="py-2 text-muted">Not yet: no x402 payment</td>
                       </tr>
                     );
@@ -186,7 +217,7 @@ export function MarketPrices({
             </div>
           )}
 
-          {hasRows && (
+          {showTable && (
             <p className="max-w-[64ch] text-[12px] leading-4 text-muted">
               Prices from other providers are list prices read from their public pages. Only a firm quote from a seller your agent can pay is ever approved or paid.
             </p>
