@@ -178,3 +178,20 @@ Decisions made by the designer (owner asked for improvements): firm quotes befor
 - **RunPod and DigitalOcean.** `os_id` per provider as in the plan. A failed port-22 check is reported ("closed") and never fails a run.
 - **Destroy now is allowed at any time**, including seconds after renting. The seller's 1-hour minimum is a charge, not a lock.
 - **Cancel at the approval stop** ends the run `refused` with code `CANCELLED`; nothing was signed, so nothing is owed.
+
+## Addendum 2026-11-25: market prices (the aggregator view)
+
+Owner asked to close the gap between "one seller's price list" and "the best rate anywhere". Decision: add read-only live prices from providers that publish them without an account, shown beside the seller the agent can buy from. No payment code changes.
+
+Sources (verified live 2026-11-25, all plain GET/POST with no key; fixed URLs; nothing about the owner is sent):
+- Vultr direct: `GET https://api.vultr.com/v2/plans?per_page=500` → `plans[]` with `id, vcpu_count, ram` (MB), `hourly_cost, hourly_cost_preemptible, gpu_type, gpu_vram_gb, locations[]`.
+- Vast.ai marketplace: `GET https://console.vast.ai/api/v0/bundles/?q=<json>` with `{"rentable":{"eq":true},"verified":{"eq":true},"num_gpus":{"eq":1},"order":[["dph_total","asc"]],"limit":40}` → `offers[]` with `gpu_name, gpu_ram` (MB), `cpu_cores_effective, cpu_ram` (MB), `dph_total` ($/h on demand), `min_bid` ($/h interruptible), `geolocation, reliability2`.
+- RunPod direct: `POST https://api.runpod.io/graphql` body `{"query":"{ gpuTypes { id displayName memoryInGb communityPrice securePrice communitySpotPrice secureSpotPrice } }"}` → `data.gpuTypes[]` (prices in $/h; 0 or null = not offered).
+- Akash: `GET https://console-api.akash.network/v1/gpu-prices` → `models[]` with `vendor, model, ram` ("40Gi"), `availability{total,available}`, `price{currency,min,max,avg,...}` ($/h).
+
+Rules:
+- Each source is fetched with a 6 s timeout and a 2 MB cap, parsed defensively (bad rows skipped, never throws); a failed source is reported and never fails a run.
+- A price is a fit when it meets the need (kind; vCPUs, RAM, GPU memory at least what was asked; a dimension the source does not state is not compared, except GPU memory for GPU needs).
+- The view shows, per source, the cheapest fit (on-demand price and, when published, the interruptible price), then two plain facts: the cheapest fit anywhere, and the cheapest the agent can actually buy with how much more that is per hour. Sources the agent cannot buy from say so ("no x402 payment yet").
+- Prices from other providers are never called quotes and never enter the payment path; only the buyable seller's firm quote can be approved.
+- Available two ways: inside a run (fetched during the scan), and on demand through a "Compare prices" action that starts no run.
