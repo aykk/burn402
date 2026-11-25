@@ -9,6 +9,7 @@ import { RENT_HELP } from "./copy";
 import { usd2 } from "./format";
 import { Help } from "./Help";
 import { MARKET_NAME, hoursText, sentence } from "./market-copy";
+import { draftLimits } from "./meter-model";
 import { Segmented } from "./Segmented";
 import { BTN, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
 
@@ -166,8 +167,11 @@ export function NeedForm(props: {
     setStartError(null);
   }, [resetSignal]);
 
+  // The meter follows the budget and limit as they are typed, but only valid pairs: while a field holds a value the
+  // form would refuse, the meter keeps the last valid one instead of showing it as if it were real.
   useEffect(() => {
-    onDraftChange({ budgetUsd: Number.isFinite(budget) ? budget : 0, rateUsdHr: Number.isFinite(rate) ? rate : 0 });
+    const valid = draftLimits(budget, rate);
+    if (valid) onDraftChange(valid);
   }, [budget, rate, onDraftChange]);
 
   const hasKey = Boolean(snap?.models.providers.find((p) => p.id === snap.models.selected)?.key);

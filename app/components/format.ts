@@ -36,6 +36,24 @@ export function kb(bytes: number | null): string {
 /** Displayed amounts never go below zero or show NaN. */
 const safe = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
 
+/** "1234567.25" becomes "1,234,567.25": thousands separators on the whole dollars only. */
+const grouped = (fixed: string) => fixed.replace(/^\d+/, (whole) => whole.replace(/\B(?=(\d{3})+(?!\d))/g, ","));
+
+/** How long something took, as people say it: "51 s", "2 min 5 s", "1 h 5 min". */
+export function elapsedText(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "-";
+  const total = Math.round(seconds);
+  if (total < 60) return `${total} s`;
+  if (total < 3600) {
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return s > 0 ? `${m} min ${s} s` : `${m} min`;
+  }
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return m > 0 ? `${h} h ${m} min` : `${h} h`;
+}
+
 /**
  * The site's two money formats. Budgets and limits read in cents ("$0.50", "$1.25"), keeping extra
  * digits only when the amount really has them ("$0.125"), so a typed limit is never rounded away.
@@ -43,12 +61,12 @@ const safe = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
 export function usd2(n: number): string {
   const v = parseFloat(safe(n).toFixed(4));
   const cents = v * 100;
-  return Math.abs(cents - Math.round(cents)) < 1e-9 ? `$${v.toFixed(2)}` : `$${v}`;
+  return Math.abs(cents - Math.round(cents)) < 1e-9 ? `$${grouped(v.toFixed(2))}` : `$${grouped(String(v))}`;
 }
 
 /** Job-level costs and prices (payments, quotes, plan rates) always carry four decimals: "$0.0026". */
 export function usd4(n: number): string {
-  return `$${safe(n).toFixed(4)}`;
+  return `$${grouped(safe(n).toFixed(4))}`;
 }
 
 /**

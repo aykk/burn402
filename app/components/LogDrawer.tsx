@@ -87,8 +87,9 @@ export function LogDrawer({
           Close
         </button>
       </div>
-      {/* The scrolling log is itself a tab stop so keyboard users can scroll it. */}
-      <div ref={logRef} tabIndex={0} aria-label="Log entries" className="flex-1 overflow-y-auto p-3 text-[12px] leading-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground">
+      {/* The scrolling log is itself a tab stop so keyboard users can scroll it, but only while the drawer is open
+          (inert should already keep it out, the tabIndex makes sure). */}
+      <div ref={logRef} tabIndex={open ? 0 : -1} aria-label="Log entries" className="flex-1 overflow-y-auto p-3 text-[12px] leading-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground">
         {log.map((l) => (
           <div
             key={l.seq}

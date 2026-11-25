@@ -100,6 +100,8 @@ type StoredRecord = {
   outcome: Outcome;
   verified: boolean;
   steps: Step[];
+  /** The payment's transaction signature, when the record says a payment was signed and the chain gave one. */
+  paymentTx?: string | null;
 };
 
 export async function GET(request: Request) {
@@ -151,6 +153,7 @@ export async function GET(request: Request) {
         let headline = plainTransaction(tagOf(item.tags, "Outcome"), tagOf(item.tags, "Plan"), null);
         let outcome = transactionOutcome(tagOf(item.tags, "Outcome"));
         let reason: string | null = null;
+        let paymentTx: string | null = null;
         let verified = false;
         try {
           const body = JSON.parse(new TextDecoder().decode(await gateway.fetchData(item.id))) as {
@@ -167,6 +170,7 @@ export async function GET(request: Request) {
             headline = words?.headline ?? plainTransaction(t.outcome ?? null, t.plan ?? null, t.usd);
             outcome = words ? { label: words.label, tone: words.tone } : transactionOutcome(t.outcome ?? null);
             reason = words ? words.reason : plainRefusal(t.reason);
+            paymentTx = typeof t.usd === "number" && typeof t.tx === "string" && t.tx ? t.tx : null;
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {
@@ -192,6 +196,7 @@ export async function GET(request: Request) {
           outcome,
           verified,
           steps,
+          paymentTx,
         };
       }),
       ...conversations.map(async (item): Promise<StoredRecord> => {

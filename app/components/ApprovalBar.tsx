@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
-import { approvalSentence } from "./market-copy";
+import { approvalSentence, surchargeLine } from "./market-copy";
+import type { FocusNext } from "./MarketPanel";
 import { BTN } from "./ui";
 
 const PAY_TEST =
@@ -18,7 +19,7 @@ const PAY_REAL =
  * Pay sends the one-time code the run issued with the quote; without a wallet for this market it is off,
  * with the reason beside it.
  */
-export function ApprovalBar({ run, walletReady, post }: { run: MarketRunView; walletReady: boolean; post: Post }) {
+export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: MarketRunView; walletReady: boolean; post: Post; onFocusNext?: (next: FocusNext) => void }) {
   const [busy, setBusy] = useState<"pay" | "cancel" | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -28,24 +29,39 @@ export function ApprovalBar({ run, walletReady, post }: { run: MarketRunView; wa
   if (!a) return null;
   const real = run.market === "real";
 
+  // The guard is released in `finally`, so a throw can never leave Pay and Cancel dead.
   const pay = async () => {
     if (inFlight.current) return;
     inFlight.current = true;
-    setPayError(null);
-    setBusy("pay");
-    setPayError(await post("/api/market/approve", { run: run.id, code: a.code }));
-    setBusy(null);
-    inFlight.current = false;
+    try {
+      setPayError(null);
+      setBusy("pay");
+      // This bar goes away once the payment is sent: focus moves on to the machine block.
+      onFocusNext?.("machine");
+      const failed = await post("/api/market/approve", { run: run.id, code: a.code });
+      if (failed) onFocusNext?.(null);
+      setPayError(failed);
+    } finally {
+      setBusy(null);
+      inFlight.current = false;
+    }
   };
   const cancel = async () => {
     if (inFlight.current) return;
     inFlight.current = true;
-    setCancelError(null);
-    setBusy("cancel");
-    setCancelError(await post("/api/market/destroy", { run: run.id, cancel: true }));
-    setBusy(null);
-    inFlight.current = false;
+    try {
+      setCancelError(null);
+      setBusy("cancel");
+      onFocusNext?.("heading");
+      const failed = await post("/api/market/destroy", { run: run.id, cancel: true });
+      if (failed) onFocusNext?.(null);
+      setCancelError(failed);
+    } finally {
+      setBusy(null);
+      inFlight.current = false;
+    }
   };
+  const surcharge = surchargeLine(a.surcharge);
 
   const reason = walletReady ? null : real ? "Fund a mainnet wallet to pay on the real market." : "Set up the devnet wallet to pay on the test market.";
 
@@ -56,8 +72,9 @@ export function ApprovalBar({ run, walletReady, post }: { run: MarketRunView; wa
           Your approval
         </h3>
         <p className="mt-1 max-w-[60ch] text-[16px] leading-[22px] font-semibold text-foreground tabular-nums [overflow-wrap:anywhere]">{approvalSentence(a)}</p>
+        {surcharge && <p className="mt-1 max-w-[64ch] text-foreground">{surcharge}</p>}
         <p className="mt-1 max-w-[64ch] text-[12px] leading-4 text-muted">
-          A firm quote from {run.marketLabel}. Your agent checks the seller&apos;s payment request against this amount and your limits before it signs.
+          A firm quote from the seller. Your agent checks the seller&apos;s payment request against this amount and your limits before it signs.
         </p>
       </div>
       <div className="space-y-2">

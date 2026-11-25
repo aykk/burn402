@@ -1,5 +1,5 @@
+import { usdExact } from "../../lib/market/money";
 import type { MarketRunView } from "@/lib/market/run";
-import { usd4 } from "./format";
 import { endState, sentence } from "./market-copy";
 import { MARKET_STAGES, marketStage } from "./stages";
 
@@ -27,10 +27,12 @@ export function marketAnnouncement(prev: MarketMark | null | undefined, run: Mar
 
   const parts: string[] = [];
   if (fresh && !ENDED.has(next.phase)) parts.push("Run started.");
-  if (next.paid && (fresh || !prev.paid)) parts.push(`Payment sent: ${usd4(run.payment?.usd ?? 0)} USDC.`);
+  const amount = run.payment ? usdExact(run.payment.atomic) : null;
+  if (amount && next.paid && (fresh || !prev.paid)) parts.push(`Payment sent: ${amount} USDC${run.payment?.status === "confirmed" ? "" : ", not confirmed yet"}.`);
 
   if (next.phase === "released") {
-    if (changed) parts.push(`Machine destroyed.${run.payment ? ` Spent ${usd4(run.payment.usd)}.` : ""}`);
+    const money = !amount ? "" : run.spent === "paid" ? ` Spent ${amount}.` : run.spent === "maybe" ? ` A payment of ${amount} was sent and is not confirmed.` : "";
+    if (changed) parts.push(`Machine destroyed.${money}`);
   } else if (next.phase === "refused") {
     if (changed) parts.push(endState(run)?.sentence ?? "Stopped before paying.");
   } else if (next.phase === "failed") {
@@ -38,7 +40,7 @@ export function marketAnnouncement(prev: MarketMark | null | undefined, run: Mar
   } else {
     if (fresh || next.stage !== prev.stage) parts.push(`Stage ${next.stage + 1} of ${MARKET_STAGES.length}: ${MARKET_STAGES[next.stage]}.`);
     if (next.phase === "approval" && changed && run.approval) {
-      parts.push(`Waiting for your approval to pay ${usd4(run.approval.usd)} ${run.approval.token} for ${run.approval.plan}.`);
+      parts.push(`Waiting for your approval to pay ${run.approval.exact} ${run.approval.token} for ${run.approval.plan}.`);
     }
     if (next.phase === "ready" && changed) parts.push(`Machine ready${run.machine?.ip ? ` at ${run.machine.ip}` : ""}.`);
   }
