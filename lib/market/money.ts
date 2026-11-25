@@ -51,6 +51,13 @@ export function usdMoreThan(more: number, less: number): [string, string] {
   return [usdPlain(hi / 1e6), usdPlain(lo / 1e6)];
 }
 
+/** A per-hour price with exactly 4 decimals, for comparing rates: 0.010382 is "$0.0104", 0.007 is "$0.0070". */
+export function usdPerHour(usd: number): string {
+  if (typeof usd !== "number" || !Number.isFinite(usd)) return "an unreadable amount";
+  const [whole, frac] = Math.abs(usd).toFixed(4).split(".");
+  return `${usd < 0 ? "-" : ""}$${group(whole)}.${frac}`;
+}
+
 const short = (s: string) => (s.length > 10 ? `${s.slice(0, 4)}…${s.slice(-4)}` : s);
 
 /** "USDC", "SOL", or "another token (Abcd…Wxyz)". */
