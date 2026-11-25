@@ -1,119 +1,106 @@
 import { describe, expect, it } from "vitest";
-import type { PlanQuote } from "@/lib/train";
 import { budgetShare, jobGauge, leadingZeros, meterView, shareText, type MeterJob } from "./meter-model";
 
-function q(plan: string, hourlyUsd: number, jobUsd: number): PlanQuote {
-  return {
-    plan, family: "vc2", familyLabel: "regular", vcpus: 2, ramGb: 4, hourlyUsd,
-    coreSpeed: 0.36, workers: 1, ramNeededGb: 1, trainSeconds: 100, totalSeconds: 200,
-    jobUsd, budgetHours: 10, withinRate: true, withinBudget: true, withinDeadline: true, enoughRam: true,
-  };
-}
+const HOUR = 3_600_000;
+
+const approval = {
+  code: "c0de", usd: 0.01, atomic: "10000", token: "USDC" as const, network: "Solana devnet",
+  payTo: "ELT2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "testseller",
+};
 
 function job(over: Partial<MeterJob>): MeterJob {
   return {
-    phase: "training", budgetUsd: 1, rateUsdHr: 1, quotes: [], chosen: null, plan: null,
-    paidUsd: null, paidAt: null, doneAt: null, error: null, ...over,
+    phase: "scanning",
+    limits: { budgetUsd: 1, rateUsdHr: 0.05 },
+    need: { kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false },
+    approval: null, payment: null, machine: null, paidAt: null, releasedAt: null, error: null, refusal: null,
+    ...over,
   };
 }
 
-const base = { formBudgetUsd: 1, formRateUsdHr: 1 };
-const rented = [q("vc2-1c-1gb", 0.007, 0.0006), q("vc2-2c-4gb", 0.027, 0.0022)];
-const running = { plan: "vc2-2c-4gb", quotes: rented, paidUsd: 0.0022, paidAt: 1000 };
+const T0 = 1_795_000_000_000;
+const paid = { approval, payment: { usd: 0.01, tx: "5xTx", at: T0, payer: "3Ybt" }, paidAt: T0 };
+const base = { formBudgetUsd: 1, formRateUsdHr: 0.05 };
 
 describe("meterView", () => {
-  it("ready with no job", () => {
-    expect(meterView({ ...base, job: null, nowSec: 5 })).toMatchObject({
-      phase: "ready", budgetUsd: 1, remainingUsd: 1, quotedUsd: null, burnedUsd: null,
+  it("ready with no run shows the form's budget and limit", () => {
+    expect(meterView({ formBudgetUsd: 2, formRateUsdHr: 0.1, job: null, nowMs: T0 })).toMatchObject({
+      phase: "ready", budgetUsd: 2, rateUsdHr: 0.1, remainingUsd: 2, quotedUsd: null, paidUsd: null, usedUsd: null,
     });
   });
-  it("negotiating before a quote", () => {
-    const v = meterView({ ...base, job: job({ phase: "negotiating" }), nowSec: 5 });
-    expect(v).toMatchObject({ phase: "negotiating", remainingUsd: 1, quotedUsd: null });
+  it("scanning shows the run's limits and no amount yet", () => {
+    const v = meterView({ ...base, formBudgetUsd: 9, job: job({ phase: "quoting" }), nowMs: T0 });
+    expect(v).toMatchObject({ phase: "searching", budgetUsd: 1, rateUsdHr: 0.05, remainingUsd: 1, quotedUsd: null });
   });
-  it("negotiating with a quote", () => {
-    const v = meterView({ ...base, job: job({ phase: "negotiating", chosen: q("vc2-2c-4gb", 0.027, 0.0022) }), nowSec: 5 });
-    expect(v.quotedUsd).toBe(0.0022);
+  it("approval carries the firm quote, not paid", () => {
+    const v = meterView({ ...base, job: job({ phase: "approval", approval }), nowMs: T0 });
+    expect(v).toMatchObject({ phase: "approval", quotedUsd: 0.01, quotedHours: 1, paidUsd: null, remainingUsd: 1 });
   });
-  it("running drains at the rented plan's rate", () => {
-    const v = meterView({ ...base, job: job(running), nowSec: 1160 });
+  it("paid drains over the hours asked for: half the time, half used", () => {
+    const v = meterView({ ...base, job: job({ ...paid, phase: "ready" }), nowMs: T0 + HOUR / 2 });
     expect(v.phase).toBe("running");
-    expect(v.remainingUsd).toBeCloseTo(0.9978, 6);
-    expect(v.burnedUsd).toBeCloseTo(0.0012, 6);
+    expect(v.paidUsd).toBe(0.01);
+    expect(v.remainingUsd).toBeCloseTo(0.99, 9);
+    expect(v.usedUsd).toBeCloseTo(0.005, 9);
+    expect(v.secondsLeft).toBeCloseTo(1800, 6);
   });
-  it("drain is capped at what was paid", () => {
-    const v = meterView({ ...base, job: job(running), nowSec: 1000 + 3600 });
-    expect(v.burnedUsd).toBeCloseTo(0.0022, 6);
+  it("the drain is capped at what was paid", () => {
+    const v = meterView({ ...base, job: job({ ...paid, phase: "ready" }), nowMs: T0 + 3 * HOUR });
+    expect(v.usedUsd).toBeCloseTo(0.01, 9);
+    expect(v.secondsLeft).toBe(0);
   });
-  it("rented plan missing from quotes falls back to chosen", () => {
-    const v = meterView({
-      ...base,
-      job: job({ ...running, plan: "vc2-4c-8gb", quotes: [q("vc2-1c-1gb", 0.007, 0.0006)], chosen: q("vc2-2c-4gb", 0.027, 0.0022) }),
-      nowSec: 1160,
-    });
-    expect(v.quotedUsd).toBe(0.0022);
-    expect(v.burnedUsd).toBeCloseTo(0.0012, 6);
+  it("an earlier destroy time (the paid expiry) shortens the drain", () => {
+    const machine = { id: "m", ip: "203.0.113.1", status: "active", expiresAt: T0 + HOUR / 2, destroyAt: T0 + HOUR / 2, ssh: null, port22: "not checked" as const, plan: "p", region: "ewr" };
+    const v = meterView({ ...base, job: job({ ...paid, phase: "ready", machine }), nowMs: T0 + HOUR / 4 });
+    expect(v.usedUsd).toBeCloseTo(0.005, 9);
   });
-  it("failed during negotiation shows the error and no amber", () => {
-    const error = "your agent finished without renting a server";
-    const v = meterView({ ...base, job: job({ phase: "failed", error }), nowSec: 50 });
-    expect(v).toMatchObject({ phase: "failed", remainingUsd: 1, quotedUsd: null, burnedUsd: null, error });
+  it("paying with the payment already reported counts as running", () => {
+    expect(meterView({ ...base, job: job({ ...paid, phase: "paying" }), nowMs: T0 }).phase).toBe("running");
+    expect(meterView({ ...base, job: job({ phase: "paying", approval }), nowMs: T0 }).phase).toBe("paying");
   });
-  it("done freezes at doneAt", () => {
-    const v = meterView({ ...base, job: job({ ...running, phase: "done", doneAt: 1100 }), nowSec: 5000 });
-    expect(v.phase).toBe("done");
-    expect(v.burnedUsd).toBeCloseTo(0.00075, 6);
+  it("released freezes at the release time and reports how long it ran", () => {
+    const v = meterView({ ...base, job: job({ ...paid, phase: "released", releasedAt: T0 + 600_000 }), nowMs: T0 + 5 * HOUR });
+    expect(v.phase).toBe("released");
+    expect(v.usedUsd).toBeCloseTo(0.01 / 6, 9);
+    expect(v.ranSeconds).toBe(600);
+    expect(v.remainingUsd).toBeCloseTo(0.99, 9);
   });
-  it("no NaN when paidAt is missing", () => {
-    const v = meterView({ ...base, job: job({ ...running, paidAt: null }), nowSec: 1160 });
-    expect(v.burnedUsd).toBe(0);
+  it("refused before paying keeps the whole budget and no quote", () => {
+    const v = meterView({ ...base, job: job({ phase: "refused", approval, refusal: { code: "CANCELLED", detail: "x" } }), nowMs: T0 });
+    expect(v).toMatchObject({ phase: "refused", remainingUsd: 1, paidUsd: null, usedUsd: null });
+    expect(jobGauge(v)).toBeNull();
+  });
+  it("failed carries the error", () => {
+    const v = meterView({ ...base, job: job({ phase: "failed", error: "No usable quote" }), nowMs: T0 });
+    expect(v).toMatchObject({ phase: "failed", error: "No usable quote", remainingUsd: 1 });
+  });
+  it("no NaN when paidAt is missing: falls back to the payment time", () => {
+    const v = meterView({ ...base, job: job({ ...paid, paidAt: null, phase: "ready" }), nowMs: T0 + HOUR / 2 });
+    expect(v.usedUsd).toBeCloseTo(0.005, 9);
   });
 });
 
 describe("jobGauge", () => {
-  const view = (over: Partial<MeterJob>, nowSec: number) => meterView({ ...base, job: job(over), nowSec });
+  const view = (over: Partial<MeterJob>, nowMs: number) => meterView({ ...base, job: job(over), nowMs });
 
-  it("no gauge before there is a price", () => {
-    expect(jobGauge(meterView({ ...base, job: null, nowSec: 5 }))).toBeNull();
-    expect(jobGauge(view({ phase: "negotiating" }, 5))).toBeNull();
+  it("no gauge before there is a quote", () => {
+    expect(jobGauge(meterView({ ...base, job: null, nowMs: T0 }))).toBeNull();
+    expect(jobGauge(view({ phase: "scanning" }, T0))).toBeNull();
   });
   it("a quote fills the gauge and says how long it buys", () => {
-    const g = jobGauge(view({ phase: "negotiating", chosen: q("vc2-2c-4gb", 0.036, 0.0026) }, 5));
-    expect(g).toMatchObject({ state: "quoted", scaleUsd: 0.0026, leftUsd: 0.0026, fill: 1 });
-    expect(g!.secondsLeft).toBeCloseTo(260, 6);
+    expect(jobGauge(view({ phase: "approval", approval }, T0))).toMatchObject({ state: "quoted", scaleUsd: 0.01, leftUsd: 0.01, fill: 1, secondsLeft: 3600 });
   });
-  it("the paid amount drains to zero at the rented plan's rate", () => {
-    const start = jobGauge(view(running, 1000))!;
-    expect(start).toMatchObject({ state: "draining", scaleUsd: 0.0022, fill: 1 });
-    expect(start.secondsLeft).toBeCloseTo((0.0022 / 0.027) * 3600, 6);
-    const mid = jobGauge(view(running, 1160))!;
-    expect(mid.leftUsd).toBeCloseTo(0.001, 6);
-    expect(mid.fill).toBeCloseTo(0.001 / 0.0022, 6);
-    expect(mid.secondsLeft).toBeCloseTo((0.001 / 0.027) * 3600, 6);
-    const end = jobGauge(view(running, 1000 + 3600))!;
-    expect(end).toMatchObject({ state: "draining", leftUsd: 0, fill: 0, secondsLeft: 0 });
+  it("the paid amount drains to zero over the rented time", () => {
+    const mid = jobGauge(view({ ...paid, phase: "ready" }, T0 + HOUR / 2))!;
+    expect(mid.state).toBe("draining");
+    expect(mid.leftUsd).toBeCloseTo(0.005, 9);
+    expect(mid.fill).toBeCloseTo(0.5, 9);
+    const end = jobGauge(view({ ...paid, phase: "ready" }, T0 + HOUR))!;
+    expect(end).toMatchObject({ leftUsd: 0, fill: 0, secondsLeft: 0 });
   });
-  it("done or failed after paying shows the server shut down, empty", () => {
-    expect(jobGauge(view({ ...running, phase: "done", doneAt: 1100 }, 5000))).toMatchObject({
-      state: "shut", scaleUsd: 0.0022, leftUsd: 0, fill: 0, secondsLeft: 0,
-    });
-    expect(jobGauge(view({ ...running, phase: "failed", error: "x" }, 1100))).toMatchObject({ state: "shut", fill: 0 });
-  });
-  it("a failed run that never paid has no job gauge", () => {
-    expect(jobGauge(view({ phase: "failed", chosen: q("a", 0.03, 0.002), error: "x" }, 5))).toBeNull();
-  });
-  it("unknown rate leaves the time out, never NaN", () => {
-    const g = jobGauge(view({ ...running, quotes: [], chosen: null }, 1160))!;
-    expect(g.state).toBe("draining");
-    expect(g.fill).toBe(1);
-    expect(g.secondsLeft).toBeNull();
-  });
-});
-
-describe("meterView server time", () => {
-  it("ranSeconds is paidAt to doneAt, only once done", () => {
-    expect(meterView({ ...base, job: job(running), nowSec: 1160 }).ranSeconds).toBeNull();
-    expect(meterView({ ...base, job: job({ ...running, phase: "done", doneAt: 1190 }), nowSec: 5000 }).ranSeconds).toBe(190);
+  it("released, or failed after paying, shows the machine gone, empty", () => {
+    expect(jobGauge(view({ ...paid, phase: "released", releasedAt: T0 + 1000 }, T0 + HOUR))).toMatchObject({ state: "shut", scaleUsd: 0.01, leftUsd: 0, fill: 0 });
+    expect(jobGauge(view({ ...paid, phase: "failed", error: "x" }, T0 + 1000))).toMatchObject({ state: "shut", fill: 0 });
   });
 });
 

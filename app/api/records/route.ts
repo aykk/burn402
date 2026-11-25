@@ -169,10 +169,10 @@ export async function GET(request: Request) {
             const session = await getSession();
             const checkedJws = await verifyJws(fromCompact(body.jws), (iss) => session.rt.directory.resolveKeys(iss), TRANSACTION_TYP);
             verified = true;
-            steps.push({ name: "broker signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
+            steps.push({ name: "signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
           }
         } catch (error) {
-          steps.push({ name: "broker signature", ok: false, detail: (error as Error).message });
+          steps.push({ name: "signature", ok: false, detail: (error as Error).message });
         }
         return {
           id: item.id,

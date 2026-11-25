@@ -1,45 +1,58 @@
 import { describe, expect, it } from "vitest";
+import type { MarketRunView } from "@/lib/market/run";
 import type { TrainingRunView } from "@/lib/demo/train";
-import { runAnnouncement, runMark } from "./announce";
+import { marketAnnouncement, marketMark } from "./announce";
 import { failedWhere } from "./stages";
 
 const job = (over: Partial<TrainingRunView>): TrainingRunView =>
   ({ id: "j1", phase: "negotiating", plan: null, paidUsd: null, actualSeconds: null, error: null, ...over }) as TrainingRunView;
 
-describe("runAnnouncement", () => {
+const run = (over: Partial<MarketRunView>): MarketRunView =>
+  ({ id: "mkt_1", market: "test", phase: "scanning", rows: [], leftOut: [], approval: null, payment: null, machine: null, error: null, refusal: null, ...over }) as MarketRunView;
+
+const approval = { code: "c", usd: 0.01, atomic: "10000", token: "USDC" as const, network: "Solana devnet", payTo: "ELT2xxxxxxxxd5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "t" };
+const payment = { usd: 0.0104, tx: "tx", at: 1, payer: "p" };
+const machine = { id: "m", ip: "203.0.113.1", status: "active", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "vc2-1c-1gb", region: "ewr" };
+
+describe("marketAnnouncement", () => {
   it("treats the first snapshot after load as a baseline", () => {
-    expect(runAnnouncement(undefined, job({ phase: "done" }))).toBeNull();
+    expect(marketAnnouncement(undefined, run({ phase: "released" }))).toBeNull();
   });
   it("announces a new run and its stage", () => {
-    expect(runAnnouncement(null, job({}))).toBe("Run started. Stage 1 of 4: Deal.");
+    expect(marketAnnouncement(null, run({}))).toBe("Run started. Stage 1 of 4: Scan.");
   });
   it("stays quiet when nothing but the clock moved", () => {
-    const j = job({ phase: "training", plan: "vc2", paidUsd: 0.01 });
-    expect(runAnnouncement(runMark(j), j)).toBeNull();
+    const r = run({ phase: "ready", payment, machine });
+    expect(marketAnnouncement(marketMark(r), r)).toBeNull();
+  });
+  it("announces the approval stop with what will be paid", () => {
+    const before = run({ phase: "quoting" });
+    expect(marketAnnouncement(marketMark(before), run({ phase: "approval", approval }))).toBe(
+      "Stage 3 of 4: Pay. Waiting for your approval to pay $0.0100 USDC for vc2-1c-1gb.",
+    );
   });
   it("announces the payment once, with the amount", () => {
-    const before = job({ phase: "negotiating", plan: "vc2" });
-    expect(runAnnouncement(runMark(before), job({ phase: "booting", plan: "vc2", paidUsd: 0.0123 }))).toBe(
-      "Payment settled: $0.0123 USDC. Stage 3 of 4: Training.",
+    const before = run({ phase: "paying", approval });
+    expect(marketAnnouncement(marketMark(before), run({ phase: "provisioning", approval, payment }))).toBe(
+      "Payment sent: $0.0104 USDC. Stage 4 of 4: Machine.",
     );
   });
-  it("announces done with time and amount", () => {
-    const before = job({ phase: "publishing", plan: "vc2", paidUsd: 0.0123 });
-    expect(runAnnouncement(runMark(before), job({ phase: "done", plan: "vc2", paidUsd: 0.0123, actualSeconds: 95 }))).toBe(
-      "Run finished. Model trained in 1m 35s for $0.0123.",
+  it("announces the machine ready and destroyed", () => {
+    const before = run({ phase: "provisioning", payment, machine });
+    expect(marketAnnouncement(marketMark(before), run({ phase: "ready", payment, machine }))).toBe("Machine ready at 203.0.113.1.");
+    const ready = run({ phase: "ready", payment, machine });
+    expect(marketAnnouncement(marketMark(ready), run({ phase: "released", payment, machine }))).toBe("Machine destroyed. Spent $0.0104.");
+  });
+  it("announces a refusal in plain words", () => {
+    const before = run({ phase: "approval", approval });
+    expect(marketAnnouncement(marketMark(before), run({ phase: "refused", approval, refusal: { code: "CANCELLED", detail: "x" } }))).toBe(
+      "You cancelled before paying. Nothing was spent.",
     );
   });
-  it("does not call a run that arrives already failed 'started'", () => {
-    expect(runAnnouncement(null, job({ phase: "failed", error: "no quotes" }))).toBe("Run failed during deal. No quotes.");
-  });
-  it("announces failure with the stage and the error", () => {
-    const before = job({});
-    expect(runAnnouncement(runMark(before), job({ phase: "failed", error: "no quotes" }))).toBe("Run failed during deal. No quotes.");
-  });
-  it("does not call a failure while the server booted 'training'", () => {
-    const before = job({ phase: "booting", plan: "vc2", paidUsd: 0.01 });
-    const failed = job({ phase: "failed", plan: "vc2", paidUsd: 0.01, status: null, liveAt: null, error: "the box did not finish inside 25 minutes" });
-    expect(runAnnouncement(runMark(before), failed)).toBe("Run failed while the server was booting. The box did not finish inside 25 minutes.");
+  it("announces a failure with the error", () => {
+    expect(marketAnnouncement(marketMark(run({})), run({ phase: "failed", error: "No price list could be read" }))).toBe(
+      "Run failed. No price list could be read.",
+    );
   });
 });
 

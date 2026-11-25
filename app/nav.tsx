@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 const PAGES = [
-  { href: "/", label: "Run" },
+  { href: "/", label: "Rent" },
   { href: "/records", label: "Records" },
   { href: "/audit", label: "Overspend test" },
 ] as const;

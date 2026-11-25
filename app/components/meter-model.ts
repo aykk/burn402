@@ -1,37 +1,57 @@
-import type { TrainingRunView } from "@/lib/demo/train";
-import type { PlanQuote } from "@/lib/train";
+import type { MarketRunView } from "@/lib/market/run";
 
-export type MeterPhase = "ready" | "negotiating" | "running" | "done" | "failed";
+export type MeterPhase = "ready" | "searching" | "approval" | "paying" | "running" | "released" | "failed" | "refused";
 
-export type MeterJob = Pick<
-  TrainingRunView,
-  "phase" | "budgetUsd" | "rateUsdHr" | "quotes" | "chosen" | "plan" | "paidUsd" | "paidAt" | "doneAt" | "error"
->;
+export type MeterJob = Pick<MarketRunView, "phase" | "limits" | "approval" | "payment" | "machine" | "paidAt" | "releasedAt" | "error" | "refusal" | "need">;
 
 export type MeterView = {
   phase: MeterPhase;
   budgetUsd: number;
   rateUsdHr: number;
   remainingUsd: number;
+  /** The firm quote at the approval stop (or being paid); null before there is one. */
   quotedUsd: number | null;
+  /** Hours the quote buys (the seller's billed hours). */
+  quotedHours: number | null;
+  /** What was actually paid over x402. Never an estimate. */
   paidUsd: number | null;
-  burnedUsd: number | null;
-  /** Hourly price of the plan actually rented (falling back to the broker's pick), or null. */
-  hourlyUsd: number | null;
-  /** Seconds the paid server ran, from payment to the end of the run; null until the run is done. */
+  /** The share of the paid amount the machine time used so far stands for; prepaid, so nothing moves. */
+  usedUsd: number | null;
+  /** Seconds of rented time left while the machine runs; null otherwise. */
+  secondsLeft: number | null;
+  /** Seconds from payment to release, once released. */
   ranSeconds: number | null;
   error: string | null;
 };
 
 const finite = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n);
 
-export function meterView(input: {
-  formBudgetUsd: number;
-  formRateUsdHr: number;
-  job: MeterJob | null;
-  nowSec: number;
-}): MeterView {
-  const { job, nowSec } = input;
+function phaseOf(job: MeterJob, paid: boolean): MeterPhase {
+  switch (job.phase) {
+    case "scanning":
+    case "choosing":
+    case "quoting":
+      return "searching";
+    case "approval":
+      return "approval";
+    case "paying":
+      return paid ? "running" : "paying";
+    case "provisioning":
+    case "ready":
+    case "releasing":
+      return "running";
+    case "released":
+      return "released";
+    case "failed":
+      return "failed";
+    case "refused":
+      return "refused";
+  }
+}
+
+/** All times in ms (MarketRunView and Snapshot.nowMs). */
+export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number; job: MeterJob | null; nowMs: number }): MeterView {
+  const { job, nowMs } = input;
   if (!job) {
     return {
       phase: "ready",
@@ -39,76 +59,83 @@ export function meterView(input: {
       rateUsdHr: input.formRateUsdHr,
       remainingUsd: input.formBudgetUsd,
       quotedUsd: null,
+      quotedHours: null,
       paidUsd: null,
-      burnedUsd: null,
-      hourlyUsd: null,
+      usedUsd: null,
+      secondsLeft: null,
       ranSeconds: null,
       error: null,
     };
   }
 
-  const phase: MeterPhase =
-    job.phase === "negotiating" ? "negotiating"
-    : job.phase === "done" ? "done"
-    : job.phase === "failed" ? "failed"
-    : "running";
+  const paid = job.payment && finite(job.payment.usd) ? job.payment.usd : null;
+  const phase = phaseOf(job, paid !== null);
+  const { budgetUsd, rateUsdHr } = job.limits;
 
-  const quote: PlanQuote | null =
-    (job.plan ? job.quotes.find((x) => x.plan === job.plan) : undefined) ?? job.chosen ?? null;
-  const paid = finite(job.paidUsd) ? job.paidUsd : null;
-
-  let burned: number | null = null;
-  if (paid !== null && quote && finite(quote.hourlyUsd)) {
-    if (!finite(job.paidAt)) burned = 0;
-    else {
-      const end = Math.min(nowSec, job.doneAt ?? nowSec);
-      const raw = (quote.hourlyUsd * (end - job.paidAt)) / 3600;
-      burned = Math.min(paid, Math.max(0, finite(raw) ? raw : 0));
-    }
+  let usedUsd: number | null = null;
+  let secondsLeft: number | null = null;
+  let ranSeconds: number | null = null;
+  const start = finite(job.paidAt) ? job.paidAt : job.payment && finite(job.payment.at) ? job.payment.at : null;
+  if (paid !== null && start !== null) {
+    // The prepaid time runs over the hours asked for, or until the machine's destroy time if that is sooner.
+    let span = job.need.hours * 3_600_000;
+    const destroyAt = job.machine?.destroyAt;
+    if (finite(destroyAt) && destroyAt > start && destroyAt - start < span) span = destroyAt - start;
+    const end = finite(job.releasedAt) ? Math.min(nowMs, job.releasedAt) : nowMs;
+    const elapsed = Math.max(0, end - start);
+    const share = span > 0 ? Math.min(1, elapsed / span) : 1;
+    usedUsd = paid * share;
+    if (phase === "running") secondsLeft = Math.max(0, (span - elapsed) / 1000);
+    if (phase === "released" && finite(job.releasedAt)) ranSeconds = Math.max(0, (job.releasedAt - start) / 1000);
+  } else if (paid !== null) {
+    usedUsd = 0;
   }
+
+  const quoteLive = phase === "approval" || phase === "paying" || phase === "running";
+  const quote = quoteLive && job.approval && finite(job.approval.usd) ? job.approval : null;
 
   return {
     phase,
-    budgetUsd: job.budgetUsd,
-    rateUsdHr: job.rateUsdHr,
-    remainingUsd: paid !== null ? job.budgetUsd - paid : job.budgetUsd,
-    quotedUsd: quote && finite(quote.jobUsd) ? quote.jobUsd : null,
+    budgetUsd,
+    rateUsdHr,
+    remainingUsd: paid !== null ? budgetUsd - paid : budgetUsd,
+    quotedUsd: quote ? quote.usd : null,
+    quotedHours: quote && finite(quote.hours) ? quote.hours : null,
     paidUsd: paid,
-    burnedUsd: burned,
-    hourlyUsd: quote && finite(quote.hourlyUsd) && quote.hourlyUsd > 0 ? quote.hourlyUsd : null,
-    ranSeconds: phase === "done" && finite(job.paidAt) && finite(job.doneAt) ? Math.max(0, job.doneAt - job.paidAt) : null,
+    usedUsd,
+    secondsLeft,
+    ranSeconds,
     error: phase === "failed" ? job.error : null,
   };
 }
 
 /**
- * The meter zoomed to the job: the quoted amount (before payment) or the paid amount fills the gauge,
- * and the paid amount drains to zero at the rented plan's hourly rate. Once the run is done or failed
- * the server is released, so the gauge is empty and shut. Null while there is no price to show.
+ * The meter zoomed to the rental: the firm quote (before payment) or the paid amount fills the gauge,
+ * and the paid amount drains to zero over the rented time. Once the run is over the machine is gone,
+ * so the gauge is empty. Null while there is no price to show.
  */
 export type JobGauge = {
   state: "quoted" | "draining" | "shut";
   /** What a full gauge stands for: the paid amount, or the quote before payment. */
   scaleUsd: number;
-  /** Server money not yet burned. */
+  /** Paid time not yet used, in dollars. */
   leftUsd: number;
   /** leftUsd / scaleUsd, 0 to 1. */
   fill: number;
-  /** Server seconds leftUsd buys at the rented rate; null when the rate is unknown. */
+  /** Seconds of machine time leftUsd stands for. */
   secondsLeft: number | null;
 };
 
 export function jobGauge(v: MeterView): JobGauge | null {
-  const secondsFor = (usd: number) => (v.hourlyUsd !== null ? (usd / v.hourlyUsd) * 3600 : null);
   if (v.paidUsd !== null && v.paidUsd > 0) {
-    if (v.phase === "done" || v.phase === "failed") {
+    if (v.phase === "released" || v.phase === "failed" || v.phase === "refused") {
       return { state: "shut", scaleUsd: v.paidUsd, leftUsd: 0, fill: 0, secondsLeft: 0 };
     }
-    const left = Math.min(v.paidUsd, Math.max(0, v.paidUsd - (v.burnedUsd ?? 0)));
-    return { state: "draining", scaleUsd: v.paidUsd, leftUsd: left, fill: left / v.paidUsd, secondsLeft: secondsFor(left) };
+    const left = Math.min(v.paidUsd, Math.max(0, v.paidUsd - (v.usedUsd ?? 0)));
+    return { state: "draining", scaleUsd: v.paidUsd, leftUsd: left, fill: left / v.paidUsd, secondsLeft: v.secondsLeft };
   }
-  if ((v.phase === "negotiating" || v.phase === "running") && v.quotedUsd !== null && v.quotedUsd > 0) {
-    return { state: "quoted", scaleUsd: v.quotedUsd, leftUsd: v.quotedUsd, fill: 1, secondsLeft: secondsFor(v.quotedUsd) };
+  if ((v.phase === "approval" || v.phase === "paying") && v.quotedUsd !== null && v.quotedUsd > 0) {
+    return { state: "quoted", scaleUsd: v.quotedUsd, leftUsd: v.quotedUsd, fill: 1, secondsLeft: v.quotedHours !== null ? v.quotedHours * 3600 : null };
   }
   return null;
 }
