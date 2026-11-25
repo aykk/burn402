@@ -58,10 +58,14 @@ export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, jo
 /**
  * The owner closes an open purchase that has no machine (a payment the seller kept, or one never
  * confirmed) after checking it themselves. One journal line records it; nothing is destroyed or paid.
- * An entry with a machine on record is refused: that machine has to be destroyed instead.
+ * Only an entry with no machine whose last event is paid or unknown can be dismissed: one with a
+ * machine on record has to be destroyed, and an intent-only entry has its machine looked for by Destroy.
  */
 export function dismissOpenPurchase(open: OpenPurchase, journal: Journal, opts: { now?: () => number } = {}): RecoverResult {
   if (open.instance) return { ok: false, error: `This purchase has a machine on record (${open.instance}). Destroy it instead; it cannot be dismissed.` };
+  if (open.lastEvent !== "paid" && open.lastEvent !== "unknown") {
+    return { ok: false, error: "No payment was recorded for this purchase yet, so there is nothing to dismiss. Use Destroy to look for its machine." };
+  }
   const now = opts.now ?? Date.now;
   journal.append({ at: now(), run: open.run, market: open.market, seller: open.seller, event: "failed", plan: open.plan, region: open.region, usd: open.usd, tx: open.tx, instance: null, detail: "dismissed by owner" });
   return { ok: true, destroyed: [], message: "Dismissed. The purchase journal keeps a line saying you dismissed it." };
@@ -84,6 +88,15 @@ export async function settleOnReset(run: Pick<MarketRun, "view" | "cancel" | "de
     return "destroyed";
   }
   return "kept";
+}
+
+export const RESET_WHILE_PAYING = "A payment is in progress. Wait for it to finish before resetting.";
+
+/** A reset is refused while the current run is paying or provisioning: it would drop a purchase in flight. */
+export function resetRefusal(run: { view: () => Pick<MarketRunView, "phase" | "market"> } | null): string | null {
+  if (!run) return null;
+  const { phase } = run.view();
+  return phase === "paying" || phase === "provisioning" ? RESET_WHILE_PAYING : null;
 }
 
 const ENDED: ReadonlySet<MarketPhase> = new Set(["released", "failed", "refused"]);

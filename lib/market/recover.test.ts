@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./guard";
 import { Journal, type OpenPurchase } from "./journal";
-import { destroyOpenPurchase, dismissOpenPurchase, settleOnReset, visibleOpenPurchases } from "./recover";
+import { destroyOpenPurchase, dismissOpenPurchase, resetRefusal, settleOnReset, visibleOpenPurchases } from "./recover";
 import { MarketRun } from "./run";
 import { SELLERS, SellerClient, type Instance } from "./seller";
 import { FakeProcessor, fakePayer, inProcess } from "./testing";
@@ -231,6 +231,33 @@ describe("dismissOpenPurchase", () => {
     expect(r).toEqual({ ok: false, error: "This purchase has a machine on record (m1). Destroy it instead; it cannot be dismissed." });
     expect(j.all()).toHaveLength(3);
     expect(j.open()).toHaveLength(1);
+  });
+});
+
+describe("dismissOpenPurchase only for a payment with no machine (M5)", () => {
+  it("refuses an entry whose last event is intent, in plain words, and writes nothing", () => {
+    const j = new Journal(path.join(tmp(), "purchases.jsonl"));
+    j.append({ at: 1, run: OPEN.run, market: "test", seller: "testseller", event: "intent", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    const r = dismissOpenPurchase(j.open()[0], j);
+    expect(r).toEqual({ ok: false, error: "No payment was recorded for this purchase yet, so there is nothing to dismiss. Use Destroy to look for its machine." });
+    expect(j.all()).toHaveLength(1);
+    expect(j.open()).toHaveLength(1);
+  });
+});
+
+describe("resetRefusal (I2b)", () => {
+  const MSG = "A payment is in progress. Wait for it to finish before resetting.";
+  it("refuses a reset while a run is paying or provisioning, on either market", () => {
+    for (const phase of ["paying", "provisioning"] as const) {
+      expect(resetRefusal({ view: () => ({ phase, market: "real" }) })).toBe(MSG);
+      expect(resetRefusal({ view: () => ({ phase, market: "test" }) })).toBe(MSG);
+    }
+  });
+  it("allows it with no run, at the approval stop, at ready and after the end", () => {
+    expect(resetRefusal(null)).toBeNull();
+    for (const phase of ["scanning", "approval", "ready", "releasing", "released", "failed", "refused"] as const) {
+      expect(resetRefusal({ view: () => ({ phase, market: "real" }) })).toBeNull();
+    }
   });
 });
 
