@@ -5,7 +5,7 @@ import { mandateHash, signMandate, toCompact, type Mandate } from "../mandate";
 import { syncBehavior } from "../trust";
 import { publishVerdict } from "../verify";
 import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
-import { toTransactionRecord } from "../market/record";
+import { clusterForMarket, toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { findPaymentFor, marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
@@ -219,9 +219,9 @@ export class DemoSession {
       keyDir: sshKeyDir(rt.config.root),
       findPayment: findPaymentFor(input.market),
       onRecord: (record) => {
-        void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti }), {
+        void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti, cluster: clusterForMarket(input.market) }), {
           signer,
-          cluster: input.market === "real" ? "mainnet" : "devnet",
+          cluster: clusterForMarket(input.market),
         });
       },
       log: (line) => rt.log.push("info", "MARKET", line),

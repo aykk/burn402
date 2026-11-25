@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describePurchase, toTransactionRecord } from "./record";
+import { clusterOf, clusterForMarket, describePurchase, toTransactionRecord } from "./record";
 import type { PurchaseRecord } from "./run";
 
 const ctx = { subject: "ans://v1.0.0.ops.burn402.xyz", mandate: "hash123", mandateJti: "m_mkt_1" };
@@ -20,6 +20,21 @@ describe("toTransactionRecord", () => {
       tx: "5xTx",
       server: "ts-1",
     });
+  });
+
+  it("carries the Solana cluster when the caller gives one, and leaves the field out otherwise", () => {
+    expect(toTransactionRecord(base, { ...ctx, cluster: "devnet" }).cluster).toBe("devnet");
+    expect(toTransactionRecord(base, { ...ctx, cluster: "mainnet" }).cluster).toBe("mainnet");
+    expect("cluster" in toTransactionRecord(base, ctx)).toBe(false);
+  });
+
+  it("maps a market to its cluster, and reads only known clusters back from a stored record", () => {
+    expect(clusterForMarket("test")).toBe("devnet");
+    expect(clusterForMarket("real")).toBe("mainnet");
+    expect(clusterOf("devnet")).toBe("devnet");
+    expect(clusterOf("mainnet")).toBe("mainnet");
+    expect(clusterOf("testnet")).toBeNull();
+    expect(clusterOf(undefined)).toBeNull();
   });
 
   it("maps a guard refusal with its code and detail in reason", () => {

@@ -1,13 +1,21 @@
 import type { TransactionRecord } from "../x402";
 import { usdPlain } from "./money";
 import type { PurchaseRecord } from "./run";
+import type { MarketId } from "./types";
+
+export type Cluster = "devnet" | "mainnet";
+
+export const clusterForMarket = (m: MarketId): Cluster => (m === "real" ? "mainnet" : "devnet");
+
+/** A cluster read back from a stored record: only the two known values, else null (older records carry none). */
+export const clusterOf = (v: unknown): Cluster | null => (v === "devnet" || v === "mainnet" ? v : null);
 
 /**
  * A purchase decision in the shape the gate's TRANSACTION events use, so it is stored,
  * anchored and listed the same way. `at` goes from ms to seconds; an empty plan (the run
  * ended before any quote) becomes "none" because an Arweave tag value cannot be empty.
  */
-export function toTransactionRecord(r: PurchaseRecord, ctx: { subject: string; mandate: string | null; mandateJti: string | null }): TransactionRecord {
+export function toTransactionRecord(r: PurchaseRecord, ctx: { subject: string; mandate: string | null; mandateJti: string | null; cluster?: Cluster }): TransactionRecord {
   return {
     at: r.at / 1000,
     subject: ctx.subject,
@@ -20,6 +28,7 @@ export function toTransactionRecord(r: PurchaseRecord, ctx: { subject: string; m
     usd: r.usd,
     tx: r.tx,
     server: r.server,
+    ...(ctx.cluster ? { cluster: ctx.cluster } : {}),
   };
 }
 
