@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getSession } from "@/lib/demo/session";
-import { clusterOf, describePurchase } from "@/lib/market/record";
+import { clusterOf } from "@/lib/market/record";
+import { recordWords } from "@/app/components/record-words";
 import { fromCompact, verifyJws } from "@/lib/mandate";
 import { DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict } from "@/lib/verify";
 
@@ -36,40 +37,6 @@ function plainBreach(verdict: string | null | undefined, mode: string | null | u
 function verdictOutcome(verdict: string | null | undefined): Outcome {
   if (verdict === "BREACH") return { label: "broke its budget", tone: "bad" };
   return { label: "no violation found", tone: "good" };
-}
-
-function transactionOutcome(outcome: string | null): Outcome {
-  if (outcome === "accepted") return { label: "allowed and paid", tone: "good" };
-  if (outcome === "refused") return { label: "refused by the broker", tone: "warn" };
-  if (outcome === "payment rejected") return { label: "payment rejected", tone: "bad" };
-  if (outcome === "failed") return { label: "could not be started", tone: "bad" };
-  return { label: outcome ?? "unknown", tone: "warn" };
-}
-
-export function plainRefusal(reason: string | null | undefined): string | null {
-  if (!reason) return null;
-  const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
-  if (rate) return `the server costs $${rate[1]} an hour and the budget allowed $${rate[2]}`;
-  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "the budget was signed by a key that does not belong to the agent named on it";
-  if (/BUDGET_EXCEEDED/.test(reason)) return "the budget had no money left in it";
-  if (/WINDOW_EXPIRED/.test(reason)) return "the budget had already expired";
-  if (/SCOPE_ESCALATION/.test(reason)) return "the budget does not cover renting servers";
-  if (/IDENTITY_UNANCHORED/.test(reason)) return "the agent is not registered in ANS";
-  if (/DEPTH_EXCEEDED/.test(reason)) return "the budget had been passed on more times than it allows";
-  if (/PLAN_UNKNOWN/.test(reason)) return "there is no such plan at the provider";
-  if (/PLAN_UNAVAILABLE/.test(reason)) return "that plan is not available in this region";
-  if (/Cannot add instance|out of stock|capacity/i.test(reason)) return "the provider had none of that plan left to give";
-  if (/PROVIDER_ERROR/.test(reason)) return `the provider refused to start it: ${reason.replace(/^.*HTTP \d+: /, "").slice(0, 120)}`;
-  return reason.replace(/^[A-Z_]+: /, "");
-}
-
-function plainTransaction(outcome: string | null, plan: string | null, usd: number | null | undefined): string {
-  const server = plan ? `a ${plan} server` : "a server";
-  if (outcome === "accepted") return `paid ${usd !== null && usd !== undefined ? `${usd.toFixed(6)} USDC ` : ""}for ${server}`;
-  if (outcome === "refused") return `asked for ${server} and was refused`;
-  if (outcome === "payment rejected") return `tried to pay for ${server} and the payment was rejected`;
-  if (outcome === "failed") return `asked for ${server} and it could not be started`;
-  return `${outcome ?? "asked"} ${server}`;
 }
 
 function conversationOutcome(ok: boolean, withheld: number): Outcome {
@@ -152,8 +119,10 @@ export async function GET(request: Request) {
         const steps: Step[] = [];
         let issuedAt = seconds(tagOf(item.tags, "Issued-At"));
         let subject = tagOf(item.tags, "Subject-FQDN");
-        let headline = plainTransaction(tagOf(item.tags, "Outcome"), tagOf(item.tags, "Plan"), null);
-        let outcome = transactionOutcome(tagOf(item.tags, "Outcome"));
+        // Until the body is read, the tags alone: outcome and plan.
+        const tagWords = recordWords({ outcome: tagOf(item.tags, "Outcome"), plan: tagOf(item.tags, "Plan"), usd: null, tx: null, reason: null });
+        let headline = tagWords.headline;
+        let outcome: Outcome = { label: tagWords.label, tone: tagWords.tone };
         let reason: string | null = null;
         let paymentTx: string | null = null;
         let paymentCluster: "devnet" | "mainnet" | null = null;
@@ -168,11 +137,11 @@ export async function GET(request: Request) {
             issuedAt = body.transaction.at ? Math.floor(body.transaction.at) : issuedAt;
             subject = body.transaction.subject ?? subject;
             const t = body.transaction;
-            // a payment the seller kept, an unconfirmed payment, or the owner's own cancel: worded by the market code
-            const words = describePurchase({ outcome: t.outcome ?? null, plan: t.plan ?? null, usd: t.usd, tx: t.tx, reason: t.reason });
-            headline = words?.headline ?? plainTransaction(t.outcome ?? null, t.plan ?? null, t.usd);
-            outcome = words ? { label: words.label, tone: words.tone } : transactionOutcome(t.outcome ?? null);
-            reason = words ? words.reason : plainRefusal(t.reason);
+            // Plain words for every record, older ones included: exact amounts, no codes, no raw JSON.
+            const words = recordWords({ outcome: t.outcome ?? null, plan: t.plan ?? null, usd: t.usd, tx: t.tx, reason: t.reason });
+            headline = words.headline;
+            outcome = { label: words.label, tone: words.tone };
+            reason = words.reason;
             paymentTx = typeof t.usd === "number" && typeof t.tx === "string" && t.tx ? t.tx : null;
             paymentCluster = clusterOf(t.cluster);
           }
