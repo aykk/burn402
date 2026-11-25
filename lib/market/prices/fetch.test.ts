@@ -70,6 +70,7 @@ describe("fetchMarketPrices", () => {
       }
       expect(h.get("accept")).toBe("application/json");
       expect(c.init?.credentials).toBe("omit");
+      expect(c.init?.redirect).toBe("error");
       expect(c.init?.signal).toBeInstanceOf(AbortSignal);
     }
     const vast = new URL(calls.find((c) => c.url.includes("vast"))!.url);
@@ -100,6 +101,13 @@ describe("fetchMarketPrices", () => {
       ["akash", false, "sent something this app could not read"],
     ]);
     expect(mixed.prices.some((p) => p.source === "vast" || p.source === "akash")).toBe(false);
+  });
+
+  it("a parser that throws is reported as unreadable, not unreachable", async () => {
+    const { f } = fakeFetch(); // the vultr fixture parses fine; only the injected parser throws
+    const r = await fetchMarketPrices({ fetch: f, cache: fresh(), parsers: { vultr: () => { throw new Error("boom"); } } });
+    expect(r.sources[0]).toEqual({ source: "vultr", label: "Vultr (direct)", ok: false, count: 0, note: "sent something this app could not read" });
+    expect(r.sources.slice(1).every((s) => s.ok)).toBe(true);
   });
 
   it("never throws, even when fetch throws synchronously", async () => {

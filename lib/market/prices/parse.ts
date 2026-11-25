@@ -18,6 +18,11 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !=
 const rows = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
 
+/** Provider text shown to the owner is capped, so a feed cannot flood the page. */
+const MAX_TEXT = 80;
+const cap = (s: string | null): string | null => (s !== null && s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) : s);
+const capped = (p: MarketPrice): MarketPrice => ({ ...p, name: cap(p.name)!, gpu: cap(p.gpu), region: cap(p.region), note: cap(p.note) });
+
 function base(source: PriceSource): Pick<MarketPrice, "source" | "sourceLabel" | "url"> {
   return { source, sourceLabel: SOURCE_LABELS[source], url: SOURCE_URLS[source] };
 }
@@ -49,7 +54,7 @@ export function parseVultr(raw: unknown): MarketPrice[] {
     const model = /^vcg-([a-z0-9]+)-/i.exec(id)?.[1]?.toUpperCase() ?? null;
     const gpu = !isGpu ? null : (gpuType ?? ([brand && brand.toLowerCase() !== "none" ? brand : null, model].filter(Boolean).join(" ") || id));
     const preemptible = pos(row.hourly_cost_preemptible);
-    out.push({
+    out.push(capped({
       ...base("vultr"),
       name: id,
       kind: isGpu ? "gpu" : "cpu",
@@ -61,7 +66,7 @@ export function parseVultr(raw: unknown): MarketPrice[] {
       spotHourlyUsd: preemptible !== null && row.deploy_preemptible !== false ? preemptible : null,
       region,
       note: null,
-    });
+    }));
   }
   return out;
 }
@@ -79,7 +84,7 @@ export function parseVast(raw: unknown): MarketPrice[] {
     const hourly = pos(row.dph_total);
     if (!name || hourly === null) continue;
     const reliability = num(row.reliability2);
-    out.push({
+    out.push(capped({
       ...base("vast"),
       name,
       kind: "gpu",
@@ -91,7 +96,7 @@ export function parseVast(raw: unknown): MarketPrice[] {
       spotHourlyUsd: pos(row.min_bid),
       region: str(row.geolocation),
       note: reliability !== null && reliability >= 0 && reliability <= 1 ? `community host, ${(reliability * 100).toFixed(1)}% reliability` : null,
-    });
+    }));
   }
   return out;
 }
@@ -112,7 +117,7 @@ export function parseRunpod(raw: unknown): MarketPrice[] {
     for (const tier of RUNPOD_TIERS) {
       const hourly = pos(row[tier.price]);
       if (hourly === null) continue;
-      out.push({
+      out.push(capped({
         ...base("runpod"),
         name,
         kind: "gpu",
@@ -124,7 +129,7 @@ export function parseRunpod(raw: unknown): MarketPrice[] {
         spotHourlyUsd: pos(row[tier.spot]),
         region: null,
         note: tier.note,
-      });
+      }));
     }
   }
   return out;
@@ -138,7 +143,8 @@ function giToGb(v: unknown): number {
 
 /**
  * Akash `gpu-prices`: one price per GPU model across the network's providers. The price is the
- * average when positive, else the minimum; models with nothing available are skipped.
+ * minimum (the cheapest listed) when positive, else the average; the note gives the average and
+ * the top of the range. Models with nothing available are skipped.
  */
 export function parseAkash(raw: unknown): MarketPrice[] {
   if (!isObj(raw)) return [];
@@ -151,15 +157,18 @@ export function parseAkash(raw: unknown): MarketPrice[] {
     const total = num(avail.total);
     const min = pos(row.price.min);
     const max = pos(row.price.max);
-    const hourly = pos(row.price.avg) ?? min;
+    const avg = pos(row.price.avg);
+    // the cheapest listed price, as the other sources give theirs; the average goes in the note
+    const hourly = min ?? avg;
     if (!model || hourly === null || !(available > 0)) continue;
     const ram = str(row.ram);
     const iface = str(row.interface);
     const vendor = str(row.vendor);
     const notes: string[] = [];
-    if (min !== null && max !== null && max !== min) notes.push(`${usdPlain(min)} to ${usdPlain(max)} across providers`);
-    notes.push(total !== null && total >= available ? `${available} of ${total} available` : `${available} available`);
-    out.push({
+    const stock = total !== null && total >= available ? `${available} of ${total} available` : `${available} available`;
+    if (max !== null && max !== hourly) notes.push(`${avg !== null ? `average ${usdPlain(avg)}, ` : ""}up to ${usdPlain(max)} across providers`);
+    notes.push(stock);
+    out.push(capped({
       ...base("akash"),
       name: [model, ram, iface].filter(Boolean).join(" "),
       kind: "gpu",
@@ -170,8 +179,8 @@ export function parseAkash(raw: unknown): MarketPrice[] {
       hourlyUsd: hourly,
       spotHourlyUsd: null,
       region: null,
-      note: notes.join(", "),
-    });
+      note: notes.join("; "),
+    }));
   }
   return out;
 }
