@@ -62,8 +62,16 @@ export async function nuzaFeed(fetchImpl: typeof fetch = fetch): Promise<Offer[]
   return parseNuzaFeed(await response.json());
 }
 
-/** Market routes: same-origin JSON only, so another website cannot drive a run through the browser. */
+const LOCAL_HOSTS = new Set(["127.0.0.1:3000", "localhost:3000"]);
+
+/** True when the request was addressed to this app by its local name; a DNS-rebinding page arrives with its own host name. */
+export function isLocalHost(request: Request): boolean {
+  return LOCAL_HOSTS.has(request.headers.get("host") ?? "");
+}
+
+/** Market routes: local host, same-origin JSON only, so another website cannot drive a run through the browser. */
 export function checkRequest(request: Request): Response | null {
+  if (!isLocalHost(request)) return Response.json({ error: "this app only answers on 127.0.0.1:3000 or localhost:3000" }, { status: 403 });
   const origin = request.headers.get("origin");
   if (origin !== null && !LOCAL_ORIGINS.has(origin)) return Response.json({ error: "requests from other websites are not allowed" }, { status: 403 });
   const type = request.headers.get("content-type") ?? "";

@@ -6,6 +6,7 @@ import { syncBehavior } from "../trust";
 import { publishVerdict } from "../verify";
 import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
 import { toTransactionRecord } from "../market/record";
+import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { runAgentProgram, runStressTester } from "./agent";
@@ -234,7 +235,7 @@ export class DemoSession {
   }
 
   /** Destroys the current run's machine, cancels it at the approval stop, or destroys a machine recovered from the journal. */
-  async destroyMarket(input: { run?: string; cancel?: boolean; open?: { run: string } }): Promise<{ ok: true } | { ok: false; error: string }> {
+  async destroyMarket(input: { run?: string; cancel?: boolean; open?: { run: string } }): Promise<{ ok: true; message?: string } | { ok: false; error: string }> {
     const current = this.market;
     const target = input.open?.run ?? input.run;
     if (!target) return { ok: false, error: "say which run" };
@@ -250,34 +251,23 @@ export class DemoSession {
     return this.destroyOpen(target);
   }
 
-  private async destroyOpen(runId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  private async destroyOpen(runId: string): Promise<{ ok: true; message?: string } | { ok: false; error: string }> {
     const journal = marketJournal(this.rt.config.root);
     const open = journal.open().find((o) => o.run === runId);
     if (!open) return { ok: false, error: "that purchase is not listed as open" };
-    if (!open.instance) return { ok: false, error: "no machine id is known for that purchase; list the wallet's machines with npm run market:sweep" };
+    // machines known to belong to other runs are never picked by the plan-and-region match
+    const exclude = new Set(journal.all().filter((e) => e.run !== runId && e.instance).map((e) => e.instance!));
+    const live = this.market?.view().machine?.id;
+    if (live) exclude.add(live);
+    let result: RecoverResult;
     try {
-      const seller = sellerFor(open.market, await payerFor(open.market));
-      await seller.destroy(open.instance);
-      const after = await seller.instance(open.instance);
-      if (after && after.status !== "destroyed") throw new Error(`the seller still lists ${open.instance} as ${after.status}`);
+      result = await destroyOpenPurchase(open, sellerFor(open.market, await payerFor(open.market)), journal, { exclude });
     } catch (error) {
-      return { ok: false, error: `Destroy failed, the machine may still be running: ${(error as Error).message}` };
+      return { ok: false, error: (error as Error).message };
     }
-    journal.append({
-      at: Date.now(),
-      run: open.run,
-      market: open.market,
-      seller: open.seller,
-      event: "released",
-      plan: open.plan,
-      region: open.region,
-      usd: open.usd,
-      tx: open.tx,
-      instance: open.instance,
-      detail: "destroyed from the open purchases list",
-    });
-    this.rt.log.push("info", "MARKET", `${open.instance} from run ${open.run} destroyed`);
-    return { ok: true };
+    if (!result.ok) return result;
+    this.rt.log.push("info", "MARKET", `run ${open.run}: ${result.message}`);
+    return { ok: true, message: result.message };
   }
 
   jobFor(conv: string): TrainingRun | null {

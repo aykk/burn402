@@ -1,9 +1,9 @@
 import { resetSession } from "@/lib/demo/session";
-import { snapshot } from "@/lib/demo/snapshot";
+import { snapshotFor } from "@/lib/demo/snapshot";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    return Response.json(snapshot(await resetSession()));
+    return Response.json(snapshotFor(await resetSession(), request));
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 503 });
   }

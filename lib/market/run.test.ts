@@ -489,6 +489,30 @@ describe("MarketRun seller-supplied IP", () => {
     });
   }
 
+  for (const local of ["127.0.0.1", "10.1.2.3", "172.16.0.9", "172.31.255.1", "192.168.1.20", "169.254.169.254", "0.1.2.3", "::1", "::", "fe80::1", "fd12:3456::1", "fc00::5", "::ffff:10.0.0.1"]) {
+    it(`never probes the non-public address ${local}: port 22 is "not checked"`, async () => {
+      const probePort = vi.fn(async () => true);
+      const { run } = setup({ wrap: rewriteIp(local), probePort });
+      await run.start();
+      const v = run.view();
+      expect(v.phase).toBe("ready");
+      expect(probePort).not.toHaveBeenCalled();
+      expect(v.machine?.port22).toBe("not checked");
+      await run.destroy();
+    });
+  }
+
+  it("still probes public addresses next to the private ranges", async () => {
+    for (const ip of ["172.32.0.1", "11.0.0.1", "2001:db8::7"]) {
+      const probePort = vi.fn(async () => false);
+      const { run } = setup({ wrap: rewriteIp(ip), probePort });
+      await run.start();
+      expect(probePort).toHaveBeenCalledWith(ip);
+      expect(run.view().machine?.port22).toBe("closed");
+      await run.destroy();
+    }
+  });
+
   it("probes a valid routable IP and puts it in the ssh line", async () => {
     const probePort = vi.fn(async () => true);
     const { run } = setup({ wrap: rewriteIp("198.51.100.7"), probePort });
@@ -602,6 +626,30 @@ describe("MarketRun destroy", () => {
     expect(payer.calls).toBe(0);
     expect(processor.settled).toBe(0);
     expect(records).toEqual([expect.objectContaining({ outcome: "refused", reason: expect.stringContaining("STOPPED") })]);
+  });
+
+  it("destroy during the fallback re-quote stops the run instead of showing a new approval stop", async () => {
+    const { run, seller, events, payer, processor } = setup({ ask: true });
+    await run.start();
+    seller.faults = { ...seller.faults, outOfStockRegions: ["ewr"] };
+    let target: MarketRun | null = null;
+    let unpaid = 0;
+    const handle = seller.handle.bind(seller);
+    seller.handle = async (req: Request) => {
+      // first unpaid POST: the fresh 402 for the approved quote; second: the fallback re-quote
+      if (req.method === "POST" && !req.headers.has("PAYMENT-SIGNATURE") && target && ++unpaid === 2) void target.destroy();
+      return handle(req);
+    };
+    expect(run.approve("code-1")).toEqual({ ok: true });
+    target = run;
+    await run.done;
+    expect(unpaid).toBeGreaterThanOrEqual(2);
+    expect(run.view().phase).toBe("refused");
+    expect(run.view().refusal?.code).toBe("STOPPED");
+    expect(run.view().approval?.code).toBe("code-1"); // no new approval stop
+    expect(events()).toEqual(["intent", "failed"]);
+    expect(payer.calls).toBe(0);
+    expect(processor.settled).toBe(0);
   });
 
   it("destroy during scanning stops the run before any payment", async () => {
