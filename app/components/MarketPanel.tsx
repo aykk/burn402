@@ -5,7 +5,7 @@ import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
 import { MachinePanel, type Send } from "./MachinePanel";
-import { PHASE_HEADING, endState, sentence } from "./market-copy";
+import { PHASE_HEADING, endState, fallbackLine, sentence } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
 import { TEXT_BTN } from "./ui";
@@ -185,7 +185,7 @@ export function MarketPanel({
         <div className="space-y-0.5">
           {run.fallbacks.map((f, i) => (
             <p key={i} className="max-w-[64ch] text-foreground">
-              {f}
+              {fallbackLine(f)}
             </p>
           ))}
         </div>

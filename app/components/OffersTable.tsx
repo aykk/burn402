@@ -7,12 +7,16 @@ import { usd4 } from "./format";
 import { leftOutPhrase, leftOutSummary, machineSize, quoteNote, sourceLines } from "./market-copy";
 
 const MAX_ROWS = 8;
+/** Cell padding: a little tighter while the table is narrow. */
+const PAD = "py-2 pr-3 @min-[30rem]:pr-4";
 const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote failed": 2, candidate: 3, "left out": 4 };
 
 /**
  * The comparison: sources, then the chosen and quoted plans, then other candidates (at most 8 rows), and
  * one line counting what was left out and why. "Show all" opens every plan, left-out ones included, in
- * the same table. Below 640px the table keeps Plan, Seller price, Firm quote and the status.
+ * the same table. Columns follow the width the table actually has (a container query), so the firm quote
+ * and the status are always in view without scrolling: under 30rem the status sits under the plan name,
+ * Provider and List price join from 37rem, Size from 43rem.
  */
 export function OffersTable({ run }: { run: MarketRunView }) {
   const [all, setAll] = useState(false);
@@ -56,17 +60,18 @@ export function OffersTable({ run }: { run: MarketRunView }) {
       )}
 
       {shown.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13.5px] leading-5 sm:min-w-[640px]">
+        // relative: the visually hidden header text is positioned against this wrapper, so it cannot widen the page.
+        <div className="@container relative overflow-x-auto">
+          <table className="w-full border-collapse text-[13.5px] leading-5">
             <thead>
               <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
-                <th className="py-2 pr-4 pl-2.5 font-medium">Plan</th>
-                <th className="hidden py-2 pr-4 font-medium sm:table-cell">Provider</th>
-                <th className="hidden py-2 pr-4 font-medium md:table-cell">Size</th>
-                <th className="hidden py-2 pr-4 text-right font-medium sm:table-cell">List price/h</th>
-                <th className="py-2 pr-4 text-right font-medium">Seller price/h</th>
-                <th className="py-2 pr-4 text-right font-medium">Firm quote</th>
-                <th className="py-2 font-medium">
+                <th className={`${PAD} pl-2.5 font-medium`}>Plan</th>
+                <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Provider</th>
+                <th className={`hidden ${PAD} font-medium @min-[43rem]:table-cell`}>Size</th>
+                <th className={`hidden ${PAD} text-right font-medium @min-[37rem]:table-cell`}>List price/h</th>
+                <th className={`${PAD} text-right font-medium`}>Seller price/h</th>
+                <th className={`${PAD} text-right font-medium`}>Firm quote</th>
+                <th className="hidden py-2 font-medium @min-[30rem]:table-cell">
                   <span className="sr-only">Status</span>
                 </th>
               </tr>
@@ -79,15 +84,19 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 return (
                   <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule ${out ? "text-muted" : ""}`}>
                     {/* Plan ids never break mid-word: the table scrolls sideways instead, and the full id is in the title. */}
-                    <td className={`border-l-2 py-2 pr-4 pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
+                    <td className={`border-l-2 ${PAD} pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
                       <span className="whitespace-nowrap">{r.id}</span>
                       {r.region && <span className="font-normal whitespace-nowrap text-muted"> {r.region}</span>}
+                      {/* Narrow tables: the status under the plan name instead of a column that would scroll out of view. */}
+                      <span className={`block text-[12px] leading-4 @min-[30rem]:hidden ${s.tone}`} title={s.title}>
+                        {s.word}
+                      </span>
                     </td>
-                    <td className="hidden py-2 pr-4 sm:table-cell">{r.provider}</td>
-                    <td className="hidden py-2 pr-4 md:table-cell">{machineSize(r)}</td>
-                    <td className="hidden py-2 pr-4 text-right sm:table-cell">{r.listHourlyUsd !== null ? usd4(r.listHourlyUsd) : "-"}</td>
-                    <td className="py-2 pr-4 text-right">{usd4(r.hourlyUsd)}</td>
-                    <td className="py-2 pr-4 text-right">
+                    <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>{r.provider}</td>
+                    <td className={`hidden ${PAD} @min-[43rem]:table-cell`}>{machineSize(r)}</td>
+                    <td className={`hidden ${PAD} text-right @min-[37rem]:table-cell`}>{r.listHourlyUsd !== null ? usd4(r.listHourlyUsd) : "-"}</td>
+                    <td className={`${PAD} text-right`}>{usd4(r.hourlyUsd)}</td>
+                    <td className={`${PAD} text-right`}>
                       {r.quoteUsd === null ? (
                         ""
                       ) : chosen ? (
@@ -98,7 +107,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                         (r.quoteExact ?? usd4(r.quoteUsd))
                       )}
                     </td>
-                    <td className={`py-2 text-[12px] leading-4 ${s.tone}`} title={s.title}>
+                    <td className={`hidden py-2 text-[12px] leading-4 @min-[30rem]:table-cell ${s.tone}`} title={s.title}>
                       {s.word}
                     </td>
                   </tr>
