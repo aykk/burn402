@@ -1,5 +1,5 @@
 import { readTextCapped } from "../read";
-import { parseAkash, parseRunpod, parseVast, parseVultr } from "./parse";
+import { parseAkash, parseRunpod, parseVast, parseVultr, runpodAnswered } from "./parse";
 import { SOURCE_LABELS, SOURCES, type MarketPrice, type PriceSource, type SourceStatus } from "./types";
 
 /**
@@ -34,6 +34,9 @@ export const PRICE_URLS: Record<PriceSource, string> = {
 const PARSERS: Record<PriceSource, (raw: unknown) => MarketPrice[]> = { vultr: parseVultr, vast: parseVast, runpod: parseRunpod, akash: parseAkash };
 
 const UNREADABLE = "sent something this app could not read";
+/** Sources whose well-formed answer can honestly hold no prices (nothing in stock), and the note said then. */
+const EMPTY_ANSWER: Partial<Record<PriceSource, (raw: unknown) => boolean>> = { runpod: runpodAnswered };
+const NOTHING_IN_STOCK = "has nothing in stock right now";
 
 class SourceError extends Error {}
 
@@ -45,7 +48,7 @@ function requestFor(source: PriceSource, signal: AbortSignal): RequestInit {
 
 type Parsers = Partial<Record<PriceSource, (raw: unknown) => MarketPrice[]>>;
 
-async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutMs: number, parsers: Parsers): Promise<MarketPrice[]> {
+async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutMs: number, parsers: Parsers): Promise<{ prices: MarketPrice[]; note: string | null }> {
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
@@ -69,8 +72,9 @@ async function readSource(source: PriceSource, fetchImpl: typeof fetch, timeoutM
   } catch {
     throw new SourceError(UNREADABLE);
   }
+  if (Array.isArray(prices) && prices.length === 0 && EMPTY_ANSWER[source]?.(raw)) return { prices: [], note: NOTHING_IN_STOCK };
   if (!Array.isArray(prices) || prices.length === 0) throw new SourceError(UNREADABLE);
-  return prices;
+  return { prices, note: null };
 }
 
 async function fetchAll(fetchImpl: typeof fetch, timeoutMs: number, now: () => number, parsers: Parsers): Promise<MarketPrices> {
@@ -80,8 +84,8 @@ async function fetchAll(fetchImpl: typeof fetch, timeoutMs: number, now: () => n
     const source = SOURCES[i];
     const label = SOURCE_LABELS[source];
     if (r.status === "fulfilled") {
-      prices.push(...r.value);
-      return { source, label, ok: true, count: r.value.length, note: null };
+      prices.push(...r.value.prices);
+      return { source, label, ok: true, count: r.value.prices.length, note: r.value.note };
     }
     const note = r.reason instanceof SourceError ? r.reason.message : "could not be reached";
     return { source, label, ok: false, count: 0, note };
