@@ -12,7 +12,7 @@ export type Faults = { outOfStockRegions: string[]; quoteBumpPct: number; wrongA
 
 export const NO_FAULTS: Faults = { outOfStockRegions: [], quoteBumpPct: 0, wrongAsset: false, fail5xxOnce: false, pending202: false, settlementPending409: false };
 
-export type Machine = { id: string; owner: string; plan: string; region: string; ip: string; createdAt: number; expiresAt: number; destroyed: boolean };
+export type Machine = { id: string; owner: string; plan: string; region: string; ip: string; createdAt: number; expiresAt: number; destroyed: boolean; /** what was settled for it */ usd: number };
 
 type Obj = Record<string, unknown>;
 type Settled = { machineId: string; tx: string };
@@ -268,6 +268,7 @@ export class TestSeller {
       createdAt,
       expiresAt: createdAt + hours * 3600_000,
       destroyed: false,
+      usd: Number(requirements.amount) / 1e6,
     };
     this.machines.set(machine.id, machine);
     const settled = { machineId: machine.id, tx: settlement.tx };
