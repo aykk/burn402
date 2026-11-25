@@ -106,7 +106,7 @@ describe("parseVast", () => {
       spotHourlyUsd: 0.013333333333333334,
       region: "Nevada, US",
       note: "community host, 99.3% reliability",
-      url: "https://cloud.vast.ai/create/",
+      url: "https://vast.ai/pricing",
     });
   });
 
@@ -127,48 +127,66 @@ describe("parseVast", () => {
 
 describe("parseRunpod", () => {
   const prices = parseRunpod(runpod);
+  const tiers = (name: string) => prices.filter((p) => p.name === name).map((p) => [p.hourlyUsd, p.note]);
 
-  it("splits each GPU type into community and secure tiers with a positive price", () => {
-    const a40 = prices.filter((p) => p.name === "A40");
-    expect(a40.map((p) => [p.hourlyUsd, p.note])).toEqual([
-      [0.35, "RunPod community cloud"],
-      [0.59, "RunPod secure cloud"],
+  it("lists a tier only when RunPod offers it and reports stock for one GPU", () => {
+    expect(tiers("A100 SXM")).toEqual([
+      [1.39, "RunPod community cloud, low stock"],
+      [2.19, "RunPod secure cloud, low stock"],
     ]);
-    // securePrice 0: community only
-    expect(prices.filter((p) => p.name === "RTX 3070").map((p) => p.note)).toEqual(["RunPod community cloud"]);
-    expect(prices.some((p) => p.name === "unknown")).toBe(false);
+    // community price 0.5 is a placeholder: communityCloud false, no community stock
+    expect(tiers("MI350X")).toEqual([[5.49, "RunPod secure cloud, low stock"]]);
+    expect(tiers("RTX 2000 Ada")).toEqual([[0.24, "RunPod secure cloud, low stock"]]);
+    // offered in neither tier right now, or listed but with no stock for one GPU
+    for (const name of ["MI300X", "H200 NVL", "A40", "RTX A4000", "unknown"]) expect(tiers(name)).toEqual([]);
+    expect(prices.some((p) => p.hourlyUsd === 0.5 && (p.note ?? "").includes("community"))).toBe(false);
   });
 
   it("memoryInGb is GPU memory; vCPUs and RAM are not stated", () => {
-    const p = prices.find((x) => x.name === "RTX A4000")!;
+    const p = prices.find((x) => x.name === "RTX 3070")!;
     expect(p).toEqual({
       source: "runpod",
       sourceLabel: "RunPod (direct)",
-      name: "RTX A4000",
+      name: "RTX 3070",
       kind: "gpu",
       vcpus: 0,
       ramGb: 0,
-      gpu: "NVIDIA RTX A4000",
-      vramGb: 16,
-      hourlyUsd: 0.17,
+      gpu: "NVIDIA GeForce RTX 3070",
+      vramGb: 8,
+      hourlyUsd: 0.13,
       spotHourlyUsd: null,
       region: null,
-      note: "RunPod community cloud",
+      note: "RunPod community cloud, low stock",
       url: "https://www.runpod.io/pricing",
     });
   });
 
+  const stocked = { communityCloud: true, secureCloud: true, community: { stockStatus: "High" }, secure: { stockStatus: "Medium" } };
+
   it("matches each tier to its own spot price", () => {
-    const raw = { data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 24, communityPrice: 0.3, securePrice: 0.5, communitySpotPrice: 0.2, secureSpotPrice: 0.4 }] } };
-    expect(parseRunpod(raw).map((p) => [p.hourlyUsd, p.spotHourlyUsd])).toEqual([
-      [0.3, 0.2],
-      [0.5, 0.4],
+    const raw = { data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 24, communityPrice: 0.3, securePrice: 0.5, communitySpotPrice: 0.2, secureSpotPrice: 0.4, ...stocked }] } };
+    expect(parseRunpod(raw).map((p) => [p.hourlyUsd, p.spotHourlyUsd, p.note])).toEqual([
+      [0.3, 0.2, "RunPod community cloud, high stock"],
+      [0.5, 0.4, "RunPod secure cloud, medium stock"],
     ]);
   });
 
   it("skips tiers with missing, NaN or negative prices", () => {
-    const raw = { data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 24, communityPrice: NaN, securePrice: -1 }, { id: "H", memoryInGb: 8, communityPrice: null }] } };
+    const raw = { data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 24, communityPrice: NaN, securePrice: -1, ...stocked }, { id: "H", memoryInGb: 8, communityPrice: null, ...stocked }] } };
     expect(parseRunpod(raw)).toEqual([]);
+  });
+
+  it("without a stock answer: the tier flag decides, and the note says availability is not confirmed", () => {
+    const raw = { data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 24, communityPrice: 0.3, securePrice: 0.5, communityCloud: true, secureCloud: false }] } };
+    expect(parseRunpod(raw).map((p) => [p.hourlyUsd, p.note])).toEqual([[0.3, "RunPod community cloud; listed price, availability not confirmed"]]);
+  });
+
+  it("with no availability signal at all: a tier under a third of the other tier's price is dropped as a placeholder", () => {
+    const row = (communityPrice: number, securePrice: number) => ({ data: { gpuTypes: [{ id: "G", displayName: "G", memoryInGb: 192, communityPrice, securePrice }] } });
+    expect(parseRunpod(row(0.5, 5.49)).map((p) => [p.hourlyUsd, p.note])).toEqual([[5.49, "RunPod secure cloud; listed price, availability not confirmed"]]);
+    expect(parseRunpod(row(1.64, 0.5)).map((p) => p.hourlyUsd)).toEqual([1.64]);
+    expect(parseRunpod(row(0.34, 0.89)).map((p) => p.hourlyUsd)).toEqual([0.34, 0.89]);
+    expect(parseRunpod(row(0.13, 0)).map((p) => p.hourlyUsd)).toEqual([0.13]);
   });
 });
 
@@ -197,8 +215,8 @@ describe("parseAkash", () => {
       hourlyUsd: 1.07,
       spotHourlyUsd: null,
       region: null,
-      note: "average $1.49, up to $1.91 across providers; 27 of 120 available",
-      url: "https://console.akash.network/",
+      note: "average $1.49 an hour, up to $1.91 an hour across providers; 27 of 120 available",
+      url: "https://akash.network/pricing/gpus/",
     });
   });
 
@@ -209,7 +227,7 @@ describe("parseAkash", () => {
   it("falls back to the average when the minimum is not positive; skips bad prices", () => {
     const row = (price: unknown) => ({ models: [{ vendor: "nvidia", model: "x", ram: "16Gi", interface: "PCIe", availability: { total: 2, available: 1 }, price }] });
     expect(parseAkash(row({ min: 0, max: 0.3, avg: 0.25 }))[0].hourlyUsd).toBe(0.25);
-    expect(parseAkash(row({ min: 0.2, max: 0.3 }))[0].note).toBe("up to $0.30 across providers; 1 of 2 available");
+    expect(parseAkash(row({ min: 0.2, max: 0.3 }))[0].note).toBe("up to $0.30 an hour across providers; 1 of 2 available");
     for (const price of [null, {}, { min: -1, avg: NaN }, { min: 0, avg: 0 }]) expect(parseAkash(row(price))).toEqual([]);
     expect(parseAkash({ models: [{ vendor: "nvidia", model: "x", ram: "16Gi", availability: { total: 2, available: 1 }, price: { min: 0.2, max: 0.2, avg: 0.2 } }] })[0]).toMatchObject({ name: "x 16Gi", vramGb: 16 });
     expect(parseAkash({ models: [{ vendor: "nvidia", model: "x", ram: "lots", availability: { total: 2, available: 1 }, price: { min: 0.2, avg: 0.2 } }] })[0].vramGb).toBe(0);
@@ -221,7 +239,7 @@ describe("provider text is capped at 80 characters", () => {
   it.each([
     ["vultr", () => parseVultr({ plans: [{ id: long, vcpu_count: 1, ram: 1024, hourly_cost: 0.01, gpu_type: long, locations: [long] }] })[0]],
     ["vast", () => parseVast({ offers: [{ gpu_name: long, gpu_ram: 8192, dph_total: 0.1, geolocation: long }] })[0]],
-    ["runpod", () => parseRunpod({ data: { gpuTypes: [{ id: long, displayName: long, memoryInGb: 8, communityPrice: 0.1 }] } })[0]],
+    ["runpod", () => parseRunpod({ data: { gpuTypes: [{ id: long, displayName: long, memoryInGb: 8, communityPrice: 0.1, communityCloud: true }] } })[0]],
     ["akash", () => parseAkash({ models: [{ vendor: long, model: long, ram: "8Gi", availability: { total: 1, available: 1 }, price: { min: 0.1, max: 0.1, avg: 0.1 } }] })[0]],
   ])("%s", (_name, get) => {
     const p = get();

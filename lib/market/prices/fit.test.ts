@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Need } from "../types";
-import { bestPerSource, fits } from "./fit";
+import { bestPerSource, fits, regionMatches } from "./fit";
 import { SOURCES, type MarketPrice, type PriceSource } from "./types";
 
 const CPU: Need = { kind: "cpu", vcpus: 2, ramGb: 4, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -111,5 +111,41 @@ describe("bestPerSource", () => {
       }
       for (const s of SOURCES) expect(seen.has(s)).toBe(prices.some((p) => p.source === s && fits(p, need)));
     }
+  });
+});
+
+describe("regionMatches", () => {
+  it("matches a country code, a state or city substring, or a Vultr region by its country", () => {
+    expect(regionMatches("Texas, US", ["us"])).toBe(true);
+    expect(regionMatches("Texas, US", ["texas"])).toBe(true);
+    expect(regionMatches("New Jersey, US", ["ewr"])).toBe(true);
+    expect(regionMatches("New Jersey, US", ["vultr:ewr"])).toBe(true);
+    expect(regionMatches("China, CN", ["ewr", "fra"])).toBe(false);
+    expect(regionMatches("Germany, DE", ["ewr", "fra"])).toBe(true);
+  });
+  it("a short code is a whole token, never a substring", () => {
+    expect(regionMatches("Russia, RU", ["us"])).toBe(false);
+    expect(regionMatches(null, ["us"])).toBe(false);
+  });
+});
+
+describe("bestPerSource with regions asked for", () => {
+  const vast = (name: string, hourlyUsd: number, region: string) => price({ source: "vast", name, kind: "gpu", vramGb: 16, hourlyUsd, region });
+  const prices = [vast("cn", 0.09, "China, CN"), vast("us", 0.12, "Texas, US"), vast("de", 0.1, "Germany, DE")];
+
+  it("prefers the cheapest Vast.ai offer inside a requested region", () => {
+    const best = bestPerSource(prices, { ...GPU, regions: ["ewr"] });
+    expect(best.map((p) => [p.name, p.outsideRegions])).toEqual([["us", undefined]]);
+  });
+
+  it("with none inside, keeps the cheapest and marks it outside the regions asked for", () => {
+    const best = bestPerSource(prices, { ...GPU, regions: ["syd"] });
+    expect(best.map((p) => [p.name, p.outsideRegions])).toEqual([["cn", true]]);
+  });
+
+  it("no regions asked: the cheapest, unmarked; other sources are not region-filtered", () => {
+    expect(bestPerSource(prices, GPU).map((p) => [p.name, p.outsideRegions])).toEqual([["cn", undefined]]);
+    const vultr = price({ kind: "gpu", vramGb: 16, region: "ewr", hourlyUsd: 0.4 });
+    expect(bestPerSource([vultr], { ...GPU, regions: ["syd"] })[0].outsideRegions).toBeUndefined();
   });
 });

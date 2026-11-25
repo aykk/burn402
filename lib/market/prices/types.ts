@@ -24,6 +24,8 @@ export type MarketPrice = {
   note: string | null;
   /** the provider's own page where a person can rent it (fixed per source) */
   url: string;
+  /** set on a comparison's row when regions were asked for and this source had no offer inside them */
+  outsideRegions?: boolean;
 };
 
 export type SourceStatus = { source: PriceSource; label: string; ok: boolean; count: number; note: string | null };
@@ -35,11 +37,14 @@ export const SOURCE_LABELS: Record<PriceSource, string> = {
   akash: "Akash Network",
 };
 
+/** Providers by their short names in running text ("direct from Vultr"). */
+export const SOURCE_NAMES: Record<PriceSource, string> = { vultr: "Vultr", vast: "Vast.ai", runpod: "RunPod", akash: "Akash" };
+
 export const SOURCE_URLS: Record<PriceSource, string> = {
   vultr: "https://www.vultr.com/pricing/",
-  vast: "https://cloud.vast.ai/create/",
+  vast: "https://vast.ai/pricing",
   runpod: "https://www.runpod.io/pricing",
-  akash: "https://console.akash.network/",
+  akash: "https://akash.network/pricing/gpus/",
 };
 
 export const SOURCES: PriceSource[] = ["vultr", "vast", "runpod", "akash"];

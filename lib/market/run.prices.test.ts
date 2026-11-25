@@ -43,8 +43,27 @@ const MARKET: MarketPrices = {
 };
 
 /** the test seller's rules for vc2-1c-1gb, 1 hour: 15% surcharge under 24 hours, 1-hour minimum */
-const PLAIN = { seller: SELLER, plan: "vc2-1c-1gb", hours: 1, surchargePct: 15, surchargeUnderHours: 24, minHours: 1, askedHours: 1, billedHours: 1 };
-const BASIS = "The agent's price includes the seller's 15% surcharge for rentals under 24 hours and is spread over 1 billed hour; other providers' figures are list prices per hour.";
+const PLAIN = {
+  seller: SELLER,
+  plan: "vc2-1c-1gb",
+  hours: 1,
+  paid: false,
+  surchargePct: 15,
+  surchargeUnderHours: 24,
+  minHours: 1,
+  askedHours: 1,
+  billedHours: 1,
+  provider: "vultr",
+  kind: "cpu",
+  vcpus: 1,
+  ramGb: 1,
+  vramGb: 0,
+  gpu: null,
+};
+const TAIL = "other providers' figures are list prices per hour.";
+/** an estimate names the seller's published surcharge; a firm quote includes it */
+const BASIS = `The agent's price includes the seller's published 15% surcharge for rentals under 24 hours; ${TAIL}`;
+const BASIS_FIRM = `The agent's price includes the seller's 15% surcharge for rentals under 24 hours; ${TAIL}`;
 
 const dirs: string[] = [];
 const payers: { calls: number }[] = [];
@@ -113,8 +132,8 @@ describe("MarketRun with market prices", () => {
     const before = run.view();
     expect(before.phase).toBe("quoting");
     expect(before.prices).not.toBeNull();
-    expect(before.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: ESTIMATE_USD, totalUsd: ESTIMATE_USD, firm: false });
-    expect(before.prices!.sentence).toContain("The cheapest it can buy is an estimated $0.0104 an hour");
+    expect(before.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: ESTIMATE_USD, billedHourlyUsd: ESTIMATE_USD, totalUsd: ESTIMATE_USD, firm: false });
+    expect(before.prices!.sentence).toContain("your agent pays an estimated $0.0104 an hour");
     expect(before.prices!.basis).toBe(BASIS);
     expect(before.prices!.cheapestAnywhere?.name).toBe("vc2-1c-1gb");
     expect(before.prices!.sources).toEqual(MARKET.sources);
@@ -123,15 +142,28 @@ describe("MarketRun with market prices", () => {
     g.release();
     await waitPhase(run, "approval");
     const after = run.view();
-    expect(after.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: QUOTE_USD, totalUsd: QUOTE_USD, firm: true });
-    expect(after.prices!.basis).toBe(BASIS);
-    expect(after.prices!.premiumPct).toBe(48);
+    expect(after.prices!.buyable).toEqual({ ...PLAIN, hourlyUsd: QUOTE_USD, billedHourlyUsd: QUOTE_USD, totalUsd: QUOTE_USD, firm: true });
+    expect(after.prices!.basis).toBe(BASIS_FIRM);
+    // $0.0104 / $0.0070 = 1.4857 -> 49%
+    expect(after.prices!.premiumPct).toBe(49);
+    expect(after.prices!.sameMachine).toEqual({ source: "vultr", sourceLabel: "Vultr (direct)", name: "vc2-1c-1gb", hourlyUsd: 0.007, premiumPct: 49 });
     expect(after.prices!.sentence).toBe(
-      `The cheapest fit anywhere is $0.0070 an hour at Vultr (direct), which your agent cannot buy from yet. The cheapest it can buy is a quoted $0.0104 an hour through ${SELLER}, 48% more.`,
+      `The same machine costs $0.0070 an hour direct from Vultr; through ${SELLER} your agent pays a quoted $0.0104 an hour, 49% more. Nothing cheaper that meets your minimums is listed.`,
     );
     // the comparison never changes what is approved
     expect(after.approval?.usd).toBe(QUOTE_USD);
     expect(after.approval?.plan).toBe("vc2-1c-1gb");
+  });
+
+  it("once paid, the sentence says what the agent paid", async () => {
+    const { run } = setup(async () => MARKET);
+    payers.pop(); // this run pays (a fake payer on a simulated seller)
+    await run.start();
+    await waitPhase(run, "approval");
+    expect(run.approve("code-1")).toEqual({ ok: true });
+    await vi.waitFor(() => expect(run.view().prices?.buyable?.paid).toBe(true));
+    expect(run.view().prices!.sentence).toMatch(/your agent paid \$0\.0104 an hour, 49% more\./);
+    expect(run.view().prices!.basis).toBe(BASIS_FIRM);
   });
 
   it("a cheaper market price does not change the plan chosen", async () => {
@@ -158,19 +190,39 @@ describe("MarketRun with market prices", () => {
     await vi.waitFor(() => expect(["approval", "failed"]).toContain(run.view().phase));
   });
 
+  it("after quoting an interruptible plan, the last on-demand estimate stays and the sentence says its rate is not compared", async () => {
+    // the seller sells vc2-1c-1gb; offered here as an interruptible plan ranked first
+    const spot: Offer = { seller: "testseller", id: "vc2-1c-1gb", provider: "vultr", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.001, listHourlyUsd: null, inStock: true, spot: true, rentable: true };
+    const { run } = setup(async () => MARKET, undefined, { need: { allowSpot: true }, spotFeed: async () => [spot] });
+    await run.start();
+    await vi.waitFor(() => expect(run.view().prices).not.toBeNull());
+    const v = run.view();
+    expect(v.phase).toBe("approval");
+    // the interruptible quote is the one put forward: no short-rental surcharge applies to it
+    expect(v.approval?.plan).toBe("vc2-1c-1gb");
+    expect(v.approval?.surcharge).toBeNull();
+    const p = v.prices!;
+    expect(p.buyingSpot).toBe(true);
+    expect(p.buyable).toEqual({ ...PLAIN, hourlyUsd: ESTIMATE_USD, billedHourlyUsd: ESTIMATE_USD, totalUsd: ESTIMATE_USD, firm: false });
+    expect(p.sentence).not.toMatch(/no seller/);
+    expect(p.sentence).toMatch(/Your agent is buying an interruptible machine; its rate is not compared with list prices\.$/);
+  });
+
   it("nothing inside the limits: no buyable, and the sentence says inside your limits", async () => {
     const { run } = setup(async () => MARKET, undefined, { limits: { budgetUsd: 1, rateUsdHr: 0.001 } });
     await run.start();
     await vi.waitFor(() => expect(run.view().prices).not.toBeNull());
     expect(run.view().phase).toBe("refused");
     expect(run.view().prices!.buyable).toBeNull();
-    expect(run.view().prices!.sentence).toBe("The cheapest fit anywhere is $0.0070 an hour at Vultr (direct). Your agent has no seller it can buy this from inside your limits.");
+    expect(run.view().prices!.sentence).toBe(
+      "The cheapest machine anywhere that meets your minimums is a vc2-1c-1gb (1 vCPU, 1 GB RAM) on Vultr (direct) at $0.0070 an hour. Your agent has no seller it can buy this from inside your limits.",
+    );
   });
 
   it("regions asked for: the basis says other providers' prices are for any region", async () => {
     const { run } = setup(async () => MARKET, undefined, { need: { regions: ["ewr"] } });
     await run.start();
-    expect(run.view().prices!.basis).toBe(`${BASIS} Other providers' prices are for any region.`);
+    expect(run.view().prices!.basis).toBe(`${BASIS_FIRM} Other providers' prices are for any region; a Vast.ai row names its host's region.`);
   });
 
   it("without marketPrices there is no comparison", async () => {

@@ -102,11 +102,20 @@ export function parseVast(raw: unknown): MarketPrice[] {
 }
 
 const RUNPOD_TIERS = [
-  { price: "communityPrice", spot: "communitySpotPrice", note: "RunPod community cloud" },
-  { price: "securePrice", spot: "secureSpotPrice", note: "RunPod secure cloud" },
+  { price: "communityPrice", spot: "communitySpotPrice", offered: "communityCloud", stock: "community", other: "securePrice", note: "RunPod community cloud" },
+  { price: "securePrice", spot: "secureSpotPrice", offered: "secureCloud", stock: "secure", other: "communityPrice", note: "RunPod secure cloud" },
 ] as const;
 
-/** RunPod `gpuTypes`: one price per GPU type per tier that has a positive price. 0 or null = not offered. */
+const UNCONFIRMED = "listed price, availability not confirmed";
+
+/**
+ * RunPod `gpuTypes`: one price per GPU type per tier that RunPod actually offers. RunPod lists
+ * placeholder prices ($0.50 for an MI300X) for tiers it does not offer, so a tier is kept only when:
+ * - the stock answer for one GPU in that tier is present and names a status (the note gives it); or,
+ *   when no stock answer came back, the tier's own flag (`communityCloud`/`secureCloud`) is true; or,
+ *   with neither signal, its price is not under a third of the other tier's price.
+ * The last two say "listed price, availability not confirmed". 0 or null = not offered.
+ */
 export function parseRunpod(raw: unknown): MarketPrice[] {
   if (!isObj(raw) || !isObj(raw.data)) return [];
   const out: MarketPrice[] = [];
@@ -117,6 +126,21 @@ export function parseRunpod(raw: unknown): MarketPrice[] {
     for (const tier of RUNPOD_TIERS) {
       const hourly = pos(row[tier.price]);
       if (hourly === null) continue;
+      const stockAnswer = row[tier.stock];
+      const flag = row[tier.offered];
+      let note: string;
+      if (isObj(stockAnswer) && "stockStatus" in stockAnswer) {
+        const status = str(stockAnswer.stockStatus);
+        if (status === null || flag === false) continue;
+        note = `${tier.note}, ${status.toLowerCase()} stock`;
+      } else if (typeof flag === "boolean") {
+        if (!flag) continue;
+        note = `${tier.note}; ${UNCONFIRMED}`;
+      } else {
+        const other = pos(row[tier.other]);
+        if (other !== null && hourly < other / 3) continue;
+        note = `${tier.note}; ${UNCONFIRMED}`;
+      }
       out.push(capped({
         ...base("runpod"),
         name,
@@ -128,7 +152,7 @@ export function parseRunpod(raw: unknown): MarketPrice[] {
         hourlyUsd: hourly,
         spotHourlyUsd: pos(row[tier.spot]),
         region: null,
-        note: tier.note,
+        note,
       }));
     }
   }
@@ -166,7 +190,7 @@ export function parseAkash(raw: unknown): MarketPrice[] {
     const vendor = str(row.vendor);
     const notes: string[] = [];
     const stock = total !== null && total >= available ? `${available} of ${total} available` : `${available} available`;
-    if (max !== null && max !== hourly) notes.push(`${avg !== null ? `average ${usdPlain(avg)}, ` : ""}up to ${usdPlain(max)} across providers`);
+    if (max !== null && max !== hourly) notes.push(`${avg !== null ? `average ${usdPlain(avg)} an hour, ` : ""}up to ${usdPlain(max)} an hour across providers`);
     notes.push(stock);
     out.push(capped({
       ...base("akash"),

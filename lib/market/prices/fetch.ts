@@ -15,7 +15,14 @@ const TIMEOUT_MS = 6_000;
 const CACHE_MS = 60_000;
 
 const VAST_QUERY = { rentable: { eq: true }, verified: { eq: true }, num_gpus: { eq: 1 }, order: [["dph_total", "asc"]], limit: 40 };
-const RUNPOD_QUERY = { query: "{ gpuTypes { id displayName memoryInGb communityPrice securePrice communitySpotPrice secureSpotPrice } }" };
+/**
+ * Per GPU type: both tiers' prices, whether RunPod offers each tier at all, and whether either has stock
+ * for one GPU right now. A price with no stock behind it (RunPod lists $0.50 placeholders) is not shown.
+ */
+const RUNPOD_QUERY = {
+  query:
+    "{ gpuTypes { id displayName memoryInGb communityPrice securePrice communitySpotPrice secureSpotPrice communityCloud secureCloud community: lowestPrice(input: { gpuCount: 1, secureCloud: false }) { stockStatus } secure: lowestPrice(input: { gpuCount: 1, secureCloud: true }) { stockStatus } } }",
+};
 
 export const PRICE_URLS: Record<PriceSource, string> = {
   vultr: "https://api.vultr.com/v2/plans?per_page=500",
