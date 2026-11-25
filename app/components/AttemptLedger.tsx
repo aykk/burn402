@@ -115,8 +115,9 @@ function Prose({ text }: { text: string }) {
  * "Step N" on the left of every row (the attempt that went around the broker included) and the attempt,
  * the outcome and what it proves behind one 2px ink rule. Stacks under 640px.
  */
-export function AttemptLedger({ attempts, status }: { attempts: Attempt[]; status: Status }) {
-  const verdict = attemptVerdict(attempts, status);
+export function AttemptLedger({ attempts, status, verdict: given }: { attempts: Attempt[]; status: Status; verdict?: string }) {
+  // a caller with its own verdict (the purchasing agent's overspend test) passes it in
+  const verdict = given ?? attemptVerdict(attempts, status);
   return (
     <div className="space-y-4">
       {verdict && <p className="max-w-[64ch] font-semibold text-foreground">{verdict}</p>}
