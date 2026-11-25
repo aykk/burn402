@@ -104,6 +104,12 @@ const NO_WALLET = "no wallet is set up for this market";
 const UNKNOWN_OUTCOME = "payment outcome unknown; check the journal";
 const FALLBACK_CODES = new Set(["OUT_OF_STOCK", "SELLER_ERROR"]);
 const TEST_NET_3 = /^203\.0\.113\.\d{1,3}$/;
+const DESTROY_RETRY_MS = 60_000;
+const DESTROY_RETRIES = 10;
+const STOPPED = "Stopped on request before anything was paid";
+
+/** A seller-supplied address is used only when it is a plain IP address. */
+const validIp = (ip: string | null): string | null => (ip && net.isIP(ip) ? ip : null);
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const keyOf = (seller: string, id: string) => `${seller}\u0000${id}`;
@@ -171,6 +177,9 @@ export class MarketRun {
   private destroying: Promise<void> | null = null;
   private destroyRequested = false;
   private recorded = false;
+  /** destroy() before any payment: no step may run after this */
+  private stopped = false;
+  private destroyRetries = 0;
 
   constructor(deps: MarketRunDeps) {
     this.d = deps;
@@ -184,7 +193,7 @@ export class MarketRun {
 
   /** Runs until the approval stop, `ready`, or an end state. Never throws. */
   start(): Promise<void> {
-    this.starting ??= this.guarded(() => this.scan());
+    this.starting ??= this.stopped ? Promise.resolve() : this.guarded(() => this.scan());
     return this.starting;
   }
 
@@ -199,14 +208,25 @@ export class MarketRun {
 
   cancel(): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "approval") return { ok: false, error: "only a run waiting for approval can be cancelled" };
-    this.current = null;
     this.refuse("CANCELLED", "The owner cancelled at the approval stop; nothing was signed");
+    this.current = null;
     return { ok: true };
   }
 
   destroy(): Promise<void> {
+    if (this.ended && !this.machine) return Promise.resolve();
+    if (this.phase === "approval") {
+      this.cancel();
+      return Promise.resolve();
+    }
+    if (!this.ended && (this.phase === "scanning" || this.phase === "choosing" || this.phase === "quoting")) {
+      // nothing is paid yet: end the run here; the step in flight stops at its next check
+      this.refuse("STOPPED", STOPPED);
+      this.stopped = true;
+      return Promise.resolve();
+    }
     if (this.phase === "paying" || this.phase === "provisioning") {
-      // a payment or machine is in flight: the run destroys the machine as soon as it is known
+      // a payment or machine is in flight: the run stops, or destroys the machine as soon as it is known
       this.destroyRequested = true;
       return Promise.resolve();
     }
@@ -277,6 +297,7 @@ export class MarketRun {
   }
 
   private async choose(offers: Offer[], rules: HourlyRules): Promise<void> {
+    if (this.stopped) return;
     this.setPhase("choosing");
     const { ranked, rejected } = choose(offers, this.d.need, this.d.limits, rules);
     this.leftOut = summarize(rejected);
@@ -289,6 +310,7 @@ export class MarketRun {
   }
 
   private async quote(ranked: Candidate[]): Promise<void> {
+    if (this.stopped) return;
     this.setPhase("quoting");
     try {
       this.key = newSshKey(this.d.keyDir, `run-${this.d.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
@@ -296,9 +318,9 @@ export class MarketRun {
       return this.fail(`Could not create an SSH key: ${msg(e)}`);
     }
     for (const c of ranked) {
-      if (this.quotes.length >= MAX_QUOTES || this.quoteFailures >= MAX_QUOTE_FAILURES) break;
+      if (this.stopped || this.quotes.length >= MAX_QUOTES || this.quoteFailures >= MAX_QUOTE_FAILURES) break;
       for (const region of c.regions.slice(0, MAX_REGIONS)) {
-        if (this.quoteFailures >= MAX_QUOTE_FAILURES) break;
+        if (this.stopped || this.quoteFailures >= MAX_QUOTE_FAILURES) break;
         const q = await this.tryQuote(c, region);
         if (q) {
           this.quotes.push(q);
@@ -306,6 +328,7 @@ export class MarketRun {
         }
       }
     }
+    if (this.stopped) return;
     if (this.quotes.length === 0) return this.fail(`No usable quote: ${this.lastQuoteError || "no seller answered"}`);
     this.quotes.sort((a, b) => a.amountUsd - b.amountUsd); // stable: ties keep the chooser's order
     return this.offer(this.quotes[0]);
@@ -348,6 +371,7 @@ export class MarketRun {
 
   /** Puts a quote forward: stop for approval when it applies, else pay. */
   private async offer(q: Quote): Promise<void> {
+    if (this.stopped || this.ended) return;
     this.used.add(q);
     this.current = q;
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
@@ -386,6 +410,7 @@ export class MarketRun {
       // best effort; the expiry check below still applies
     }
 
+    if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     const intentAt = this.now();
     try {
       this.d.journal.append(this.entry("intent", q, {}));
@@ -434,6 +459,8 @@ export class MarketRun {
         this.updateRow(q.candidate.offer, { state: "quote failed", note: why });
         return this.refuse(this.refusal.code, this.refusal.detail);
       }
+      // the owner asked to stop while this attempt was in flight: no fallback purchase
+      if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
       if (FALLBACK_CODES.has(outcome.code) && !this.signing && this.fallbacks < MAX_FALLBACKS) {
         this.updateRow(q.candidate.offer, { state: "quote failed", note: why });
         const next = await this.nextOption(q);
@@ -495,7 +522,7 @@ export class MarketRun {
     this.setPhase("provisioning");
     this.setMachine(q, first);
     let inst: Instance | null = first;
-    for (let i = 0; !(inst && inst.status === "active" && inst.ip); i++) {
+    for (let i = 0; !(inst && inst.status === "active" && validIp(inst.ip)); i++) {
       if (this.destroyRequested) return this.releaseOnRequest();
       if (i >= ACTIVE_POLLS) return this.fail(`The machine did not become active within 10 minutes (last status ${this.machine?.status ?? "unknown"})`);
       await this.sleep(ACTIVE_POLL_MS);
@@ -509,7 +536,7 @@ export class MarketRun {
     }
     if (this.destroyRequested) return this.releaseOnRequest();
 
-    const ip = inst.ip!;
+    const ip = validIp(inst.ip)!;
     let port22: "open" | "closed" | "not checked" = "not checked";
     if (!TEST_NET_3.test(ip)) {
       port22 = "closed";
@@ -550,6 +577,19 @@ export class MarketRun {
     (this.timer as { unref?: () => void }).unref?.();
   }
 
+  /** Retries the destroy every 60 s, at most 10 times; release() clears it. */
+  private armDestroyRetry(): void {
+    if (!this.machine || this.machine.status === "destroyed" || this.phase === "released") return;
+    if (this.destroyRetries >= DESTROY_RETRIES) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.destroyRetries++;
+      void this.startRelease();
+    }, DESTROY_RETRY_MS);
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+
   private startRelease(): Promise<void> {
     if (this.destroying) return this.destroying;
     if (this.phase === "released" || !this.machine) return Promise.resolve();
@@ -582,6 +622,7 @@ export class MarketRun {
       this.error = `Destroy failed, the machine may still be running: ${msg(e)}`;
       this.destroyError = true;
       this.setPhase(before === "failed" ? "failed" : "ready");
+      this.armDestroyRetry();
       return;
     }
     m.status = "destroyed";
@@ -605,6 +646,8 @@ export class MarketRun {
     this.setPhase("failed");
     this.record("failed", error);
     this.end();
+    // a machine the run knows of is never left without an armed destroy
+    this.armDestroyRetry();
   }
 
   private refuse(code: string, detail: string): void {
@@ -645,6 +688,7 @@ export class MarketRun {
   // ---- helpers -----------------------------------------------------------
 
   private setPhase(p: MarketPhase): void {
+    if (this.stopped) return; // stopped before paying: the run stays refused
     if (this.phase !== p) this.log(`phase ${p}`);
     this.phase = p;
   }
@@ -667,7 +711,7 @@ export class MarketRun {
   }
 
   private setMachine(q: Quote, inst: Instance): void {
-    const ip = inst.ip;
+    const ip = validIp(inst.ip);
     this.machine = {
       id: inst.id,
       ip,
