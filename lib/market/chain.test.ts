@@ -129,14 +129,14 @@ describe("findPayment", () => {
     expect(many.calls.filter((c) => c.method === "getTransaction")).toHaveLength(10);
   });
 
-  it("has one deadline for the whole lookup: a hanging RPC gives null within it, never throws", async () => {
+  it("has one deadline for the whole lookup: a hanging RPC gives \"unavailable\" within it, never throws", async () => {
     let signal: AbortSignal | undefined;
     const hanging = ((_input: RequestInfo | URL, init?: RequestInit) => {
       signal = init?.signal ?? undefined;
       return new Promise<Response>(() => {});
     }) as typeof fetch;
     const t0 = Date.now();
-    expect(await q(hanging, { deadlineMs: 50 })).toBeNull();
+    expect(await q(hanging, { deadlineMs: 50 })).toBe("unavailable");
     expect(Date.now() - t0).toBeLessThan(1_000);
     expect(signal?.aborted).toBe(true);
     // a slow RPC that answers each call late still stops at the deadline
@@ -145,22 +145,28 @@ describe("findPayment", () => {
       await new Promise((r) => setTimeout(r, 30));
       return slow.f(input, init);
     }) as typeof fetch;
-    expect(await q(late, { deadlineMs: 80 })).toBeNull();
+    expect(await q(late, { deadlineMs: 80 })).toBe("unavailable");
     expect(slow.calls.length).toBeLessThan(5);
   });
 
-  it("is null on RPC errors and odd shapes, never throws", async () => {
-    expect(await q(scripted({ s: {} }, { failMethod: "getTokenAccountsByOwner" }).f)).toBeNull();
-    expect(await q(scripted({ s: {} }, { failMethod: "getSignaturesForAddress" }).f)).toBeNull();
-    expect(await q(scripted({ s: "rpc-error" }).f)).toBeNull();
-    expect(await q(scripted({ s: {} }, { accounts: { value: "nope" } }).f)).toBeNull();
-    expect(await q(scripted({ s: {} }, { sigs: [{ signature: "s", blockTime: null }] }).f)).toBeNull();
+  it("is \"unavailable\" when it could not look (RPC errors, odd shapes, an answer over 2 MB), never throws", async () => {
+    expect(await q(scripted({ s: {} }, { failMethod: "getTokenAccountsByOwner" }).f)).toBe("unavailable");
+    expect(await q(scripted({ s: {} }, { failMethod: "getSignaturesForAddress" }).f)).toBe("unavailable");
+    expect(await q(scripted({ s: "rpc-error" }).f)).toBe("unavailable");
+    expect(await q(scripted({ s: {} }, { accounts: { value: "nope" } }).f)).toBe("unavailable");
     const throwing = (async () => {
       throw new Error("network down");
     }) as typeof fetch;
-    expect(await q(throwing)).toBeNull();
+    expect(await q(throwing)).toBe("unavailable");
     const notJson = (async () => new Response("<html>")) as typeof fetch;
-    expect(await q(notJson)).toBeNull();
+    expect(await q(notJson)).toBe("unavailable");
+    const huge = (async () => new Response(`{"jsonrpc":"2.0","id":1,"result":{"value":[]},"pad":"${"x".repeat(2 * 1024 * 1024)}"}`)) as typeof fetch;
+    expect(await q(huge)).toBe("unavailable");
+  });
+
+  it("is null when it looked and found nothing", async () => {
+    expect(await q(scripted({ s: {} }, { sigs: [{ signature: "s", blockTime: null }] }).f)).toBeNull();
+    expect(await q(scripted({ s: {} }, { accounts: { value: [] } }).f)).toBeNull();
   });
 
   it("is null for an amount that is not a whole number", async () => {

@@ -30,6 +30,15 @@ describe("checkPayment", () => {
   it("refuses a higher amount", () => expect(acc({ amount: "10001" })).toBe("OVER_QUOTE"));
   it("refuses over budget", () => expect(code({ budgetLeftUsd: 0.005 })).toBe("OVER_BUDGET"));
   it("refuses over rate", () => expect(code({ rateUsdHr: 0.009 })).toBe("OVER_RATE"));
+  it("refuses a requirement that makes the paying wallet pay the network fee", () => {
+    const r = checkPayment({ ...base, accepts: { ...real, extra: { feePayer: "Payer11111111111111111111111111111111111111" } }, payer: "Payer11111111111111111111111111111111111111" });
+    expect(r).toEqual({ ok: false, code: "WRONG_NETWORK", detail: "The seller asked your wallet to pay the network fee." });
+  });
+  it("accepts a fee payer that is not the paying wallet, and requirements with no fee payer", () => {
+    expect(checkPayment({ ...base, accepts: { ...real, extra: { feePayer: "Fee11111111111111111111111111111111111111" } }, payer: "Payer11111111111111111111111111111111111111" }).ok).toBe(true);
+    expect(checkPayment({ ...base, payer: "Payer11111111111111111111111111111111111111" }).ok).toBe(true);
+    expect(checkPayment({ ...base, accepts: { ...real, extra: {} }, payer: "Payer11111111111111111111111111111111111111" }).ok).toBe(true);
+  });
   it("refuses a changed recipient", () => {
     const r = checkPayment({ ...base, payTo: "SomeoneElse1111111111111111111111111111111" });
     expect(r.ok).toBe(false);

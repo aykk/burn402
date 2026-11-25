@@ -26,7 +26,7 @@ export type GuardCode =
   | "ALREADY_PAID"
   | "MALFORMED";
 
-export type Accepts = { scheme: string; network: string; asset: string; amount: string; payTo: string };
+export type Accepts = { scheme: string; network: string; asset: string; amount: string; payTo: string; extra?: Record<string, unknown> };
 
 type GuardInput = {
   accepts: Accepts;
@@ -37,6 +37,8 @@ type GuardInput = {
   hours: number;
   alreadyPaid: boolean;
   payTo?: string;
+  /** the paying wallet's address; a requirement naming it as fee payer is refused */
+  payer?: string;
 };
 type GuardResult = { ok: true; usd: number } | { ok: false; code: GuardCode; detail: string };
 
@@ -81,7 +83,7 @@ export function checkPayment(input: GuardInput): GuardResult {
 }
 
 function check(input: GuardInput): GuardResult {
-  const { accepts, market, approvedAtomic, budgetLeftUsd, rateUsdHr, hours, alreadyPaid, payTo } = input;
+  const { accepts, market, approvedAtomic, budgetLeftUsd, rateUsdHr, hours, alreadyPaid, payTo, payer } = input;
   const net = NETWORKS[market];
   if (!net) return fail("MALFORMED", "Unknown market");
   if (!accepts || typeof accepts !== "object") return fail("MALFORMED", "Payment terms are missing");
@@ -103,6 +105,8 @@ function check(input: GuardInput): GuardResult {
     return fail("WRONG_NETWORK", `The seller asked for a kind of payment this agent does not make ("${clip(accepts.scheme)}"); it pays only exact amounts.`);
   }
   if (accepts.network !== net.caip2) return fail("WRONG_NETWORK", `The seller asked to be paid on ${clip(networkName(accepts.network))} instead of ${net.label}.`);
+  const feePayer = accepts.extra && typeof accepts.extra === "object" ? accepts.extra.feePayer : undefined;
+  if (typeof payer === "string" && payer !== "" && feePayer === payer) return fail("WRONG_NETWORK", "The seller asked your wallet to pay the network fee.");
   if (accepts.asset !== net.usdc) return fail("WRONG_ASSET", `The seller asked to be paid in ${tokenFor(accepts.asset, market)} instead of USDC on ${net.label}.`);
 
   const amount = BigInt(accepts.amount);

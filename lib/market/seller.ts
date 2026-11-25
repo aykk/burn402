@@ -7,6 +7,7 @@ import type { Candidate } from "./choose";
 import { atomicToUsd, type Accepts } from "./guard";
 import { sellerReason, usdPlain } from "./money";
 import { readPaymentRequired, type PaymentRequired } from "./pay";
+import { readTextCapped, TooLargeError } from "./read";
 import type { HourlyRules, MarketId, Offer } from "./types";
 
 export type SellerConfig = { id: "x402layer" | "testseller"; label: string; baseUrl: string; market: MarketId };
@@ -115,7 +116,7 @@ function solanaRequirement(required: PaymentRequired): PaymentRequirements | nul
   return r ?? null;
 }
 
-const toAccepts = (r: PaymentRequirements): Accepts => ({ scheme: r.scheme, network: r.network, asset: r.asset, amount: r.amount, payTo: r.payTo });
+const toAccepts = (r: PaymentRequirements): Accepts => ({ scheme: r.scheme, network: r.network, asset: r.asset, amount: r.amount, payTo: r.payTo, ...(isObj(r.extra) ? { extra: r.extra } : {}) });
 
 function txFrom(body: Obj, response: Response): string | null {
   if (typeof body.tx_hash === "string" && body.tx_hash) return body.tx_hash;
@@ -153,7 +154,7 @@ export class SellerClient {
 
   async catalog(): Promise<{ offers: Offer[]; rules: HourlyRules; skipped: number }> {
     const response = await this.fetch(this.url("/compute/plans"), { method: "GET", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(this.timeouts.read) });
-    const text = await response.text();
+    const text = await readTextCapped(response);
     if (!response.ok) throw new Error(`${this.config.label}'s price list could not be read (error ${response.status}): ${said(text)}`);
     return parsePlansFeed(parseJson(text), this.config.id);
   }
@@ -181,7 +182,7 @@ export class SellerClient {
     let text: string;
     try {
       response = await this.postProvision(body);
-      text = await response.text();
+      text = await readTextCapped(response);
     } catch (e) {
       throw new QuoteError("UNREACHABLE", `${this.config.label} could not be reached: ${errText(e)}.`);
     }
@@ -231,7 +232,7 @@ export class SellerClient {
     let freshText: string;
     try {
       fresh = await this.postProvision(quote.body);
-      freshText = await fresh.text();
+      freshText = await readTextCapped(fresh);
     } catch (e) {
       return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} could not be reached: ${errText(e)}.` };
     }
@@ -262,8 +263,10 @@ export class SellerClient {
       let text: string;
       try {
         response = await this.postProvision(quote.body, headers, true);
-        text = await response.text();
+        text = await readTextCapped(response);
       } catch (e) {
+        // an answer too large to read is like an unreadable one: the payment may have gone through
+        if (e instanceof TooLargeError) return { kind: "unknown", detail: `${this.config.label} answered the paid request with more than 2 MB, which the agent does not read; it will not pay again.` };
         last = `no answer: ${errText(e)}`;
         continue;
       }
@@ -301,7 +304,7 @@ export class SellerClient {
     const headers = await authHeaders(this.signer, { method, path, body: "", now: this.now });
     const signal = AbortSignal.timeout(method === "DELETE" ? this.timeouts.paid : this.timeouts.read);
     const response = await this.fetch(this.url(path), { method, headers: { Accept: "application/json", ...headers }, signal });
-    return { response, text: await response.text() };
+    return { response, text: await readTextCapped(response) };
   }
 
   async instance(id: string): Promise<Instance | null> {

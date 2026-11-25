@@ -119,7 +119,7 @@ describe("quote", () => {
     );
     expect(Object.keys(calls[0].headers).filter((k) => k.startsWith("x-auth") || k.includes("payment"))).toEqual([]);
     expect(q).toMatchObject({ seller: "x402layer", market: "real", region: "ewr", hours: 1, amountUsd: 0.012345, atomic: "12345", body: calls[0].body });
-    expect(q.accepts).toEqual({ scheme: "exact", network: REAL_NET, asset: USDC, amount: "12345", payTo: solanaAccepts().payTo });
+    expect(q.accepts).toEqual({ scheme: "exact", network: REAL_NET, asset: USDC, amount: "12345", payTo: solanaAccepts().payTo, extra: solanaAccepts().extra });
   });
 
   it("uses the digitalocean slug and omits os_id for runpod", async () => {
@@ -518,5 +518,40 @@ describe("seller text is plain", () => {
     const { fetch } = fakeFetch([new Response("<html>oops</html>", { status: 500 })]);
     const err = await new SellerClient(config, { fetch }).catalog().catch((e) => e);
     expect(err.message).toBe("x402layer's price list could not be read (error 500): the seller gave no reason.");
+  });
+});
+
+describe("response size cap (M3)", () => {
+  const huge = (status: number) => new Response("x".repeat(2 * 1024 * 1024 + 1), { status, headers: { "Content-Type": "application/json" } });
+  const okPay = () => vi.fn<(r: PaymentRequired, a: Accepts) => Promise<Record<string, string>>>(async () => ({ ...PAID }));
+
+  it("a paid answer over 2 MB is unknown, never not charged, and is not resent", async () => {
+    for (const status of [200, 402, 409]) {
+      const q = await quoteWith();
+      const { fetch, calls } = fakeFetch([required402(), huge(status)]);
+      const pay = okPay();
+      const out = await new SellerClient(config, { fetch }).provision(q, pay);
+      expect(out.kind).toBe("unknown");
+      expect(pay).toHaveBeenCalledTimes(1);
+      expect(calls).toHaveLength(2);
+    }
+  });
+
+  it("a fresh 402 over 2 MB is not charged and nothing is signed", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([huge(402)]);
+    const pay = okPay();
+    expect(await new SellerClient(config, { fetch }).provision(q, pay)).toMatchObject({ kind: "not_charged", code: "SELLER_ERROR" });
+    expect(pay).not.toHaveBeenCalled();
+  });
+
+  it("a quote answer over 2 MB fails the quote", async () => {
+    const { fetch } = fakeFetch([huge(402)]);
+    await expect(new SellerClient(config, { fetch }).quote(candidate(), "ewr", opts)).rejects.toBeInstanceOf(QuoteError);
+  });
+
+  it("a machine list over 2 MB throws", async () => {
+    const { fetch } = fakeFetch([huge(200)]);
+    await expect(new SellerClient(config, { fetch, signer: await testSigner() }).instances()).rejects.toThrow(/2 MB/);
   });
 });
