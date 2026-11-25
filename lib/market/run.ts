@@ -111,22 +111,70 @@ const STOPPED = "Stopped on request before anything was paid";
 /** A seller-supplied address is used only when it is a plain IP address. */
 const validIp = (ip: string | null): string | null => (ip && net.isIP(ip) ? ip : null);
 
-/** Addresses the port-22 probe must never connect to: loopback, private, link-local, unique-local, unspecified. */
+/**
+ * Addresses the port-22 probe must never connect to: loopback, private, shared (CGNAT), link-local,
+ * documentation, benchmarking, multicast, reserved, unique-local, unspecified and the IPv6
+ * translation/6to4 prefixes that can lead back into IPv4 space.
+ */
 const NOT_PUBLIC = (() => {
   const list = new net.BlockList();
-  for (const [net4, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.168.0.0", 16]] as const) list.addSubnet(net4, bits, "ipv4");
-  list.addAddress("::", "ipv6");
+  const v4: [string, number][] = [
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.0.2.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["198.51.100.0", 24],
+    ["203.0.113.0", 24],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ];
+  for (const [base, bits] of v4) list.addSubnet(base, bits, "ipv4");
+  const v6: [string, number][] = [
+    ["::", 96], // unspecified, loopback and the deprecated IPv4-compatible block
+    ["64:ff9b::", 96],
+    ["2002::", 16],
+    ["2001:db8::", 32],
+    ["fe80::", 10],
+    ["fc00::", 7],
+    ["ff00::", 8],
+  ];
+  for (const [base, bits] of v6) list.addSubnet(base, bits, "ipv6");
   list.addAddress("::1", "ipv6");
-  list.addSubnet("fe80::", 10, "ipv6");
-  list.addSubnet("fc00::", 7, "ipv6");
   return list;
 })();
 
 /** True for a public address the probe may connect to. `ip` is already a valid IP. */
 export function probeable(ip: string): boolean {
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip)?.[1];
-  if (mapped) return !NOT_PUBLIC.check(mapped, "ipv4");
-  return !NOT_PUBLIC.check(ip, net.isIPv6(ip) ? "ipv6" : "ipv4");
+  try {
+    if (!net.isIPv6(ip)) return !NOT_PUBLIC.check(ip, "ipv4");
+    if (ip.includes("%")) return false; // a zone id only makes sense on a local link
+    const mapped = mappedIpv4(ip);
+    if (mapped) return !NOT_PUBLIC.check(mapped, "ipv4");
+    return !NOT_PUBLIC.check(ip, "ipv6");
+  } catch {
+    return false; // anything that cannot be checked is not probed
+  }
+}
+
+/** The IPv4 address inside an IPv4-mapped IPv6 address (::ffff:a.b.c.d in any spelling), else null. */
+function mappedIpv4(ip: string): string | null {
+  let canon: string;
+  try {
+    canon = new URL(`http://[${ip}]/`).hostname.slice(1, -1).toLowerCase(); // canonical: ::ffff:a00:1
+  } catch {
+    return null;
+  }
+  const m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canon);
+  if (!m) return null;
+  const hi = parseInt(m[1], 16);
+  const lo = parseInt(m[2], 16);
+  return [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));

@@ -9,6 +9,7 @@ import { toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { runAgentProgram, runStressTester } from "./agent";
 import { currentModel } from "./models";
 import { loadActor, type Actor, type Runtime } from "./runtime";
@@ -159,9 +160,16 @@ export class DemoSession {
     return run.view();
   }
 
+  /** True while a market run is starting or not over. */
+  get marketBusy(): boolean {
+    return this.marketStarting !== null || (this.market !== null && !MARKET_ENDED.has(this.market.view().phase));
+  }
+
   /** One run at a time: while a run is not over, this returns it instead of starting another. */
   startMarketRun(input: RunInput): Promise<MarketRunView> {
     if (this.market && !MARKET_ENDED.has(this.market.view().phase)) return Promise.resolve(this.market.view());
+    // checked synchronously, so a run cannot start between the overspend test taking its lock and checking marketBusy
+    if (!this.marketStarting && overspendRunning()) return Promise.reject(new Error(OVERSPEND_BUSY));
     this.marketStarting ??= this.newMarketRun(input).finally(() => {
       this.marketStarting = null;
     });

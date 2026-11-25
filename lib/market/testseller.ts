@@ -8,11 +8,14 @@ import plansFeed from "./fixtures/plans.sample.json";
  * payments settle through the given processor (devnet in the app), machines are simulated.
  */
 
-export type Faults = { outOfStockRegions: string[]; quoteBumpPct: number; wrongAsset: boolean; fail5xxOnce: boolean; pending202: boolean; settlementPending409: boolean };
+export type Faults = { outOfStockRegions: string[]; quoteBumpPct: number; wrongAsset: boolean; fail5xxOnce: boolean; pending202: boolean; settlementPending409: boolean; settleThenReject: boolean };
 
-export const NO_FAULTS: Faults = { outOfStockRegions: [], quoteBumpPct: 0, wrongAsset: false, fail5xxOnce: false, pending202: false, settlementPending409: false };
+export const NO_FAULTS: Faults = { outOfStockRegions: [], quoteBumpPct: 0, wrongAsset: false, fail5xxOnce: false, pending202: false, settlementPending409: false, settleThenReject: false };
 
-export type Machine = { id: string; owner: string; plan: string; region: string; ip: string; createdAt: number; expiresAt: number; destroyed: boolean; /** what was settled for it */ usd: number };
+export type Machine = { id: string; owner: string; plan: string; region: string; ip: string; createdAt: number; expiresAt: number; destroyed: boolean };
+
+/** One payment the seller settled, whatever it answered afterwards. */
+export type Settlement = { at: number; usd: number; payer: string | null; plan: string; region: string };
 
 type Obj = Record<string, unknown>;
 type Settled = { machineId: string; tx: string };
@@ -52,7 +55,7 @@ function parseFaults(raw: unknown): Partial<Faults> | null {
     } else if (k === "quoteBumpPct") {
       if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100) return null;
       out.quoteBumpPct = v;
-    } else if (k === "wrongAsset" || k === "fail5xxOnce" || k === "pending202" || k === "settlementPending409") {
+    } else if (k === "wrongAsset" || k === "fail5xxOnce" || k === "pending202" || k === "settlementPending409" || k === "settleThenReject") {
       if (typeof v !== "boolean") return null;
       out[k] = v;
     } else {
@@ -65,6 +68,8 @@ function parseFaults(raw: unknown): Partial<Faults> | null {
 export class TestSeller {
   faults: Faults = { ...NO_FAULTS };
   readonly machines = new Map<string, Machine>();
+  /** Every successful settle, appended before the response is chosen. */
+  readonly settlements: Settlement[] = [];
 
   private readonly processor: PaymentProcessor;
   private readonly resourceUrl: string;
@@ -256,6 +261,14 @@ export class TestSeller {
 
     const settlement = await this.processor.settle(payload, requirements);
     if (!settlement.ok) return fail(json(402, { error: "settlement failed", reason: settlement.reason }));
+    this.settlements.push({ at: this.now(), usd: Number(requirements.amount) / 1e6, payer: settlement.payer, plan: plan.id, region });
+
+    if (this.faults.settleThenReject) {
+      // dishonest: keep the money, build nothing, and ask to be paid again as if the payment had been rejected
+      const again = await this.processor.requirements(this.priceUsd(plan, hours, kind));
+      const header = await this.processor.paymentRequiredHeader(again, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
+      return fail(json(402, { error: "payment rejected, pay again", quote_usd: Number(again.amount) / 1e6 }, { "PAYMENT-REQUIRED": header }));
+    }
 
     const n = ++this.counter;
     const createdAt = this.now();
@@ -268,7 +281,6 @@ export class TestSeller {
       createdAt,
       expiresAt: createdAt + hours * 3600_000,
       destroyed: false,
-      usd: Number(requirements.amount) / 1e6,
     };
     this.machines.set(machine.id, machine);
     const settled = { machineId: machine.id, tx: settlement.tx };

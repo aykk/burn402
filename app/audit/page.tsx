@@ -6,10 +6,9 @@ import { ActionError, failureMessage } from "@/app/components/ActionError";
 import { AttemptLedger } from "@/app/components/AttemptLedger";
 import { usd2, usd4 } from "@/app/components/format";
 import { BTN_PRIMARY } from "@/app/components/ui";
-import type { OverspendAttempt } from "@/lib/market/overspend";
+import type { OverspendAttempt, OverspendResult } from "@/lib/market/overspend";
 import type { Snapshot } from "@/lib/demo/snapshot";
 
-type Result = { attempts: OverspendAttempt[]; verdict: string; spentUsd: number };
 /** Mirrors OVERSPEND_LIMITS in lib/market/overspend.ts (a server module, so it is not imported here). */
 const LIMITS = { budgetUsd: 0.05, rateUsdHr: 0.05 };
 type LedgerRow = Snapshot["stress"]["attempts"][number];
@@ -17,7 +16,7 @@ type LedgerRow = Snapshot["stress"]["attempts"][number];
 /** The ledger reads "refused: …" as Blocked and "not stopped: …" as Got through. */
 const toRow = (a: OverspendAttempt): LedgerRow => ({
   what: a.what,
-  result: `${a.blocked ? "refused" : "not stopped"}: ${a.result}`,
+  result: `${a.blocked ? "refused" : "not stopped"}: ${a.paidUsd === null ? `${a.result.replace(/([^.!?])$/, "$1.")} Paid during this attempt: unknown.` : a.result}`,
   ok: a.blocked,
   blocked: a.blocked,
   mark: null,
@@ -26,7 +25,7 @@ const toRow = (a: OverspendAttempt): LedgerRow => ({
 });
 
 export default function OverspendPage() {
-  const [result, setResult] = useState<Result | null>(null);
+  const [result, setResult] = useState<OverspendResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +34,7 @@ export default function OverspendPage() {
     setRunning(true);
     try {
       const res = await fetch("/api/market/overspend", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const body = (await res.json()) as Result & { error?: string };
+      const body = (await res.json()) as OverspendResult & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `The server answered HTTP ${res.status}`);
       setResult(body);
     } catch (e) {
@@ -53,8 +52,8 @@ export default function OverspendPage() {
         <h1 className="text-[20px] leading-[26px] font-semibold">Overspend test</h1>
         <p className="mt-3 max-w-[64ch] text-muted">
           The agent is given a limit of {usd2(LIMITS.rateUsdHr)} an hour and {usd2(LIMITS.budgetUsd)} in total, then five ways to spend more are tried against the test seller: a plan over the
-          hourly limit, a rental over the budget, a seller that raises its price after quoting, a seller that asks for the wrong token, and a second payment for one run.
-          It runs on Solana devnet with simulated machines. The last attempt really pays about one cent of test USDC once, and that machine is destroyed straight away.
+          hourly limit, a rental over the budget, a seller that raises its price after quoting, a seller that asks for the wrong token, and a seller that takes the payment, then claims it was rejected, to get paid again.
+          It runs on Solana devnet with simulated machines. In the last attempt the dishonest seller really keeps one payment of about one cent of test USDC.
         </p>
       </div>
 
@@ -71,7 +70,7 @@ export default function OverspendPage() {
           <p className="flex items-center gap-x-2 text-muted">
             <span aria-hidden className="inline-block size-2.5 shrink-0 bg-amber" />
             <span>
-              Paid during the test: <span className="font-semibold text-foreground tabular-nums">{usd4(result.spentUsd)} USDC</span> on Solana devnet.
+              Paid during the test: <span className="font-semibold text-foreground tabular-nums">{result.spentUsd === null ? "unknown" : `${usd4(result.spentUsd)} USDC`}</span> on Solana devnet.
             </span>
           </p>
         </section>
