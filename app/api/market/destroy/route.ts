@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const session = await getSession();
     const result = await session.destroyMarket({ run, cancel: body.cancel === true, open });
     if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-    return Response.json({ ok: true });
+    return Response.json(result.message ? { ok: true, message: result.message } : { ok: true });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 400 });
   }

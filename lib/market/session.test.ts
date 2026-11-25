@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, isLocalHost, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
 
 const good = {
   market: "test",
@@ -9,7 +9,7 @@ const good = {
   askBeforePaying: true,
 };
 
-const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers, body: "{}" });
+const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers: { host: "127.0.0.1:3000", ...headers }, body: "{}" });
 
 describe("parseRunInput", () => {
   it("accepts the brief's example run", () => {
@@ -53,6 +53,19 @@ describe("checkRequest", () => {
   });
   it("refuses another website with 403", () => {
     expect(checkRequest(req({ "content-type": "application/json", origin: "https://evil.example" }))?.status).toBe(403);
+  });
+  it("allows both local host names", () => {
+    expect(checkRequest(req({ "content-type": "application/json", host: "localhost:3000" }))).toBeNull();
+    expect(isLocalHost(req({ host: "127.0.0.1:3000" }))).toBe(true);
+  });
+  it.each(["evil.example:3000", "127.0.0.1", "localhost:3001", "127.0.0.1:3000.evil.example", "LOCALHOST:3000.x", ""])("refuses Host %j with 403 even for same-origin JSON", (host) => {
+    const r = checkRequest(req({ "content-type": "application/json", origin: "http://127.0.0.1:3000", host }));
+    expect(r?.status).toBe(403);
+  });
+  it("refuses a request with no Host header", () => {
+    const r = new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(r.headers.get("host")).toBeNull();
+    expect(checkRequest(r)?.status).toBe(403);
   });
   it("refuses a non-JSON body with 415", () => {
     expect(checkRequest(req({ "content-type": "text/plain" }))?.status).toBe(415);

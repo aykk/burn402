@@ -1,5 +1,5 @@
 import { getSession } from "@/lib/demo/session";
-import { snapshot } from "@/lib/demo/snapshot";
+import { snapshotFor } from "@/lib/demo/snapshot";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -10,5 +10,5 @@ export async function POST(request: Request) {
     return Response.json({ error: "run a job first: the stress test attacks the budget that job used" }, { status: 400 });
   }
   void session.runStressTest(job.id);
-  return Response.json(snapshot(session));
+  return Response.json(snapshotFor(session, request));
 }

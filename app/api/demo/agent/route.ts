@@ -1,8 +1,8 @@
 import { getSession } from "@/lib/demo/session";
-import { snapshot } from "@/lib/demo/snapshot";
+import { snapshotFor } from "@/lib/demo/snapshot";
 
-export async function POST() {
+export async function POST(request: Request) {
   const session = await getSession();
   if (!session.busy) void session.runAgent();
-  return Response.json(snapshot(session));
+  return Response.json(snapshotFor(session, request));
 }

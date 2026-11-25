@@ -111,6 +111,24 @@ const STOPPED = "Stopped on request before anything was paid";
 /** A seller-supplied address is used only when it is a plain IP address. */
 const validIp = (ip: string | null): string | null => (ip && net.isIP(ip) ? ip : null);
 
+/** Addresses the port-22 probe must never connect to: loopback, private, link-local, unique-local, unspecified. */
+const NOT_PUBLIC = (() => {
+  const list = new net.BlockList();
+  for (const [net4, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.168.0.0", 16]] as const) list.addSubnet(net4, bits, "ipv4");
+  list.addAddress("::", "ipv6");
+  list.addAddress("::1", "ipv6");
+  list.addSubnet("fe80::", 10, "ipv6");
+  list.addSubnet("fc00::", 7, "ipv6");
+  return list;
+})();
+
+/** True for a public address the probe may connect to. `ip` is already a valid IP. */
+export function probeable(ip: string): boolean {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip)?.[1];
+  if (mapped) return !NOT_PUBLIC.check(mapped, "ipv4");
+  return !NOT_PUBLIC.check(ip, net.isIPv6(ip) ? "ipv6" : "ipv4");
+}
+
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const keyOf = (seller: string, id: string) => `${seller}\u0000${id}`;
 
@@ -372,6 +390,8 @@ export class MarketRun {
   /** Puts a quote forward: stop for approval when it applies, else pay. */
   private async offer(q: Quote): Promise<void> {
     if (this.stopped || this.ended) return;
+    // destroy pressed while a fallback was being quoted: end here, never show a new approval stop
+    if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     this.used.add(q);
     this.current = q;
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
@@ -464,6 +484,7 @@ export class MarketRun {
       if (FALLBACK_CODES.has(outcome.code) && !this.signing && this.fallbacks < MAX_FALLBACKS) {
         this.updateRow(q.candidate.offer, { state: "quote failed", note: why });
         const next = await this.nextOption(q);
+        if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
         if (next) {
           this.fallbacks++;
           this.approval = null;
@@ -538,7 +559,7 @@ export class MarketRun {
 
     const ip = validIp(inst.ip)!;
     let port22: "open" | "closed" | "not checked" = "not checked";
-    if (!TEST_NET_3.test(ip)) {
+    if (!TEST_NET_3.test(ip) && probeable(ip)) {
       port22 = "closed";
       for (let i = 0; i < PROBE_TRIES; i++) {
         if (i > 0) await this.sleep(PROBE_GAP_MS);
