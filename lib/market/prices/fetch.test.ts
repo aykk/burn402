@@ -106,6 +106,16 @@ describe("fetchMarketPrices", () => {
     expect(mixed.prices.some((p) => p.source === "vast" || p.source === "akash")).toBe(false);
   });
 
+  it("RunPod answering with nothing in stock is read, with a note, not reported as unreadable", async () => {
+    const outOfStock = { data: { gpuTypes: [{ id: "NVIDIA RTX A4000", displayName: "RTX A4000", memoryInGb: 16, communityPrice: 0.17, securePrice: 0.25, communityCloud: true, secureCloud: true, community: { stockStatus: null }, secure: { stockStatus: null } }] } };
+    const r = await fetchMarketPrices({ fetch: fakeFetch({ runpod: () => new Response(JSON.stringify(outOfStock)) }).f, cache: fresh() });
+    expect(r.sources[2]).toEqual({ source: "runpod", label: "RunPod (direct)", ok: true, count: 0, note: "has nothing in stock right now" });
+    expect(r.prices.some((p) => p.source === "runpod")).toBe(false);
+    // an answer with no GPU types at all is still not readable
+    const none = await fetchMarketPrices({ fetch: fakeFetch({ runpod: () => new Response('{"data":{"gpuTypes":[]}}') }).f, cache: fresh() });
+    expect(none.sources[2]).toMatchObject({ ok: false, note: "sent something this app could not read" });
+  });
+
   it("a parser that throws is reported as unreadable, not unreachable", async () => {
     const { f } = fakeFetch(); // the vultr fixture parses fine; only the injected parser throws
     const r = await fetchMarketPrices({ fetch: f, cache: fresh(), parsers: { vultr: () => { throw new Error("boom"); } } });

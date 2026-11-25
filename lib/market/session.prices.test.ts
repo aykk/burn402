@@ -133,7 +133,7 @@ describe("priceComparison", () => {
     expect(b.hourlyUsd).toBeCloseTo(b.totalUsd, 12); // total over the 1 hour asked for
     expect(b.billedHourlyUsd).toBeCloseTo(b.totalUsd / 2, 12);
     expect(c.basis).toMatch(
-      /^The agent's price includes the seller's published 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated \$[\d.]+ in total; other providers' figures are list prices per hour\.$/,
+      /^The agent's price includes the seller's published 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated \$[\d.]+ in total; other providers' figures are list prices per hour\. Your hourly limit is checked per hour of machine time billed: \$[\d.]+ an hour over 2 hours\.$/,
     );
   });
 

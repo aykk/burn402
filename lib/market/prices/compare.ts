@@ -149,9 +149,14 @@ function placeWords(p: MarketPrice): string {
   return ` (host in ${cap(p.region)}${p.outsideRegions ? ", outside the regions you asked for" : ""})`;
 }
 
-/** `regioned`: regions were asked for and a Vast.ai host inside them is preferred, so "anywhere" would not be exact. */
-function anywhereWords(c: MarketPrice, regioned = false): string {
-  return `The cheapest machine ${regioned ? "" : "anywhere "}that meets your minimums is ${article(machineWords(c))} on ${c.sourceLabel} at ${usdPerHour(c.hourlyUsd)} an hour${placeWords(c)}`;
+/**
+ * `regioned`: regions were asked for and a Vast.ai host inside them is preferred, so "anywhere" would not be exact.
+ * `elsewhere`: the agent cannot buy there: "… at $X an hour on <provider>, where your agent cannot buy yet".
+ */
+function anywhereWords(c: MarketPrice, regioned = false, elsewhere = false): string {
+  const lead = `The cheapest machine ${regioned ? "" : "anywhere "}that meets your minimums is ${article(machineWords(c))}`;
+  if (elsewhere) return `${lead} at ${usdPerHour(c.hourlyUsd)} an hour on ${c.sourceLabel}${placeWords(c)}, where your agent cannot buy yet`;
+  return `${lead} on ${c.sourceLabel} at ${usdPerHour(c.hourlyUsd)} an hour${placeWords(c)}`;
 }
 
 /** "an estimated $0.0104 an hour", "a quoted …", or for a paid quote "$0.0104 an hour" */
@@ -170,11 +175,12 @@ const SPOT = "Your agent is buying an interruptible machine; its rate is not com
 function sentenceFor(c: MarketPrice | null, b: Buyable | null, same: MarketPrice | null, o: { limited: boolean; sellerUnreadable: boolean; buyingSpot: boolean; regioned: boolean }): string {
   const parts: string[] = [];
   const anywhere = (p: MarketPrice) => anywhereWords(p, o.regioned);
+  const elsewhere = (p: MarketPrice) => anywhereWords(p, o.regioned, true);
   if (b && same) {
     const pct = pctMore(b.hourlyUsd, same.hourlyUsd);
     parts.push(`The same machine costs ${usdPerHour(same.hourlyUsd)} an hour direct from ${SOURCE_NAMES[same.source]}; through ${b.seller} your agent ${b.paid ? "paid" : "pays"} ${rateWords(b)}, ${diffWords(b.hourlyUsd, same.hourlyUsd, pct)}.`);
     if (c && b.hourlyUsd <= c.hourlyUsd + EPS) parts.push("Your agent can buy the cheapest machine that meets your minimums.");
-    else if (c && !(c.source === same.source && c.name === same.name) && c.hourlyUsd < same.hourlyUsd - EPS) parts.push(`${anywhere(c)}, which your agent cannot buy from yet.`);
+    else if (c && !(c.source === same.source && c.name === same.name) && c.hourlyUsd < same.hourlyUsd - EPS) parts.push(`${elsewhere(c)}.`);
     else parts.push("Nothing cheaper that meets your minimums is listed.");
   } else if (!c && !b) {
     if (o.sellerUnreadable) parts.push(SELLER_UNREAD);
@@ -189,7 +195,7 @@ function sentenceFor(c: MarketPrice | null, b: Buyable | null, same: MarketPrice
     if (b.hourlyUsd <= c.hourlyUsd + EPS) {
       parts.push(b.paid ? `Your agent paid ${rateWords(b)} through ${b.seller}, the cheapest machine that meets your minimums.` : `Your agent can buy the cheapest machine that meets your minimums: ${rateWords(b)} through ${b.seller}.`);
     } else {
-      parts.push(`${anywhere(c)}, which your agent cannot buy from yet. ${agentWords(b, true)}, ${diffWords(b.hourlyUsd, c.hourlyUsd, pctMore(b.hourlyUsd, c.hourlyUsd))}.`);
+      parts.push(`${elsewhere(c)}. ${agentWords(b, true)}, ${diffWords(b.hourlyUsd, c.hourlyUsd, pctMore(b.hourlyUsd, c.hourlyUsd))}.`);
     }
   }
   if (o.buyingSpot) parts.push(SPOT);
@@ -197,8 +203,10 @@ function sentenceFor(c: MarketPrice | null, b: Buyable | null, same: MarketPrice
 }
 
 function basisFor(b: Buyable | null, need: Need): string {
-  const region = need.regions.length > 0 ? " Other providers' prices are for any region; a Vast.ai row names its host's region." : "";
-  if (!b) return `Other providers' figures are list prices per hour.${region}`;
+  const regioned = need.regions.length > 0;
+  // With no agent plan there is nothing for "other" to refer to.
+  if (!b) return `Providers' figures are list prices per hour.${regioned ? " Their prices are for any region; a Vast.ai row names its host's region." : ""}`;
+  const region = regioned ? " Other providers' prices are for any region; a Vast.ai row names its host's region." : "";
   const extra = b.billedHours > b.askedHours + EPS;
   const surcharge =
     b.surchargePct !== null && b.surchargeUnderHours !== null
@@ -209,7 +217,10 @@ function basisFor(b: Buyable | null, need: Need): string {
   if (!extra) return `The agent's price includes ${surcharge}; ${tail}${region}`;
   const bills = b.minHours !== null && Math.abs(b.billedHours - b.minHours) < EPS ? `a ${num(b.minHours)}-hour minimum` : `${hoursWords(b.billedHours)} for the ${num(b.askedHours)} you asked for`;
   const total = `${b.firm || b.paid ? "" : "an estimated "}${usdPlain(b.totalUsd)} in total`;
-  return `The agent's price ${surcharge ? `includes ${surcharge} and ` : ""}is shown per hour you asked for; the seller bills ${bills}, ${total}; ${tail}${region}`;
+  // The owner's hourly limit is checked per billed hour (choose.ts, guard.ts), not per hour asked: said here, so a
+  // per-hour-asked figure above the limit is not read as the limit being broken.
+  const limit = ` Your hourly limit is checked per hour of machine time billed: ${usdPerHour(b.billedHourlyUsd)} an hour over ${hoursWords(b.billedHours)}.`;
+  return `The agent's price ${surcharge ? `includes ${surcharge} and ` : ""}is shown per hour you asked for; the seller bills ${bills}, ${total}; ${tail}${limit}${region}`;
 }
 
 /** The buyable plan as its own provider sells it direct: same provider, same plan id, a positive price. */

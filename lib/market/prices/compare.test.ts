@@ -86,7 +86,7 @@ describe("comparePrices: the same machine bought direct leads", () => {
     expect(c.premiumPct).toBe(668);
     expect(c.sentence).toBe(
       `The same machine costs $0.4710 an hour direct from Vultr; through ${SELLER} your agent pays an estimated $0.7453 an hour, 58% more. ` +
-        "The cheapest machine anywhere that meets your minimums is a Tesla P100 (16 GB) on Vast.ai marketplace at $0.0970 an hour (host in Guangdong, CN), which your agent cannot buy from yet.",
+        "The cheapest machine anywhere that meets your minimums is a Tesla P100 (16 GB) at $0.0970 an hour on Vast.ai marketplace (host in Guangdong, CN), where your agent cannot buy yet.",
     );
   });
 
@@ -95,7 +95,7 @@ describe("comparePrices: the same machine bought direct leads", () => {
     const c = compareGpu([A16, cheaperVultr], gpuBuyable(0.7453));
     expect(c.sameMachine?.name).toBe("vcg-a16-6c-60g-16vram");
     expect(c.best.map((p) => p.name)).toEqual(["vcg-x-16vram"]);
-    expect(c.sentence).toMatch(/The cheapest machine anywhere that meets your minimums is an NVIDIA X \(16 GB\) on Vultr \(direct\) at \$0\.3000 an hour, which/);
+    expect(c.sentence).toMatch(/The cheapest machine anywhere that meets your minimums is an NVIDIA X \(16 GB\) at \$0\.3000 an hour on Vultr \(direct\), where your agent cannot buy yet\./);
   });
 
   it("a quoted, a paid, an equal and a cheaper rate", () => {
@@ -117,13 +117,13 @@ describe("comparePrices: no same machine", () => {
     const c = compareGpu([P100], other(0.7453));
     expect(c.sameMachine).toBeNull();
     expect(c.sentence).toBe(
-      `The cheapest machine anywhere that meets your minimums is a Tesla P100 (16 GB) on Vast.ai marketplace at $0.0970 an hour (host in Guangdong, CN), which your agent cannot buy from yet. The cheapest it can buy is an estimated $0.7453 an hour through ${SELLER}, 668% more.`,
+      `The cheapest machine anywhere that meets your minimums is a Tesla P100 (16 GB) at $0.0970 an hour on Vast.ai marketplace (host in Guangdong, CN), where your agent cannot buy yet. The cheapest it can buy is an estimated $0.7453 an hour through ${SELLER}, 668% more.`,
     );
   });
 
   it("articles follow how the name is said; acronyms take an", () => {
     const at = (p: Partial<MarketPrice>) => compareGpu([price({ source: "runpod", sourceLabel: "RunPod (direct)", kind: "gpu", vramGb: 16, region: null, hourlyUsd: 0.1, ...p })], other(0.7)).sentence;
-    expect(at({ name: "RTX A4000" })).toContain("is an RTX A4000 (16 GB) on RunPod (direct)");
+    expect(at({ name: "RTX A4000" })).toContain("is an RTX A4000 (16 GB) at $0.1000 an hour on RunPod (direct), where");
     expect(at({ name: "H100 PCIe", vramGb: 80 })).toContain("is an H100 PCIe (80 GB)");
     expect(at({ name: "a100 80Gi SXM4", vramGb: 80 })).toContain("is an a100 80Gi SXM4 (80 GB)");
     expect(at({ name: "Quadro P2000" })).toContain("is a Quadro P2000 (16 GB)");
@@ -138,7 +138,7 @@ describe("comparePrices: no same machine", () => {
 
   it("a Vast.ai offer outside the regions asked for says so", () => {
     const c = compareGpu([price({ ...P100, region: "China, CN" })], other(0.7453), { need: { regions: ["ewr"] } });
-    expect(c.sentence).toContain("at $0.0970 an hour (host in China, CN, outside the regions you asked for), which");
+    expect(c.sentence).toContain("at $0.0970 an hour on Vast.ai marketplace (host in China, CN, outside the regions you asked for), where");
     // regions asked for: a Vast.ai host inside them is preferred, so the sentence does not say "anywhere"
     expect(c.sentence).toMatch(/^The cheapest machine that meets your minimums is a Tesla P100/);
   });
@@ -217,31 +217,33 @@ describe("comparePrices basis", () => {
 
   it("a minimum with a surcharge: shown per hour asked, with the minimum and the total", () => {
     const b = gpuBuyable(1.490592, { totalUsd: 1.490592, billedHourlyUsd: 0.745296, surchargePct: 20, surchargeUnderHours: 24, minHours: 2, askedHours: 1, billedHours: 2, hours: 2 });
+    // the hourly limit is checked per billed hour: $1.490592 / 2 = $0.745296 -> $0.7453
+    const limit = " Your hourly limit is checked per hour of machine time billed: $0.7453 an hour over 2 hours.";
     expect(compareGpu([A16], b).basis).toBe(
-      `The agent's price includes the seller's published 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated $1.490592 in total; ${tail}`,
+      `The agent's price includes the seller's published 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated $1.490592 in total; ${tail}${limit}`,
     );
     expect(compareGpu([A16], { ...b, firm: true }).basis).toBe(
-      `The agent's price includes the seller's 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, $1.490592 in total; ${tail}`,
+      `The agent's price includes the seller's 20% surcharge for rentals under 24 hours and is shown per hour you asked for; the seller bills a 2-hour minimum, $1.490592 in total; ${tail}${limit}`,
     );
   });
 
   it("a minimum alone, and whole-hour billing that is not the minimum", () => {
-    expect(compare([price({})], buyable(0.02, { totalUsd: 0.02, minHours: 2, askedHours: 1, billedHours: 2, hours: 2 })).basis).toBe(
-      `The agent's price is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated $0.02 in total; ${tail}`,
+    expect(compare([price({})], buyable(0.02, { totalUsd: 0.02, billedHourlyUsd: 0.01, minHours: 2, askedHours: 1, billedHours: 2, hours: 2 })).basis).toBe(
+      `The agent's price is shown per hour you asked for; the seller bills a 2-hour minimum, an estimated $0.02 in total; ${tail} Your hourly limit is checked per hour of machine time billed: $0.0100 an hour over 2 hours.`,
     );
-    expect(compare([price({})], buyable(0.02, { totalUsd: 0.03, minHours: 1, askedHours: 1.5, billedHours: 2, hours: 2 })).basis).toBe(
-      `The agent's price is shown per hour you asked for; the seller bills 2 hours for the 1.5 you asked for, an estimated $0.03 in total; ${tail}`,
+    expect(compare([price({})], buyable(0.02, { totalUsd: 0.03, billedHourlyUsd: 0.015, minHours: 1, askedHours: 1.5, billedHours: 2, hours: 2 })).basis).toBe(
+      `The agent's price is shown per hour you asked for; the seller bills 2 hours for the 1.5 you asked for, an estimated $0.03 in total; ${tail} Your hourly limit is checked per hour of machine time billed: $0.0150 an hour over 2 hours.`,
     );
   });
 
   it("no buyable", () => {
-    expect(compare([price({})], null).basis).toBe("Other providers' figures are list prices per hour.");
+    expect(compare([price({})], null).basis).toBe("Providers' figures are list prices per hour.");
   });
 
   it("regions asked for", () => {
     const region = " Other providers' prices are for any region; a Vast.ai row names its host's region.";
     expect(compare([price({})], buyable(0.01), { need: { regions: ["ewr"] } }).basis).toBe(`Both figures are prices per hour.${region}`);
-    expect(compare([price({})], null, { need: { regions: ["ewr"] } }).basis).toBe(`Other providers' figures are list prices per hour.${region}`);
+    expect(compare([price({})], null, { need: { regions: ["ewr"] } }).basis).toBe("Providers' figures are list prices per hour. Their prices are for any region; a Vast.ai row names its host's region.");
   });
 });
 

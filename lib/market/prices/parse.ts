@@ -159,6 +159,15 @@ export function parseRunpod(raw: unknown): MarketPrice[] {
   return out;
 }
 
+/**
+ * True when RunPod answered in the expected shape with at least one named GPU type: then an empty
+ * `parseRunpod` result means nothing is in stock right now, not that the answer could not be read.
+ */
+export function runpodAnswered(raw: unknown): boolean {
+  if (!isObj(raw) || !isObj(raw.data)) return false;
+  return rows(raw.data.gpuTypes).some((row) => isObj(row) && (str(row.displayName) ?? str(row.id)) !== null);
+}
+
 /** "40Gi" → 40 (GB of GPU memory); anything else → 0 (not stated). */
 function giToGb(v: unknown): number {
   const m = typeof v === "string" ? /^(\d+(?:\.\d+)?)\s*G(?:i|B)?$/i.exec(v.trim()) : null;
