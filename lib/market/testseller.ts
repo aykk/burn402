@@ -312,6 +312,8 @@ const holder = ((globalThis as unknown as { __burn402TestSeller?: Holder }).__bu
 
 /** The app's test seller, paid at SOLANA_RECEIVER_ADDRESS on devnet. Null when that is unset. */
 export function getTestSeller(): TestSeller | null {
+  // a stand-in for local testing only: a production build has no test seller
+  if (process.env.NODE_ENV === "production") return null;
   const payTo = process.env.SOLANA_RECEIVER_ADDRESS;
   if (!payTo) return null;
   holder.seller ??= new TestSeller({

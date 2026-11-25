@@ -355,4 +355,10 @@ describe("getTestSeller", () => {
     expect(a).toBeInstanceOf(TestSeller);
     expect(getTestSeller()).toBe(a);
   });
+
+  it("is null in production, even with SOLANA_RECEIVER_ADDRESS (M4)", () => {
+    vi.stubEnv("SOLANA_RECEIVER_ADDRESS", "Receiver11111111111111111111111111111111111");
+    vi.stubEnv("NODE_ENV", "production");
+    expect(getTestSeller()).toBeNull();
+  });
 });

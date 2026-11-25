@@ -3,6 +3,7 @@ import { getTestSeller } from "@/lib/market/testseller";
 export const dynamic = "force-dynamic";
 
 function handle(request: Request): Promise<Response> | Response {
+  if (process.env.NODE_ENV === "production") return Response.json({ error: "not found" }, { status: 404 });
   const seller = getTestSeller();
   if (!seller) return Response.json({ error: "the test seller needs SOLANA_RECEIVER_ADDRESS" }, { status: 503 });
   return seller.handle(request);

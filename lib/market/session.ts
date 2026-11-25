@@ -3,6 +3,7 @@ import { parseNuzaFeed } from "./catalog";
 import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
+import { localHosts, localVerdict } from "./local";
 import { makePayer, type Payer } from "./pay";
 import type { MarketRunDeps } from "./run";
 import { SELLERS, SellerClient } from "./seller";
@@ -12,7 +13,6 @@ import type { Limits, MarketId, Need, Offer } from "./types";
 
 const NUZA_URL = "https://nuza.io/api/v1/pricing";
 const NUZA_TIMEOUT_MS = 5_000;
-const LOCAL_ORIGINS = new Set(["http://127.0.0.1:3000", "http://localhost:3000"]);
 const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 type Env = Record<string, string | undefined>;
@@ -71,18 +71,15 @@ export async function nuzaFeed(fetchImpl: typeof fetch = fetch): Promise<Offer[]
   return parseNuzaFeed(await response.json());
 }
 
-const LOCAL_HOSTS = new Set(["127.0.0.1:3000", "localhost:3000"]);
-
 /** True when the request was addressed to this app by its local name; a DNS-rebinding page arrives with its own host name. */
 export function isLocalHost(request: Request): boolean {
-  return LOCAL_HOSTS.has(request.headers.get("host") ?? "");
+  return localHosts().has(request.headers.get("host") ?? "");
 }
 
 /** Market routes: local host, same-origin JSON only, so another website cannot drive a run through the browser. */
 export function checkRequest(request: Request): Response | null {
-  if (!isLocalHost(request)) return Response.json({ error: "this app only answers on 127.0.0.1:3000 or localhost:3000" }, { status: 403 });
-  const origin = request.headers.get("origin");
-  if (origin !== null && !LOCAL_ORIGINS.has(origin)) return Response.json({ error: "requests from other websites are not allowed" }, { status: 403 });
+  const refused = localVerdict({ host: request.headers.get("host"), origin: request.headers.get("origin") }, { origin: true });
+  if (refused) return Response.json({ error: refused }, { status: 403 });
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type)) return Response.json({ error: "send the request as JSON (Content-Type: application/json)" }, { status: 415 });
   return null;
