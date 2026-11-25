@@ -148,16 +148,28 @@ describe("destroyOpenPurchase", () => {
     expect(j.open()).toEqual([]);
   });
 
-  it("a payment the seller kept, with no machine: says there is nothing to destroy and stays listed", async () => {
+  it("a payment the seller kept, with no machine: does not search or destroy, leaves the journal untouched and says to Dismiss", async () => {
     const j = journalIn();
     j.append({ at: 2, run: OPEN.run, market: "test", seller: "testseller", event: "unknown", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
     j.append({ at: 3, run: OPEN.run, market: "test", seller: "testseller", event: "paid", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd, tx: "t1", instance: null });
-    const s = fakeSeller([inst("x", "vc2-2c-4gb")]);
-    const open = j.open()[0];
-    const r = await destroyOpenPurchase(open, s, j);
-    expect(r).toEqual({ ok: true, destroyed: [], message: "There is no machine to destroy for this purchase. The seller kept the payment of $0.0104 and delivered no machine. It stays on the list." });
+    const s = fakeSeller([inst("unrelated")]);
+    const before = j.all().length;
+    const r = await destroyOpenPurchase(j.open()[0], s, j);
+    expect(r).toEqual({ ok: true, destroyed: [], message: "The seller kept this payment and delivered no machine, so there is nothing to destroy. Use Dismiss to clear it from this list." });
+    expect(s.instances).not.toHaveBeenCalled();
     expect(s.destroy).not.toHaveBeenCalled();
+    expect(s.machines.get("unrelated")?.status).toBe("active");
+    expect(j.all()).toHaveLength(before);
     expect(j.open()).toHaveLength(1);
+  });
+
+  it("an unknown outcome with no machine still searches by plan and region and destroys the match", async () => {
+    const j = journalIn();
+    j.append({ at: 2, run: OPEN.run, market: "test", seller: "testseller", event: "unknown", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    const s = fakeSeller([inst("late")]);
+    const r = await destroyOpenPurchase(j.open()[0], s, j);
+    expect(r).toMatchObject({ ok: true, destroyed: ["late"] });
+    expect(j.all().at(-1)).toMatchObject({ event: "released", instance: "late" });
   });
 
   it("a payment that may have gone through, with no machine: says so and stays listed", async () => {
