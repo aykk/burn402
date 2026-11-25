@@ -456,6 +456,43 @@ describe("MarketRun never pays twice", () => {
   });
 });
 
+describe("MarketRun final review (M2, M6)", () => {
+  it("an unknown outcome when the machine list before paying could not be read: no machine is adopted (M6)", async () => {
+    let lists = 0;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if ((init?.method ?? "GET") === "GET" && url.endsWith("/compute/instances") && ++lists === 1) return new Response("busy", { status: 503 });
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, payer, events, seller } = setup({ faults: { settlementPending409: true }, wrap });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(seller.machines.size).toBe(1); // the seller did make one
+    expect(v.phase).toBe("failed");
+    expect(v.machine).toBeNull();
+    expect(v.error).toBe(UNCHECKED_UNCLEAR);
+    expect(v.spent).toBe("maybe");
+    expect(payer.calls).toBe(1);
+    expect(events()).toEqual(["intent", "unknown"]);
+  });
+
+  it("refuses to pay when the seller names the paying wallet as the fee payer (M2)", async () => {
+    // the fake processor names FAKE_PAY_TO as fee payer; a wallet at that address would pay the fee
+    const { run, payer, processor, events } = setup({ payer: fakePayer(FAKE_PAY_TO) });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.phase).toBe("refused");
+    expect(v.refusal).toEqual({ code: "WRONG_NETWORK", detail: "The seller asked your wallet to pay the network fee." });
+    expect(v.spent).toBe("nothing");
+    expect(payer.calls).toBe(0);
+    expect(processor.settled).toBe(0);
+    expect(events()).toEqual(["intent", "failed"]);
+  });
+});
+
 /** Rewrites every instance's ip_address the seller sends back. */
 const rewriteIp = (ip: string) => (f: typeof fetch) =>
   (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -681,6 +718,37 @@ describe("MarketRun destroy", () => {
     expect(records).toEqual([expect.objectContaining({ outcome: "refused", reason: expect.stringContaining("STOPPED") })]);
   });
 
+  it("destroy while the fresh 402 is in flight stops the run before anything is signed (I1)", async () => {
+    let target: MarketRun | null = null;
+    let unpaidPosts = 0;
+    let phaseAtDestroy = "";
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (init?.method === "POST" && url.endsWith("/compute/provision") && !new Headers(init?.headers).has("PAYMENT-SIGNATURE") && target!.view().phase === "paying" && ++unpaidPosts === 1) {
+          // the unpaid request made while paying is the fresh 402 just before signing: the owner presses destroy while it waits
+          phaseAtDestroy = target!.view().phase;
+          void target!.destroy();
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, events, payer, processor, records } = setup({ wrap });
+    target = run;
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(phaseAtDestroy).toBe("paying");
+    expect(v.phase).toBe("refused");
+    expect(v.refusal?.code).toBe("STOPPED");
+    expect(v.spent).toBe("nothing");
+    expect(v.payment).toBeNull();
+    expect(payer.calls).toBe(0);
+    expect(processor.settled).toBe(0);
+    expect(events()).toEqual(["intent", "failed"]);
+    expect(records).toEqual([expect.objectContaining({ outcome: "refused", usd: null, reason: expect.stringContaining("STOPPED") })]);
+  });
+
   it("destroy during the fallback re-quote stops the run instead of showing a new approval stop", async () => {
     const { run, seller, events, payer, processor } = setup({ ask: true });
     await run.start();
@@ -827,7 +895,7 @@ describe("MarketRun destroy", () => {
 });
 
 /** A findPayment that answers from a script, one entry per call (the last entry repeats). */
-function chainScript(answers: ({ tx: string } | null | Error)[]) {
+function chainScript(answers: ({ tx: string } | null | "unavailable" | Error)[]) {
   const calls: Parameters<NonNullable<MarketRunDeps["findPayment"]>>[0][] = [];
   const fn: NonNullable<MarketRunDeps["findPayment"]> = async (q) => {
     calls.push(q);
@@ -841,6 +909,8 @@ function chainScript(answers: ({ tx: string } | null | Error)[]) {
 const KEPT = "The seller took one payment of $0.010382 and did not deliver a machine.";
 const UNCONFIRMED_REJECTED =
   "A payment of $0.010382 was signed and sent. The seller says it was not accepted, and no transfer was found on chain yet. Check again later before paying anyone else.";
+const UNAVAILABLE_REJECTED =
+  "A payment of $0.010382 was signed and sent. The seller says it was not accepted, and the chain could not be checked right now, so check the transaction yourself before paying anyone else.";
 const UNCHECKED_REJECTED =
   "A payment of $0.010382 was signed and sent. The seller says it was not accepted. This app could not check the chain, so check the transaction yourself before paying anyone else.";
 const UNCHECKED_UNCLEAR =
@@ -946,13 +1016,24 @@ describe("MarketRun after a signed payment (B1)", () => {
     expect(records[0]).toMatchObject({ usd: CHEAPEST_USD, tx: null });
   });
 
-  it("a chain check that throws counts as not found", async () => {
-    const chain = chainScript([new Error("rpc down")]);
+  it("a chain check that always throws or cannot look says the chain could not be checked (M1)", async () => {
+    for (const answer of [new Error("rpc down"), "unavailable" as const]) {
+      const chain = chainScript([answer]);
+      const { run } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
+      await run.start();
+      await run.done;
+      expect(run.view().error).toBe(UNAVAILABLE_REJECTED);
+      expect(run.view().spent).toBe("maybe");
+      expect(chain.calls).toHaveLength(6);
+    }
+  });
+
+  it("one lookup that looked and found nothing is enough to say nothing was found yet (M1)", async () => {
+    const chain = chainScript([new Error("rpc down"), "unavailable", null, new Error("rpc down")]);
     const { run } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
     await run.start();
     await run.done;
     expect(run.view().error).toBe(UNCONFIRMED_REJECTED);
-    expect(chain.calls).toHaveLength(6);
   });
 
   it("a price cap after signing is checked the same way", async () => {

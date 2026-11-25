@@ -120,7 +120,7 @@ export type MarketRunDeps = {
    * Looks on chain for this run's transfer to the seller. Absent means the run cannot check.
    * Never asked to pay; read-only.
    */
-  findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number; signature?: string; exclude?: string[] }) => Promise<{ tx: string } | null>;
+  findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number; signature?: string; exclude?: string[] }) => Promise<{ tx: string } | null | "unavailable">;
   /** marks the overspend test's runs so they can never pass for the owner's */
   overspendTest?: boolean;
 };
@@ -454,7 +454,7 @@ export class MarketRun {
         try {
           return await this.afterSignature(this.current, "unclear", `the run stopped on an unexpected error: ${msg(e)}`);
         } catch (e2) {
-          return this.fail(this.unconfirmedText("unclear"), "PAYMENT_UNCONFIRMED", `after-payment check failed: ${msg(e2)}`);
+          return this.fail(this.unconfirmedText("unclear", true), "PAYMENT_UNCONFIRMED", `after-payment check failed: ${msg(e2)}`);
         }
       }
       this.fail(`The run stopped on an unexpected error: ${msg(e)}`);
@@ -636,11 +636,12 @@ export class MarketRun {
     if (this.alreadyPaid || this.signing) return this.fail(ALREADY_PAID);
 
     // machines that exist before this payment cannot be the one it buys
-    let before = new Set<string>();
+    // null when the list could not be read: then no machine is ever adopted by plan and region alone
+    let before: Set<string> | null = null;
     try {
       before = new Set((await this.d.seller.instances()).map((i) => i.id));
     } catch {
-      // best effort; the expiry check below still applies
+      // without it an unknown outcome is reported as unknown, never matched to a machine
     }
 
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
@@ -654,6 +655,11 @@ export class MarketRun {
     this.attempt(q.candidate.offer.id, q.region, `paying ${usdExact(q.atomic)}`, true);
 
     const payFn = async (required: PaymentRequired, accepts: Accepts): Promise<Record<string, string> | { refused: string }> => {
+      // destroy pressed while the fresh 402 was in flight: nothing is signed
+      if (this.destroyRequested) {
+        this.refusal = { code: "STOPPED", detail: STOPPED };
+        return { refused: STOPPED };
+      }
       const g = checkPayment({
         accepts,
         market: this.d.market,
@@ -663,6 +669,7 @@ export class MarketRun {
         hours: q.hours,
         alreadyPaid: this.alreadyPaid || this.signing,
         payTo: q.accepts.payTo,
+        payer: payer.address,
       });
       if (!g.ok) {
         this.refusal = { code: g.code, detail: g.detail };
@@ -740,20 +747,22 @@ export class MarketRun {
     if (!unknownWritten) this.safeAppend(this.entry("unknown", q, { usd, detail }));
     this.updateRow(q.candidate.offer, { note: detail });
     const found = await this.checkChain(q, CHAIN_CHECKS);
-    if (found && this.payment) {
+    if (found && found !== "unavailable" && this.payment) {
       this.confirmPayment(found.tx);
       this.safeAppend(this.entry("paid", q, { usd, tx: found.tx, instance: null, detail: "the seller kept the payment and delivered no machine" }));
       return this.fail(`The seller took one payment of ${usdExact(this.payment.atomic)} and did not deliver a machine.`, "SELLER_KEPT_PAYMENT");
     }
-    return this.fail(this.unconfirmedText(kind), "PAYMENT_UNCONFIRMED");
+    return this.fail(this.unconfirmedText(kind, found === "unavailable"), "PAYMENT_UNCONFIRMED");
   }
 
-  private unconfirmedText(kind: "rejected" | "unclear"): string {
+  /** `unavailable`: every chain lookup failed, so the run never actually looked. */
+  private unconfirmedText(kind: "rejected" | "unclear", unavailable = false): string {
     const amount = this.payment ? usdExact(this.payment.atomic) : this.current ? usdExact(this.current.atomic) : "an unknown amount";
     const seller = kind === "rejected" ? "The seller says it was not accepted" : "The seller did not confirm it";
     if (!this.d.findPayment) {
       return `A payment of ${amount} was signed and sent. ${seller}. This app could not check the chain, so check the transaction yourself before paying anyone else.`;
     }
+    if (unavailable) return `A payment of ${amount} was signed and sent. ${seller}, and the chain could not be checked right now, so check the transaction yourself before paying anyone else.`;
     return `A payment of ${amount} was signed and sent. ${seller}, and no transfer was found on chain yet. Check again later before paying anyone else.`;
   }
 
@@ -768,29 +777,34 @@ export class MarketRun {
     }
   }
 
-  /** Looks for this run's transfer on chain; null when the run cannot check or nothing turns up. */
-  private async checkChain(q: Quote, tries: number): Promise<{ tx: string } | null> {
+  /**
+   * Looks for this run's transfer on chain. Null when the run has no chain check or looked and
+   * found nothing; "unavailable" when every lookup failed.
+   */
+  private async checkChain(q: Quote, tries: number): Promise<{ tx: string } | null | "unavailable"> {
     const find = this.d.findPayment;
     const p = this.payment;
     if (!find || !p) return null;
+    let looked = false;
     for (let i = 0; i < tries; i++) {
       if (i > 0) await this.sleep(CHAIN_GAP_MS);
       try {
         const base = { payer: p.payer, payTo: q.accepts.payTo, atomic: p.atomic, sinceMs: this.intentAt ?? this.startedAt };
         const r = await find(this.paySignature ? { ...base, signature: this.paySignature } : { ...base, exclude: this.otherRunsTx() });
-        if (r && typeof r.tx === "string" && r.tx) return r;
+        if (r === null) looked = true;
+        else if (r !== "unavailable" && typeof r?.tx === "string" && r.tx) return r;
       } catch (e) {
         this.log(`chain check failed: ${msg(e)}`);
       }
     }
-    return null;
+    return looked ? null : "unavailable";
   }
 
   /** One chain check to fill in a transaction id the seller did not report. */
   private async lookUpTx(q: Quote): Promise<void> {
     if (this.payment?.tx) return;
     const found = await this.checkChain(q, 1);
-    if (found) this.confirmPayment(found.tx);
+    if (found && found !== "unavailable") this.confirmPayment(found.tx);
   }
 
   /** After a not-charged failure: the candidate's next region, else the next quoted candidate. */
@@ -807,7 +821,9 @@ export class MarketRun {
     return this.quotes.filter((q) => !this.used.has(q)).sort((a, b) => a.amountUsd - b.amountUsd)[0] ?? null;
   }
 
-  private async findMachine(q: Quote, intentAt: number, before: Set<string>): Promise<Instance | null> {
+  private async findMachine(q: Quote, intentAt: number, before: Set<string> | null): Promise<Instance | null> {
+    // without the list from before the payment, a machine with the same plan and region may be an older one
+    if (!before) return null;
     const minExpiry = intentAt + q.hours * 3600_000 - EXPIRY_SLACK_MS;
     for (let i = 0; i < UNKNOWN_POLLS; i++) {
       if (i > 0) await this.sleep(UNKNOWN_POLL_MS);

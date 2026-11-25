@@ -1,7 +1,9 @@
+import { readTextCapped } from "./read";
+
 /**
  * Read-only look at the chain: did a USDC transfer from the payer to the seller land? Plain
- * JSON-RPC over fetch, no keys, no writes. Any error, unexpected shape or the deadline passing is
- * "not found" (null).
+ * JSON-RPC over fetch, no keys, no writes. "Looked and found nothing" is null; any error,
+ * unexpected shape, answer over 2 MB or the deadline passing is "unavailable" (could not look).
  */
 
 /** One lookup, all of its calls together, never takes longer than this. */
@@ -42,7 +44,7 @@ async function rpc(f: typeof fetch, url: string, method: string, params: unknown
     signal,
   });
   if (!response.ok) throw new Error(`${method} answered ${response.status}`);
-  const body: unknown = await response.json();
+  const body: unknown = JSON.parse(await readTextCapped(response));
   if (!isObj(body) || "error" in body || !("result" in body)) throw new Error(`${method} returned an error`);
   return body.result;
 }
@@ -66,22 +68,24 @@ function deltas(meta: Obj, mint: string): Map<number, { owner: string; delta: bi
   return new Map([...out].map(([i, r]) => [i, { owner: r.owner, delta: r.post - r.pre }]));
 }
 
+export type FindPaymentResult = { tx: string } | null | "unavailable";
+
 /**
  * The first successful transaction since `sinceMs` (minus some slack) in which the payer's account
  * for `mint` went down by exactly `atomic` and an account owned by `payTo` went up by exactly
- * `atomic`. With `signature`, the transaction must also carry that signature. Null when none is
- * found, anything goes wrong or the deadline passes; never throws.
+ * `atomic`. With `signature`, the transaction must also carry that signature. Null when it looked
+ * and found none; "unavailable" when anything went wrong or the deadline passed; never throws.
  */
-export async function findPayment(opts: FindPaymentOpts): Promise<{ tx: string } | null> {
+export async function findPayment(opts: FindPaymentOpts): Promise<FindPaymentResult> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<null>((resolve) => {
+  const deadline = new Promise<"unavailable">((resolve) => {
     timer = setTimeout(() => {
       controller.abort();
-      resolve(null);
+      resolve("unavailable");
     }, opts.deadlineMs ?? DEADLINE_MS);
   });
-  const search = lookup(opts, controller.signal).catch(() => null);
+  const search = lookup(opts, controller.signal).catch((): "unavailable" => "unavailable");
   try {
     return await Promise.race([search, deadline]);
   } finally {
@@ -90,14 +94,14 @@ export async function findPayment(opts: FindPaymentOpts): Promise<{ tx: string }
   }
 }
 
-async function lookup(opts: FindPaymentOpts, signal: AbortSignal): Promise<{ tx: string } | null> {
+async function lookup(opts: FindPaymentOpts, signal: AbortSignal): Promise<FindPaymentResult> {
   const f = opts.fetch ?? ((input, init) => fetch(input, init));
   const call = (method: string, params: unknown[]) => rpc(f, opts.rpcUrl, method, params, signal);
   if (!/^\d{1,30}$/.test(opts.atomic)) return null;
   const amount = BigInt(opts.atomic);
   const signature = typeof opts.signature === "string" && opts.signature ? opts.signature : null;
   const accounts = await call("getTokenAccountsByOwner", [opts.payer, { mint: opts.mint }, { encoding: "jsonParsed" }]);
-  if (!isObj(accounts) || !Array.isArray(accounts.value)) return null;
+  if (!isObj(accounts) || !Array.isArray(accounts.value)) return "unavailable";
   const keys = accounts.value
     .map((a) => (isObj(a) && typeof a.pubkey === "string" ? a.pubkey : null))
     .filter((k): k is string => k !== null)
@@ -105,21 +109,27 @@ async function lookup(opts: FindPaymentOpts, signal: AbortSignal): Promise<{ tx:
   const since = (opts.sinceMs - (signature ? SIGNED_SLACK_MS : UNSIGNED_SLACK_MS)) / 1000;
   const seen = new Set<string>(signature ? [] : (opts.exclude ?? []));
   let fetched = 0;
+  /** something that should have been looked at could not be read */
+  let incomplete = false;
   for (const key of keys) {
     const sigs = await call("getSignaturesForAddress", [key, { limit: SIGNATURE_LIMIT, commitment: "confirmed" }]);
-    if (!Array.isArray(sigs)) continue;
+    if (!Array.isArray(sigs)) {
+      incomplete = true;
+      continue;
+    }
     for (const s of sigs) {
       if (!isObj(s) || typeof s.signature !== "string" || typeof s.blockTime !== "number" || s.blockTime < since) continue;
       if (s.err !== null && s.err !== undefined) continue;
       if (seen.has(s.signature)) continue;
       seen.add(s.signature);
-      if (fetched >= MAX_TRANSACTIONS) return null;
+      if (fetched >= MAX_TRANSACTIONS) return incomplete ? "unavailable" : null;
       fetched++;
       let tx: unknown;
       try {
         tx = await call("getTransaction", [s.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
       } catch {
-        if (signal.aborted) return null;
+        if (signal.aborted) return "unavailable";
+        incomplete = true;
         continue;
       }
       if (!isObj(tx) || !isObj(tx.meta) || tx.meta.err !== null) continue;
@@ -140,5 +150,5 @@ async function lookup(opts: FindPaymentOpts, signal: AbortSignal): Promise<{ tx:
       if (paid && received) return { tx: s.signature };
     }
   }
-  return null;
+  return incomplete ? "unavailable" : null;
 }
