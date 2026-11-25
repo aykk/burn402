@@ -3,9 +3,12 @@ import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
 import { REGIONS, duration, elapsedText } from "./format";
 
+/** "The last problem: The seller" reads "The last problem: the seller": no capital after a colon mid-sentence. */
+export const colonCase = (t: string) => t.replace(/: (The|A|An|No|Nothing|It|This) /g, (_, w: string) => `: ${w.toLowerCase()} `);
+
 /** Backend prose is lowercase fragments; shown as a sentence. */
 export const sentence = (t: string) => {
-  const s = t.trim().charAt(0).toUpperCase() + t.trim().slice(1);
+  const s = colonCase(t.trim().charAt(0).toUpperCase() + t.trim().slice(1));
   return /[.!?]$/.test(s) ? s : `${s}.`;
 };
 

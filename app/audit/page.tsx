@@ -5,6 +5,7 @@ import { Nav } from "@/app/nav";
 import { ActionError, failureMessage } from "@/app/components/ActionError";
 import { AttemptLedger } from "@/app/components/AttemptLedger";
 import { usd2 } from "@/app/components/format";
+import { colonCase } from "@/app/components/market-copy";
 import { usdPlain } from "@/lib/market/money";
 import { BTN_PRIMARY } from "@/app/components/ui";
 import type { OverspendAttempt, OverspendResult } from "@/lib/market/overspend";
@@ -17,7 +18,7 @@ type LedgerRow = Snapshot["stress"]["attempts"][number];
 /** The ledger reads "refused: …" as Blocked and "not stopped: …" as Got through. */
 const toRow = (a: OverspendAttempt): LedgerRow => ({
   what: a.what,
-  result: `${a.blocked ? "refused" : "not stopped"}: ${a.paidUsd === null ? `${a.result.replace(/([^.!?])$/, "$1.")} Paid during this attempt: unknown.` : a.result}`,
+  result: `${a.blocked ? "refused" : "not stopped"}: ${colonCase(a.paidUsd === null ? `${a.result.replace(/([^.!?])$/, "$1.")} Paid during this attempt: unknown.` : a.result)}`,
   ok: a.blocked,
   blocked: a.blocked,
   mark: null,
