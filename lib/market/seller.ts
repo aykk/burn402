@@ -56,6 +56,8 @@ const LABEL = "agent-rental";
 const PAID_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 2000;
 const NO_WALLET = "a wallet is needed to manage machines";
+const READ_TIMEOUT_MS = 30_000;
+const PAID_TIMEOUT_MS = 60_000;
 const STOCK_RE = /stock|unavailable|capacity/i;
 
 function parseJson(text: string): unknown {
@@ -90,9 +92,20 @@ function toInstance(raw: unknown): Instance | null {
   };
 }
 
-/** First requirement on a Solana network. */
+const nonEmpty = (v: unknown): boolean => typeof v === "string" && v !== "";
+
+/** First well-formed requirement on a Solana network. */
 function solanaRequirement(required: PaymentRequired): PaymentRequirements | null {
-  const r = required.accepts.find((a) => isObj(a) && typeof a.network === "string" && a.network.startsWith("solana:"));
+  const r = required.accepts.find(
+    (a) =>
+      isObj(a) &&
+      typeof a.network === "string" &&
+      a.network.startsWith("solana:") &&
+      typeof a.amount === "string" &&
+      /^\d+$/.test(a.amount) &&
+      nonEmpty(a.asset) &&
+      nonEmpty(a.payTo),
+  );
   return r ?? null;
 }
 
@@ -115,14 +128,16 @@ export class SellerClient {
   private readonly signer: Signer | null;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly timeouts: { read: number; paid: number };
 
   constructor(
     readonly config: SellerConfig,
-    deps: { fetch?: typeof fetch; signer?: Signer | null; now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
+    deps: { fetch?: typeof fetch; signer?: Signer | null; now?: () => number; sleep?: (ms: number) => Promise<void>; timeouts?: { read: number; paid: number } } = {},
   ) {
     this.fetch = deps.fetch ?? ((input, init) => fetch(input, init));
     this.signer = deps.signer ?? null;
     this.now = deps.now ?? Date.now;
+    this.timeouts = deps.timeouts ?? { read: READ_TIMEOUT_MS, paid: PAID_TIMEOUT_MS };
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
@@ -131,14 +146,15 @@ export class SellerClient {
   }
 
   async catalog(): Promise<{ offers: Offer[]; rules: HourlyRules; skipped: number }> {
-    const response = await this.fetch(this.url("/compute/plans"), { method: "GET", headers: { Accept: "application/json" } });
+    const response = await this.fetch(this.url("/compute/plans"), { method: "GET", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(this.timeouts.read) });
     const text = await response.text();
     if (!response.ok) throw new Error(`${this.config.label} plans feed answered ${response.status}: ${snippet(text)}`);
     return parsePlansFeed(parseJson(text), this.config.id);
   }
 
-  private postProvision(body: string, headers: Record<string, string> = {}): Promise<Response> {
-    return this.fetch(this.url("/compute/provision"), { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body });
+  private postProvision(body: string, headers: Record<string, string> = {}, paid = false): Promise<Response> {
+    const signal = AbortSignal.timeout(paid ? this.timeouts.paid : this.timeouts.read);
+    return this.fetch(this.url("/compute/provision"), { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body, signal });
   }
 
   async quote(candidate: Candidate, region: string, opts: { sshPublicKey: string; maxTotalUsd: number }): Promise<Quote> {
@@ -220,7 +236,9 @@ export class SellerClient {
     let headers: Record<string, string>;
     try {
       const result = await pay({ ...required, accepts: [req] }, toAccepts(req));
-      if ("refused" in result && typeof result.refused === "string") return { kind: "not_charged", code: "REFUSED_BY_GUARD", detail: result.refused };
+      if (typeof result === "object" && result !== null && "refused" in result) {
+        return { kind: "not_charged", code: "REFUSED_BY_GUARD", detail: String((result as { refused: unknown }).refused).slice(0, 200) };
+      }
       headers = result as Record<string, string>;
     } catch (e) {
       return { kind: "not_charged", code: "SELLER_ERROR", detail: `The payment could not be signed: ${e instanceof Error ? e.message : String(e)}` };
@@ -233,7 +251,7 @@ export class SellerClient {
       let response: Response;
       let text: string;
       try {
-        response = await this.postProvision(quote.body, headers);
+        response = await this.postProvision(quote.body, headers, true);
         text = await response.text();
       } catch (e) {
         last = `the paid request failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -271,7 +289,8 @@ export class SellerClient {
   private async signed(method: "GET" | "DELETE", path: string): Promise<{ response: Response; text: string }> {
     if (!this.signer) throw new Error(NO_WALLET);
     const headers = await authHeaders(this.signer, { method, path, body: "", now: this.now });
-    const response = await this.fetch(this.url(path), { method, headers: { Accept: "application/json", ...headers } });
+    const signal = AbortSignal.timeout(method === "DELETE" ? this.timeouts.paid : this.timeouts.read);
+    const response = await this.fetch(this.url(path), { method, headers: { Accept: "application/json", ...headers }, signal });
     return { response, text: await response.text() };
   }
 
