@@ -213,6 +213,10 @@ describe("solscanUrlForCluster (the records page)", () => {
 });
 
 describe("NN6: plain names", () => {
+  it("no capital letter after a colon inside a backend sentence", () => {
+    const e = endState(run({ phase: "failed", error: "No seller gave a usable quote. The last problem: The seller asked to be paid in SOL instead of USDC on Solana devnet." }))!;
+    expect(e.sentence).toBe("No seller gave a usable quote. The last problem: the seller asked to be paid in SOL instead of USDC on Solana devnet.");
+  });
   it("GPU names never show an underscore", () => {
     expect(machineSize({ kind: "gpu", vcpus: 6, ramGb: 16, vramGb: 16, gpu: "NVIDIA_A16" })).toBe("NVIDIA A16, 16 GB GPU, 6 vCPUs, 16 GB");
   });

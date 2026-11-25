@@ -1,5 +1,6 @@
 import { describePurchase } from "../../lib/market/record";
 import { sellerReason, tokenName, usdExact } from "../../lib/market/money";
+import { colonCase } from "./market-copy";
 
 /**
  * Plain words for transaction records on /records. Records are stored as they were written, so older ones
@@ -66,8 +67,6 @@ const sentenceCase = (t: string) => {
   return /[.!?]$/.test(up) ? up : `${up}.`;
 };
 
-/** "The last problem: The seller" reads "The last problem: the seller". */
-const colonCase = (t: string) => t.replace(/: (The|A|An|No|Nothing|It|This) /g, (_, w: string) => `: ${w.toLowerCase()} `);
 
 /** The broker-era reasons, as the page has always worded them. Null when the reason is not one of them. */
 function brokerReason(reason: string): string | null {
