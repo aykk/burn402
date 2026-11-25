@@ -55,6 +55,41 @@ describe("parsePlansFeed", () => {
     expect(offers.length).toBe(plans.plans.length);
   });
 
+  it.each([
+    ["ram", 0],
+    ["ram", -1],
+    ["ram", Number.NaN],
+    ["vcpu_count", 0],
+    ["vcpu_count", -2],
+    ["vcpu_count", null],
+  ])("skips a plan with %s = %s", (field, value) => {
+    const { offers, skipped } = parsePlansFeed({ plans: [{ ...good(), [field]: value }] }, "s");
+    expect(offers).toEqual([]);
+    expect(skipped).toBe(1);
+  });
+
+  it("a runpod row with locations null is a runpod region", () => {
+    const rp = structuredClone(plans.plans.find((p: { provider: string }) => p.provider === "runpod"));
+    rp.locations = null;
+    const { offers, skipped } = parsePlansFeed({ plans: [rp] }, "s");
+    expect(skipped).toBe(0);
+    expect(offers[0].regions).toEqual(["runpod"]);
+  });
+
+  it("never hands out DEFAULT_RULES by reference", () => {
+    for (const raw of [{ plans: [] }, { plans: [], hourly: {} }, null]) {
+      const { rules } = parsePlansFeed(raw, "s");
+      expect(rules).toEqual(DEFAULT_RULES);
+      expect(rules).not.toBe(DEFAULT_RULES);
+      expect(rules.minHours).not.toBe(DEFAULT_RULES.minHours);
+      expect(rules.surchargePct).not.toBe(DEFAULT_RULES.surchargePct);
+      rules.minHours.machine = 99;
+      rules.surchargePct.gpu = 99;
+      expect(DEFAULT_RULES.minHours.machine).toBe(1);
+      expect(DEFAULT_RULES.surchargePct.gpu).toBe(20);
+    }
+  });
+
   it("missing hourly block falls back to DEFAULT_RULES", () => {
     const { hourly: _h, ...rest } = plans;
     void _h;
@@ -89,6 +124,10 @@ describe("parseNuzaFeed", () => {
       hourlyUsd: 0.21,
       regions: ["us-east"],
     });
+  });
+
+  it("builds the offer id as model-region", () => {
+    expect(parseNuzaFeed(nuza)[0].id).toBe(`${nuza.gpus[0].model}-${nuza.gpus[0].region}`);
   });
 
   it("garbage input gives []", () => {

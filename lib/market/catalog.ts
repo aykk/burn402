@@ -10,8 +10,14 @@ const pos = (v: unknown): number | null => {
 };
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
 
+const defaultRules = (): HourlyRules => ({
+  ...DEFAULT_RULES,
+  minHours: { ...DEFAULT_RULES.minHours },
+  surchargePct: { ...DEFAULT_RULES.surchargePct },
+});
+
 function parseRules(raw: unknown): HourlyRules {
-  if (!isObj(raw)) return DEFAULT_RULES;
+  if (!isObj(raw)) return defaultRules();
   const by = isObj(raw.min_hours_by_kind) ? raw.min_hours_by_kind : {};
   const pct = isObj(raw.surcharge_pct) ? raw.surcharge_pct : {};
   const minAll = num(raw.min_hours);
@@ -34,8 +40,8 @@ function parsePlan(row: unknown, seller: string): Offer | null {
   const id = str(row.id);
   const provider = str(row.provider);
   const hourly = pos(row.our_hourly);
-  const ram = num(row.ram);
-  const vcpus = num(row.vcpu_count);
+  const ram = pos(row.ram);
+  const vcpus = pos(row.vcpu_count);
   if (!id || !provider || hourly === null || ram === null || vcpus === null) return null;
 
   let regions: string[];
@@ -70,7 +76,7 @@ function parsePlan(row: unknown, seller: string): Offer | null {
 }
 
 export function parsePlansFeed(raw: unknown, seller: string): { offers: Offer[]; rules: HourlyRules; skipped: number } {
-  if (!isObj(raw) || !Array.isArray(raw.plans)) return { offers: [], rules: DEFAULT_RULES, skipped: 0 };
+  if (!isObj(raw) || !Array.isArray(raw.plans)) return { offers: [], rules: defaultRules(), skipped: 0 };
   const offers: Offer[] = [];
   let skipped = 0;
   for (const row of raw.plans) {

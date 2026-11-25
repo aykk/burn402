@@ -158,6 +158,85 @@ describe("quote", () => {
   });
 });
 
+describe("quote validation", () => {
+  it.each([
+    ["abc", {}],
+    ["1e9", {}],
+    ["", {}],
+    [12345, {}],
+    ["10000", { payTo: undefined }],
+    ["10000", { asset: "" }],
+    ["10000", { network: undefined }],
+  ])("amount %j with %j is NO_402", async (amount, patch) => {
+    const { fetch } = fakeFetch([required402([{ ...solanaAccepts(), amount, ...patch }])]);
+    // network undefined also removes the solana entry, which is NO_402 as well
+    const err = await new SellerClient(config, { fetch }).quote(candidate(), "ewr", opts).catch((e) => e);
+    expect(err).toBeInstanceOf(QuoteError);
+    expect((err as QuoteError).code).toBe("NO_402");
+  });
+});
+
+describe("timeouts", () => {
+  const hang = (first?: Response) => {
+    const signals: (AbortSignal | undefined)[] = [];
+    let n = 0;
+    const fn = vi.fn(
+      (_i: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          signals.push(init?.signal ?? undefined);
+          if (first && n++ === 0) return resolve(first);
+          const sig = init?.signal;
+          if (!sig) return; // never settles: the test would time out
+          const abort = () => reject(sig.reason ?? new Error("aborted"));
+          if (sig.aborted) abort();
+          else sig.addEventListener("abort", abort);
+        }),
+    );
+    return { fetch: fn as unknown as typeof fetch, fn, signals };
+  };
+  const tiny = { read: 20, paid: 20 };
+
+  it("a hanging quote is UNREACHABLE", async () => {
+    const { fetch } = hang();
+    const err = await new SellerClient(config, { fetch, timeouts: tiny }).quote(candidate(), "ewr", opts).catch((e) => e);
+    expect(err).toBeInstanceOf(QuoteError);
+    expect((err as QuoteError).code).toBe("UNREACHABLE");
+  });
+
+  it("a hanging catalog GET rejects", async () => {
+    const { fetch } = hang();
+    await expect(new SellerClient(config, { fetch, timeouts: tiny }).catalog()).rejects.toBeDefined();
+  });
+
+  it("a paid request that hangs three times is unknown and pay runs once", async () => {
+    const q = await quoteWith();
+    const { fetch, fn } = hang(required402());
+    const pay = vi.fn(async () => ({ ...PAID }));
+    const out = await new SellerClient(config, { fetch, timeouts: tiny, sleep: async () => {} }).provision(q, pay);
+    expect(out.kind).toBe("unknown");
+    expect(pay).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledTimes(4);
+  });
+
+  it("every request carries a signal, defaults 30 s read and 60 s paid", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    const signer = await testSigner();
+    const { fetch, calls } = fakeFetch([json(200, { plans: [] }), required402(), required402(), json(201, { order }), json(200, []), json(200, {})]);
+    const seen: (AbortSignal | null | undefined)[] = [];
+    const wrapped = ((i: RequestInfo | URL, init?: RequestInit) => (seen.push(init?.signal), fetch(i, init))) as typeof fetch;
+    const client = new SellerClient(config, { fetch: wrapped, signer });
+    await client.catalog();
+    const q = await client.quote(candidate(), "ewr", opts);
+    await client.provision(q, async () => ({ ...PAID }));
+    await client.instances();
+    await client.destroy("ord-1");
+    expect(calls).toHaveLength(6);
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([30000, 30000, 30000, 60000, 30000, 60000]);
+    spy.mockRestore();
+  });
+});
+
 describe("provision", () => {
   const okPay = () => vi.fn<(r: PaymentRequired, a: Accepts) => Promise<Record<string, string>>>(async () => ({ ...PAID }));
 
@@ -279,6 +358,37 @@ describe("provision", () => {
     expect(calls).toHaveLength(4);
   });
 
+  it("refused with a non-string value is still a refusal, detail truncated", async () => {
+    const q = await quoteWith();
+    const { fetch, calls } = fakeFetch([required402()]);
+    const pay = vi.fn(async () => ({ refused: 42 }));
+    const out = await new SellerClient(config, { fetch }).provision(q, pay as never);
+    expect(out).toMatchObject({ kind: "not_charged", code: "REFUSED_BY_GUARD", detail: "42" });
+    expect(calls).toHaveLength(1);
+    const long = vi.fn(async () => ({ refused: "x".repeat(500) }));
+    const { fetch: f2 } = fakeFetch([required402()]);
+    const out2 = await new SellerClient(config, { fetch: f2 }).provision(q, long);
+    expect(out2).toMatchObject({ kind: "not_charged", code: "REFUSED_BY_GUARD", detail: "x".repeat(200) });
+  });
+
+  it("a paid 400 is unknown", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([required402(), json(400, { error: "bad" })]);
+    expect(await new SellerClient(config, { fetch }).provision(q, okPay())).toMatchObject({ kind: "unknown" });
+  });
+
+  it("a paid 409 without settlement_pending or quote_usd is unknown", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([required402(), json(409, { error: "conflict" })]);
+    expect(await new SellerClient(config, { fetch }).provision(q, okPay())).toMatchObject({ kind: "unknown" });
+  });
+
+  it("a paid 200 without an order is unknown", async () => {
+    const q = await quoteWith();
+    const { fetch } = fakeFetch([required402(), json(200, { success: true })]);
+    expect(await new SellerClient(config, { fetch }).provision(q, okPay())).toMatchObject({ kind: "unknown" });
+  });
+
   it("a signing failure is not charged and sends nothing paid", async () => {
     const q = await quoteWith();
     const { fetch, calls } = fakeFetch([required402()]);
@@ -311,6 +421,25 @@ describe("managing machines", () => {
     expect(await client.instance("ord-1")).toEqual({ id: "ord-1", status: "active", ip: null, expiresAt: null, plan: "vc2-1c-1gb", region: "ewr" });
     expect(verifyAuth(new Headers(calls[0].headers), { method: "GET", path: "/compute/instances/ord-1", body: "", nowMs: now() }).ok).toBe(true);
     expect(await client.instance("gone")).toBeNull();
+  });
+
+  it("instance(id) unwraps { instance } and { order }", async () => {
+    const signer = await testSigner();
+    const { fetch } = fakeFetch([json(200, { instance: order }), json(200, { order })]);
+    const client = new SellerClient(config, { fetch, signer, now });
+    expect((await client.instance("ord-1"))?.id).toBe("ord-1");
+    expect((await client.instance("ord-1"))?.id).toBe("ord-1");
+  });
+
+  it("instances() throws a plain Error on an unexpected shape", async () => {
+    const signer = await testSigner();
+    for (const body of [{ nope: 1 }, { instances: "x" }, "text", null]) {
+      const { fetch } = fakeFetch([json(200, body)]);
+      const err = await new SellerClient(config, { fetch, signer, now }).instances().catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(TypeError);
+      expect((err as Error).message).toMatch(/unexpected shape/);
+    }
   });
 
   it("destroy signs a DELETE, treats 404 as success and throws on other errors", async () => {
