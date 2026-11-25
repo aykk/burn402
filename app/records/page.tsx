@@ -5,6 +5,7 @@ import { isUnreachable } from "../components/verify-state";
 import { Segmented } from "@/app/components/Segmented";
 import { solscanUrlForCluster } from "@/app/components/market-copy";
 import { usd2, usd4 } from "@/app/components/format";
+import { usdPaid } from "@/app/components/record-words";
 import { BTN, INPUT, MONO, TEXT_BTN } from "@/app/components/ui";
 import { useEffect, useState } from "react";
 
@@ -106,11 +107,11 @@ function outcomeLabel(r: Record): string {
   return sentence(r.outcome.label);
 }
 
-/** Money in the site's format: "0.005500 USDC" becomes "$0.0055 USDC"; "provisioned 0.263/hr against mandate rate 0.25/hr" becomes an hourly sentence. */
+/** Money in the site's format: a paid amount stays exact ("0.010382 USDC" becomes "$0.010382 USDC", "0.011000 USDC" becomes "$0.0110 USDC"); "provisioned 0.263/hr against mandate rate 0.25/hr" becomes an hourly sentence. */
 function moneyCopy(text: string): string {
   return text
     .replace(/provisioned \$?([\d.]+)\/hr against mandate rate \$?([\d.]+)\/hr/i, (_, a: string, b: string) => `provisioned at ${usd4(Number(a))} an hour against a ${usd2(Number(b))} limit`)
-    .replace(/\$?(\d+\.\d+) USDC/g, (_, n: string) => `${usd4(Number(n))} USDC`);
+    .replace(/\$?(\d+\.\d+) USDC/g, (_, n: string) => `${usdPaid(Number(n))} USDC`);
 }
 
 function when(seconds: number | null): string | null {
