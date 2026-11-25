@@ -1,6 +1,7 @@
 import { usdExact } from "../../lib/market/money";
 import type { MarketRunView } from "@/lib/market/run";
-import { usd2 } from "./format";
+import { usd2, usd4 } from "./format";
+import { hoursText, timeLeft } from "./market-copy";
 
 export type MeterPhase = "ready" | "searching" | "approval" | "paying" | "running" | "released" | "failed" | "refused";
 
@@ -13,6 +14,8 @@ export type MeterView = {
   remainingUsd: number;
   /** The firm quote at the approval stop (or being paid); null before there is one. */
   quotedUsd: number | null;
+  /** That quote exactly, as the approval line states it ("$0.010382"). */
+  quotedExact: string | null;
   /** Hours the quote buys (the seller's billed hours). */
   quotedHours: number | null;
   /** What was signed and sent over x402 (confirmed or not; see `spent`). Never an estimate. */
@@ -72,6 +75,7 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
       rateUsdHr: input.formRateUsdHr,
       remainingUsd: input.formBudgetUsd,
       quotedUsd: null,
+      quotedExact: null,
       quotedHours: null,
       paidUsd: null,
       paidExact: null,
@@ -120,6 +124,7 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
     rateUsdHr,
     remainingUsd: paid !== null ? budgetUsd - paid : budgetUsd,
     quotedUsd: quote ? quote.usd : null,
+    quotedExact: quote ? quote.exact || usdExact(quote.atomic) : null,
     quotedHours: quote && finite(quote.hours) ? quote.hours : null,
     paidUsd: paid,
     paidExact: paid !== null && job.payment ? usdExact(job.payment.atomic) : null,
@@ -175,6 +180,40 @@ export function jobGauge(v: MeterView): JobGauge | null {
     return { state: "quoted", scaleUsd: v.quotedUsd, leftUsd: v.quotedUsd, fill: 1, secondsLeft: v.quotedHours !== null ? v.quotedHours * 3600 : null };
   }
   return null;
+}
+
+export type MeterHeadline = {
+  label: string;
+  /** The amount in the big figure: the exact quote, or the exact amount paid or sent. Null while the figure is time. */
+  amount: string | null;
+  /** Prepaid time left while the machine runs. */
+  time: string | null;
+  /** The muted words after the figure. */
+  suffix: string;
+};
+
+/**
+ * The meter's label and big figure while it is zoomed to the rental. Money there is always a specific
+ * amount stated exactly: the firm quote before payment, then what was paid (or sent). Once the run is over
+ * it stays the amount paid, never what is left of the prepaid time (which is zero after a destroy).
+ * `spanHours` is the prepaid time the figure is measured against.
+ */
+export function meterHeadline(v: MeterView, j: JobGauge, spanHours: number): MeterHeadline {
+  const paid = v.paidExact ?? usd4(v.paidUsd ?? j.scaleUsd);
+  const spentLabel = v.spent === "paid" ? "Spent on this rental" : "Sent for this rental, not confirmed";
+  switch (j.state) {
+    case "quoted":
+      return { label: "This rental will use", amount: v.quotedExact ?? usd4(j.scaleUsd), time: null, suffix: "quoted, not paid yet" };
+    case "sent":
+      return { label: "Payment sent", amount: paid, time: null, suffix: "sent, not confirmed yet" };
+    case "draining":
+      if (j.secondsLeft !== null) return { label: "Prepaid time left", amount: null, time: timeLeft(j.secondsLeft), suffix: `of ${hoursText(spanHours)}` };
+      return { label: v.spent === "paid" ? "Paid for machine time" : "Sent for machine time, not confirmed", amount: paid, time: null, suffix: "" };
+    case "held":
+      return { label: spentLabel, amount: paid, time: null, suffix: "" };
+    case "shut":
+      return { label: spentLabel, amount: paid, time: null, suffix: v.phase === "released" ? "machine destroyed" : "" };
+  }
 }
 
 /** The figure in the meter's corner while it shows the allowance: the limit, or once the run is over, what was spent. */

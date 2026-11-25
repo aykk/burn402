@@ -12,11 +12,12 @@ export const sentence = (t: string) => {
 /** "1 hour", "3 hours", "1.5 hours", "30 minutes". */
 export function hoursText(h: number): string {
   if (!Number.isFinite(h) || h <= 0) return "-";
-  if (h < 1) {
+  // A span a few seconds short of an hour (a destroy time just under it) is still "1 hour", not "60 minutes".
+  if (h < 1 && Math.round(h * 60) < 60) {
     const m = Math.max(1, Math.round(h * 60));
     return `${m} minute${m === 1 ? "" : "s"}`;
   }
-  const n = parseFloat(h.toFixed(2));
+  const n = h < 1 ? 1 : parseFloat(h.toFixed(2));
   return `${n} hour${n === 1 ? "" : "s"}`;
 }
 
