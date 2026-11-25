@@ -61,6 +61,16 @@ export function approvalSentence(a: NonNullable<MarketRunView["approval"]>): str
   return `Pay ${a.exact} ${a.token} to ${shortAddress(a.payTo)} on ${a.network} for ${a.plan} in ${a.region}, ${hoursText(a.hours)}.`;
 }
 
+/**
+ * When the seller bills more hours than were asked for: "The seller bills a 2-hour minimum; you asked for 1 hour."
+ * More than the whole hours asked can only come from a minimum; otherwise it is rounding up to whole hours.
+ */
+export function billedHoursLine(askedHours: number, billedHours: number): string | null {
+  if (!(billedHours > askedHours + 1e-9)) return null;
+  const why = billedHours > Math.ceil(askedHours - 1e-9) + 1e-9 ? `a ${parseFloat(billedHours.toFixed(2))}-hour minimum` : `whole hours: ${hoursText(billedHours)}`;
+  return `The seller bills ${why}; you asked for ${hoursText(askedHours)}.`;
+}
+
 /** "Includes the seller's 15% surcharge for rentals under 24 hours.", or null when the quote has none. */
 export function surchargeLine(s: NonNullable<MarketRunView["approval"]>["surcharge"]): string | null {
   if (!s) return null;
@@ -298,8 +308,10 @@ export function priceSourceLines(p: Pick<PriceComparison, "sources" | "asOf">): 
     return [{ text: `No live prices could be read${names.length > 0 ? ` from ${listJoin(names, "or")}` : ""}. The rental itself is unaffected.`, ok: false }];
   }
   const read = { text: `Live prices from ${listJoin(p.sources.filter((s) => s.ok).map(shortName))}, read at ${clock(p.asOf).slice(0, 5)} UTC.`, ok: true };
+  // A source that was read but gave a note ("has nothing in stock right now") says it, not as a failure.
+  const noted = p.sources.filter((s) => s.ok && s.note?.trim()).map((s) => ({ text: sentence(`${shortName(s)} ${s.note!.trim()}`), ok: true }));
   const failed = p.sources.filter((s) => !s.ok).map((s) => ({ text: sentence(`${shortName(s)} ${s.note?.trim() || "could not be read"}`), ok: false }));
-  return [read, ...failed];
+  return [read, ...noted, ...failed];
 }
 
 /**
@@ -333,12 +345,15 @@ export function priceMachine(p: Pick<MarketPrice, "name" | "kind" | "gpu" | "vra
   return parts.join(", ");
 }
 
-/** Which rows are the cheapest fit anywhere, the buyable plan included; ties are all marked. */
+/** The 4-decimal figure the page prints: "cheapest" compares these, so a printed tie marks every tied row. */
+const shown4 = (n: number) => Math.round(n * 1e4);
+
+/** Which rows are the cheapest fit anywhere, the buyable plan included; ties (as printed) are all marked. */
 export function cheapestMarks(p: Pick<PriceComparison, "best" | "buyable">): { rows: boolean[]; buyable: boolean } {
   const rates = [...p.best.map((r) => r.hourlyUsd), ...(p.buyable ? [p.buyable.hourlyUsd] : [])];
   if (rates.length === 0) return { rows: [], buyable: false };
-  const low = Math.min(...rates) + 1e-9;
-  return { rows: p.best.map((r) => r.hourlyUsd <= low), buyable: p.buyable !== null && p.buyable.hourlyUsd <= low };
+  const low = Math.min(...rates.map(shown4));
+  return { rows: p.best.map((r) => shown4(r.hourlyUsd) <= low), buyable: p.buyable !== null && shown4(p.buyable.hourlyUsd) <= low };
 }
 
 /** The buyable row's answer to "Can your agent buy here?". */
@@ -388,12 +403,13 @@ export function priceRows(p: Pick<PriceComparison, "best" | "buyable" | "sameMac
     outsideRegions: r.outsideRegions === true,
     note: r.note,
     hourlyUsd: r.hourlyUsd,
-    spotHourlyUsd: r.spotHourlyUsd,
+    // an interruptible figure not below the on-demand one reads like an error; it is left out
+    spotHourlyUsd: r.spotHourlyUsd !== null && r.spotHourlyUsd < r.hourlyUsd ? r.spotHourlyUsd : null,
     cheapest: marks.rows[i] ?? false,
     same: isSame(r),
   }));
   if (same && p.buyable && !rows.some((r) => r.same)) {
-    const low = Math.min(...p.best.map((r) => r.hourlyUsd), p.buyable.hourlyUsd);
+    const low = Math.min(...p.best.map((r) => shown4(r.hourlyUsd)), shown4(p.buyable.hourlyUsd));
     rows.push({
       key: `${same.source}:${same.name}:same`,
       sourceLabel: same.sourceLabel,
@@ -405,7 +421,7 @@ export function priceRows(p: Pick<PriceComparison, "best" | "buyable" | "sameMac
       note: null,
       hourlyUsd: same.hourlyUsd,
       spotHourlyUsd: null,
-      cheapest: same.hourlyUsd <= low + 1e-9,
+      cheapest: shown4(same.hourlyUsd) <= low,
       same: true,
     });
     rows.sort((a, b) => a.hourlyUsd - b.hourlyUsd);
@@ -413,12 +429,19 @@ export function priceRows(p: Pick<PriceComparison, "best" | "buyable" | "sameMac
   return rows;
 }
 
-/** What the right panel shows. A run in flight always; a comparison over an ended run or no run; else the run, or the intro. */
-export type PanelBody = "intro" | "compare" | "run";
-export function panelBody(run: Pick<MarketRunView, "phase"> | null, compareOpen: boolean): PanelBody {
+/**
+ * What the right panel shows. A run in flight always. A comparison in place of an ended run only when that
+ * run needs nothing from the owner: released, or refused or failed with nothing spent and no machine. Any
+ * other ended run (a machine it still knows about, a payment made or maybe made) keeps its body, with the
+ * comparison under it ("run+compare"), so Destroy now and the money message are never hidden.
+ */
+export type PanelBody = "intro" | "compare" | "run" | "run+compare";
+export function panelBody(run: Pick<MarketRunView, "phase" | "spent" | "machine"> | null, compareOpen: boolean): PanelBody {
   if (!run) return compareOpen ? "compare" : "intro";
   if (run.phase !== "released" && run.phase !== "failed" && run.phase !== "refused") return "run";
-  return compareOpen ? "compare" : "run";
+  if (!compareOpen) return "run";
+  const settled = run.phase === "released" || (run.spent === "nothing" && run.machine === null);
+  return settled ? "compare" : "run+compare";
 }
 
 /** A provider page is linked only when it is plain https. */

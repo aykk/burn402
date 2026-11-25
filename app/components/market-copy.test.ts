@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
 import type { PriceComparison } from "@/lib/market/prices/compare";
 import type { MarketPrice } from "@/lib/market/prices/types";
-import { approvalSentence, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalSentence, billedHoursLine, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -308,14 +308,39 @@ describe("market prices", () => {
   it("the right panel: a comparison over an ended run or no run; never over a run in flight", () => {
     expect(panelBody(null, false)).toBe("intro");
     expect(panelBody(null, true)).toBe("compare");
+    const clean = { spent: "nothing" as const, machine: null };
     for (const phase of ["scanning", "choosing", "quoting", "approval", "paying", "provisioning", "ready"] as const) {
-      expect(panelBody({ phase }, true)).toBe("run");
-      expect(panelBody({ phase }, false)).toBe("run");
+      expect(panelBody({ phase, ...clean }, true)).toBe("run");
+      expect(panelBody({ phase, ...clean }, false)).toBe("run");
     }
     for (const phase of ["released", "failed", "refused"] as const) {
-      expect(panelBody({ phase }, true)).toBe("compare");
-      expect(panelBody({ phase }, false)).toBe("run");
+      expect(panelBody({ phase, ...clean }, true)).toBe("compare");
+      expect(panelBody({ phase, ...clean }, false)).toBe("run");
     }
+  });
+
+  it("an ended run that still needs the owner keeps its body; the comparison goes under it", () => {
+    const machine = (status: "running" | "destroyed" | "pending") => ({ id: "m", ip: null, status, expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "p", region: "ewr" });
+    // released: the machine is gone and the money settled; the comparison may take the body
+    expect(panelBody({ phase: "released", spent: "paid", machine: machine("destroyed") }, true)).toBe("compare");
+    // a failed run with a machine it still knows about (Destroy now, "Destroy failed" must stay in view)
+    expect(panelBody({ phase: "failed", spent: "paid", machine: machine("running") }, true)).toBe("run+compare");
+    expect(panelBody({ phase: "failed", spent: "nothing", machine: machine("pending") }, true)).toBe("run+compare");
+    expect(panelBody({ phase: "failed", spent: "maybe", machine: machine("destroyed") }, true)).toBe("run+compare");
+    // a failed run that paid, or may have, with no machine: the money message stays
+    expect(panelBody({ phase: "failed", spent: "paid", machine: null }, true)).toBe("run+compare");
+    expect(panelBody({ phase: "failed", spent: "maybe", machine: null }, true)).toBe("run+compare");
+    // a refusal after a signed payment says what happened to the money: it stays too
+    expect(panelBody({ phase: "refused", spent: "paid", machine: null }, true)).toBe("run+compare");
+    // without Compare open, always just the run
+    expect(panelBody({ phase: "failed", spent: "paid", machine: machine("running") }, false)).toBe("run");
+  });
+
+  it("says when the seller bills more hours than were asked for", () => {
+    expect(billedHoursLine(1, 2)).toBe("The seller bills a 2-hour minimum; you asked for 1 hour.");
+    expect(billedHoursLine(1.5, 2)).toBe("The seller bills whole hours: 2 hours; you asked for 1.5 hours.");
+    expect(billedHoursLine(2, 2)).toBeNull();
+    expect(billedHoursLine(3, 2)).toBeNull();
   });
 
   it("describes a machine without repeating its name", () => {
@@ -334,6 +359,29 @@ describe("market prices", () => {
     expect(cheapestMarks(comparison({ best, buyable: buyable({ hourlyUsd: 0.089 }) }))).toEqual({ rows: [true, false], buyable: true });
     expect(cheapestMarks(comparison({ best: [], buyable: buyable() }))).toEqual({ rows: [], buyable: true });
     expect(cheapestMarks(comparison({ best: [] }))).toEqual({ rows: [], buyable: false });
+  });
+
+  it("marks cheapest by the 4-decimal figures shown, so a printed tie marks every tied row", () => {
+    // both print as $0.0890
+    const best = [price({ hourlyUsd: 0.08904 }), price({ source: "runpod", hourlyUsd: 0.08896 })];
+    expect(cheapestMarks(comparison({ best }))).toEqual({ rows: [true, true], buyable: false });
+    expect(cheapestMarks(comparison({ best, buyable: buyable({ hourlyUsd: 0.08899 }) }))).toEqual({ rows: [true, true], buyable: true });
+    const same = { source: "vultr" as const, sourceLabel: "Vultr (direct)", name: "vcg-a16", hourlyUsd: 0.08901, premiumPct: 0 };
+    const rows = priceRows(comparison({ best, buyable: buyable({ plan: "vcg-a16", hourlyUsd: 0.5 }), sameMachine: same }));
+    expect(rows.map((r) => r.cheapest)).toEqual([true, true, true]);
+  });
+
+  it("an interruptible price that is not lower than the on-demand price is not shown", () => {
+    const rows = priceRows(comparison({ best: [price({ hourlyUsd: 0.0896, spotHourlyUsd: 0.0933 }), price({ source: "runpod", hourlyUsd: 0.1, spotHourlyUsd: 0.05 })] }));
+    expect(rows.map((r) => r.spotHourlyUsd)).toEqual([null, 0.05]);
+  });
+
+  it("a source that answered with nothing in stock says so, and is not shown as a failure", () => {
+    const empty = { source: "runpod" as const, label: "RunPod (direct)", ok: true, count: 0, note: "has nothing in stock right now" };
+    expect(priceSourceLines(comparison({ sources: [src("vultr"), src("vast"), empty, src("akash")] }))).toEqual([
+      { text: "Live prices from Vultr, Vast.ai, RunPod and Akash, read at 19:42 UTC.", ok: true },
+      { text: "RunPod has nothing in stock right now.", ok: true },
+    ]);
   });
 
   it("says whether the buyable price is a firm quote or an estimate", () => {
