@@ -120,6 +120,42 @@ describe("TestSeller provisioning", () => {
     expect(processor.settled).toBe(1);
     expect(seller.machines.size).toBe(1);
   });
+
+  async function paidHeaders(s: ReturnType<typeof setup>) {
+    const unpaid = await s.seller.handle(post(provisionBody()));
+    return s.payer.payHeaders(JSON.parse(Buffer.from(unpaid.headers.get("PAYMENT-REQUIRED")!, "base64").toString()));
+  }
+
+  it("two concurrent paid requests with the same signature settle once and return the same order", async () => {
+    const s = setup();
+    const headers = await paidHeaders(s);
+    const [a, b] = await Promise.all([s.seller.handle(post(provisionBody(), headers)), s.seller.handle(post(provisionBody(), headers))]);
+    const [ja, jb] = [await a.json(), await b.json()];
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(jb.order.id).toBe(ja.order.id);
+    expect(s.processor.settled).toBe(1);
+    expect(s.seller.machines.size).toBe(1);
+  });
+
+  it("a concurrent duplicate of a 503-once attempt is retried, still one settle", async () => {
+    const s = setup();
+    s.seller.faults = { ...NO_FAULTS, fail5xxOnce: true };
+    const headers = await paidHeaders(s);
+    const [a, b] = await Promise.all([s.seller.handle(post(provisionBody(), headers)), s.seller.handle(post(provisionBody(), headers))]);
+    expect([a.status, b.status]).toEqual([503, 200]);
+    expect(s.processor.settled).toBe(1);
+  });
+
+  it("the same signature with a different body is refused with 402 and not settled", async () => {
+    const s = setup();
+    const headers = await paidHeaders(s);
+    expect((await s.seller.handle(post(provisionBody(), headers))).status).toBe(200);
+    const other = await s.seller.handle(post(provisionBody({ region: "ord" }), headers));
+    expect(other.status).toBe(402);
+    expect(s.processor.settled).toBe(1);
+    expect(s.seller.machines.size).toBe(1);
+  });
 });
 
 describe("TestSeller faults", () => {
@@ -223,7 +259,10 @@ describe("TestSeller machine management", () => {
 });
 
 describe("TestSeller fault control", () => {
-  const faultsReq = (url: string, body: unknown) => new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  afterEach(() => vi.unstubAllEnvs());
+  const faultsReq = (url: string, body: unknown, headers: Record<string, string> = { "Content-Type": "application/json" }) =>
+    new Request(url, { method: "POST", headers, body: JSON.stringify(body) });
+  const URL_ = `${BASE}/compute/_faults`;
 
   it("accepts a partial Faults from a local host and returns the current ones", async () => {
     const { seller } = setup();
@@ -239,6 +278,42 @@ describe("TestSeller fault control", () => {
     const r = await seller.handle(faultsReq("http://evil.example/api/testseller/compute/_faults", { pending202: true }));
     expect(r.status).toBe(403);
     expect(seller.faults.pending202).toBe(false);
+  });
+
+  it("refuses a spoofed localhost Host with a foreign Origin (403) and a non-JSON content type (415)", async () => {
+    const { seller } = setup();
+    const evil = await seller.handle(faultsReq(URL_, { pending202: true }, { "Content-Type": "application/json", Origin: "http://evil.example" }));
+    expect(evil.status).toBe(403);
+    const wrongPort = await seller.handle(faultsReq(URL_, { pending202: true }, { "Content-Type": "application/json", Origin: "http://localhost:4000" }));
+    expect(wrongPort.status).toBe(403);
+    expect((await seller.handle(faultsReq(URL_, { pending202: true }, { "Content-Type": "text/plain" }))).status).toBe(415);
+    expect((await seller.handle(faultsReq(URL_, { pending202: true }, {}))).status).toBe(415);
+    expect(seller.faults.pending202).toBe(false);
+    const ok = await seller.handle(faultsReq(URL_, { pending202: true }, { "Content-Type": "application/json; charset=utf-8", Origin: "http://localhost:3000" }));
+    expect(ok.status).toBe(200);
+  });
+
+  it("is 404 in production", async () => {
+    const { seller } = setup();
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await seller.handle(faultsReq(URL_, { pending202: true }))).status).toBe(404);
+    expect(seller.faults.pending202).toBe(false);
+  });
+
+  it("rejects quoteBumpPct outside 0..100", async () => {
+    const { seller } = setup();
+    expect((await seller.handle(faultsReq(URL_, { quoteBumpPct: -1 }))).status).toBe(400);
+    expect((await seller.handle(faultsReq(URL_, { quoteBumpPct: 101 }))).status).toBe(400);
+    expect((await seller.handle(faultsReq(URL_, { quoteBumpPct: 100 }))).status).toBe(200);
+  });
+
+  it("a successful update resets the quote-bump counters", async () => {
+    const { seller } = setup();
+    const amount = async () => JSON.parse(Buffer.from((await seller.handle(post(provisionBody()))).headers.get("PAYMENT-REQUIRED")!, "base64").toString()).accepts[0].amount;
+    const base = await amount();
+    expect((await seller.handle(faultsReq(URL_, { quoteBumpPct: 20 }))).status).toBe(200);
+    expect(await amount()).toBe(base); // first unpaid call after the reset is fresh
+    expect(Number(await amount())).toBeGreaterThan(Number(base));
   });
 });
 
