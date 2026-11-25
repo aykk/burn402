@@ -32,7 +32,7 @@ export type DemoConfig = {
 };
 
 export function defaultNetwork(): Network {
-  return process.env.BURN402_ARWEAVE_NETWORK === "testnet" ? "testnet" : "production";
+  return process.env.BURN402_ARWEAVE_NETWORK === "production" ? "production" : "testnet";
 }
 
 export function configFromEnv(root = process.cwd()): DemoConfig {
