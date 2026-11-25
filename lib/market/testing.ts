@@ -2,6 +2,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { SOLANA_DEVNET, type PaymentProcessor, type Settlement } from "../x402/processor";
+import type { Network } from "@x402/core/types";
 import { base58Encode, type Signer } from "./auth";
 import type { Payer, PaymentRequired } from "./pay";
 import type { TestSeller } from "./testseller";
@@ -14,12 +15,20 @@ const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64");
 /** Requirement amount from USD; decode parses JSON; verify fails only on `bad: true`; counts settles. */
 export class FakeProcessor implements PaymentProcessor {
   settled = 0;
+  private readonly network: Network;
+  private readonly asset: string;
+
+  /** Defaults to devnet USDC; pass mainnet values to stand in for the real market. */
+  constructor(o: { network?: string; asset?: string } = {}) {
+    this.network = (o.network ?? SOLANA_DEVNET) as Network;
+    this.asset = o.asset ?? DEVNET_USDC;
+  }
 
   async requirements(usd: number): Promise<PaymentRequirements> {
     return {
       scheme: "exact",
-      network: SOLANA_DEVNET,
-      asset: DEVNET_USDC,
+      network: this.network,
+      asset: this.asset,
       amount: String(Math.ceil(Math.round(usd * 1e12) / 1e6)),
       payTo: FAKE_PAY_TO,
       maxTimeoutSeconds: 60,
@@ -42,7 +51,7 @@ export class FakeProcessor implements PaymentProcessor {
   async settle(payload: PaymentPayload): Promise<Settlement> {
     this.settled++;
     const payer = (payload as unknown as { payer?: string }).payer ?? null;
-    return { ok: true, tx: `tx-${this.settled}`, payer, network: SOLANA_DEVNET };
+    return { ok: true, tx: `tx-${this.settled}`, payer, network: this.network };
   }
 
   responseHeader(settlement: Settlement): string {
