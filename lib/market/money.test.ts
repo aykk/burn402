@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { networkName, sellerReason, tokenName, usdExact, usdPlain } from "./money";
+import { networkName, sellerReason, tokenName, usdExact, usdMoreThan, usdPlain } from "./money";
 
 describe("usdExact", () => {
   it.each([
@@ -28,6 +28,41 @@ describe("usdPlain", () => {
     [1234.5, "$1,234.50"],
     [20, "$20.00"],
   ])("%s is %s", (n, want) => expect(usdPlain(n)).toBe(want));
+});
+
+describe("usdMoreThan", () => {
+  it("keeps the plain words when they already differ", () => {
+    expect(usdMoreThan(0.009027, 0.009)).toEqual(["$0.009027", "$0.009"]);
+    expect(usdMoreThan(1.5, 1)).toEqual(["$1.50", "$1.00"]);
+  });
+
+  it("never prints the same number twice: the larger rounds up and the smaller down, at 6 decimals", () => {
+    expect(usdPlain(0.0090001)).toBe(usdPlain(0.009));
+    expect(usdMoreThan(0.0090001, 0.009)).toEqual(["$0.009001", "$0.009"]);
+    expect(usdMoreThan(0.0100001, 0.0099999)).toEqual(["$0.010001", "$0.009999"]);
+    const [a, b] = usdMoreThan(0.010382 / 3, 0.0034606);
+    expect(a).not.toBe(b);
+  });
+
+  it("names an unreadable amount", () => {
+    expect(usdMoreThan(Number.NaN, 1)[0]).toBe("an unreadable amount");
+  });
+});
+
+describe("guard sentences use it", () => {
+  it("an hourly rate a hair over the limit shows two different numbers", async () => {
+    const { checkPayment, NETWORKS } = await import("./guard");
+    const r = checkPayment({
+      accepts: { scheme: "exact", network: NETWORKS.test.caip2, asset: NETWORKS.test.usdc, amount: "9001", payTo: "x", maxTimeoutSeconds: 60, extra: {} } as never,
+      market: "test",
+      approvedAtomic: BigInt(9001),
+      budgetLeftUsd: 1,
+      rateUsdHr: 0.0090009,
+      hours: 1,
+      alreadyPaid: false,
+    });
+    expect(r).toMatchObject({ ok: false, code: "OVER_RATE", detail: "$0.009001 an hour is more than your hourly limit of $0.009." });
+  });
 });
 
 describe("tokenName", () => {

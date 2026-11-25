@@ -5,7 +5,7 @@ import { choose, summarize, type Candidate, type RejectReason, type Rejection } 
 import { checkPayment, NETWORKS, type Accepts } from "./guard";
 import { usdExact } from "./money";
 import type { Journal, JournalEntry } from "./journal";
-import type { Payer, PaymentRequired } from "./pay";
+import { payerSignatureOf, type Payer, type PaymentRequired } from "./pay";
 import { QuoteError, type Instance, type ProvisionOutcome, type Quote, type SellerClient } from "./seller";
 import { newSshKey } from "./sshkey";
 import type { HourlyRules, Limits, MarketId, Need, Offer } from "./types";
@@ -120,7 +120,7 @@ export type MarketRunDeps = {
    * Looks on chain for this run's transfer to the seller. Absent means the run cannot check.
    * Never asked to pay; read-only.
    */
-  findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number }) => Promise<{ tx: string } | null>;
+  findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number; signature?: string; exclude?: string[] }) => Promise<{ tx: string } | null>;
   /** marks the overspend test's runs so they can never pass for the owner's */
   overspendTest?: boolean;
 };
@@ -350,6 +350,8 @@ export class MarketRun {
   /** true once the payer has been asked to sign: no fallback and no second payment after this */
   private signing = false;
   private alreadyPaid = false;
+  /** The payer's own signature on the sent transaction, when it could be read; the chain check matches on it. */
+  private paySignature: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private destroying: Promise<void> | null = null;
   private destroyRequested = false;
@@ -671,6 +673,7 @@ export class MarketRun {
       this.alreadyPaid = true;
       // from here the money may be out: the payment shows as sent until it is confirmed
       this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.address, status: "unconfirmed" };
+      this.paySignature = payerSignatureOf(headers);
       return headers;
     };
 
@@ -748,7 +751,21 @@ export class MarketRun {
   private unconfirmedText(kind: "rejected" | "unclear"): string {
     const amount = this.payment ? usdExact(this.payment.atomic) : this.current ? usdExact(this.current.atomic) : "an unknown amount";
     const seller = kind === "rejected" ? "The seller says it was not accepted" : "The seller did not confirm it";
+    if (!this.d.findPayment) {
+      return `A payment of ${amount} was signed and sent. ${seller}. This app could not check the chain, so check the transaction yourself before paying anyone else.`;
+    }
     return `A payment of ${amount} was signed and sent. ${seller}, and no transfer was found on chain yet. Check again later before paying anyone else.`;
+  }
+
+  /** Transaction ids other runs already recorded, so a lookup without this run's signature cannot take them. */
+  private otherRunsTx(): string[] {
+    try {
+      const out = new Set<string>();
+      for (const e of this.d.journal.all()) if (e.run !== this.d.id && typeof e.tx === "string" && e.tx) out.add(e.tx);
+      return [...out];
+    } catch {
+      return [];
+    }
   }
 
   /** Looks for this run's transfer on chain; null when the run cannot check or nothing turns up. */
@@ -759,7 +776,8 @@ export class MarketRun {
     for (let i = 0; i < tries; i++) {
       if (i > 0) await this.sleep(CHAIN_GAP_MS);
       try {
-        const r = await find({ payer: p.payer, payTo: q.accepts.payTo, atomic: p.atomic, sinceMs: this.intentAt ?? this.startedAt });
+        const base = { payer: p.payer, payTo: q.accepts.payTo, atomic: p.atomic, sinceMs: this.intentAt ?? this.startedAt };
+        const r = await find(this.paySignature ? { ...base, signature: this.paySignature } : { ...base, exclude: this.otherRunsTx() });
         if (r && typeof r.tx === "string" && r.tx) return r;
       } catch (e) {
         this.log(`chain check failed: ${msg(e)}`);
