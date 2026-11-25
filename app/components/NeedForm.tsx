@@ -13,7 +13,8 @@ import { draftLimits } from "./meter-model";
 import { Segmented } from "./Segmented";
 import { BTN, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
 
-export type NeedDraft = { budgetUsd: number; rateUsdHr: number };
+/** The last valid budget and limit; `valid` is false while a field holds a value the form would refuse. */
+export type NeedDraft = { budgetUsd: number; rateUsdHr: number; valid: boolean };
 
 export type RunBody = {
   market: MarketId;
@@ -169,9 +170,12 @@ export function NeedForm(props: {
 
   // The meter follows the budget and limit as they are typed, but only valid pairs: while a field holds a value the
   // form would refuse, the meter keeps the last valid one instead of showing it as if it were real.
+  // The meter is dimmed meanwhile, so a valid prefix of what is being typed ("9" of "99999999") is not read as the budget.
+  const lastValid = useRef<{ budgetUsd: number; rateUsdHr: number }>({ budgetUsd: 1, rateUsdHr: 0.05 });
   useEffect(() => {
     const valid = draftLimits(budget, rate);
-    if (valid) onDraftChange(valid);
+    if (valid) lastValid.current = valid;
+    onDraftChange({ ...lastValid.current, valid: valid !== null });
   }, [budget, rate, onDraftChange]);
 
   const hasKey = Boolean(snap?.models.providers.find((p) => p.id === snap.models.selected)?.key);
@@ -321,6 +325,12 @@ export function NeedForm(props: {
             Market
           </Label>
           <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} />
+          {/* Under the Market choice it belongs to. */}
+          {market === "real" && (
+            <p id="real-line" className="max-w-[28ch] text-foreground">
+              Real money: USDC on Solana mainnet. You approve every payment.
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <Label help="kind" forId="kind-choice">
@@ -329,11 +339,6 @@ export function NeedForm(props: {
           <Segmented id="kind-choice" describedBy="help-kind" label="Machine" options={KIND_OPTIONS} value={kind} onChange={setKind} disabled={disabled} />
         </div>
       </div>
-      {market === "real" && (
-        <p id="real-line" className="-mt-2 text-foreground">
-          Real money: USDC on Solana mainnet. You approve every payment.
-        </p>
-      )}
 
       {/* Units sit inside the fields. Two columns on a narrow form, up to four on a wide one. */}
       <div className={`grid grid-cols-2 gap-4 ${kind === "gpu" ? "@min-[30rem]:grid-cols-4" : "@min-[24rem]:grid-cols-3"}`}>

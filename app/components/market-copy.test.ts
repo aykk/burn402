@@ -147,6 +147,12 @@ describe("endState", () => {
     expect(e.next).toBe("It stays listed under open purchases until you dismiss it.");
     expect(said(e)).not.toMatch(/nothing/i);
   });
+  it("NN1: once the kept payment is dismissed, the line no longer says it stays listed", () => {
+    const e = endState(run({ phase: "failed", spent: "paid", payment: kept, error: "The seller took one payment of $0.010382 and did not deliver a machine." }), { listed: false })!;
+    expect(e.next).toBe("It is no longer listed under open purchases.");
+    const other = endState(run({ phase: "failed", spent: "paid", payment: kept, error: "x" }), { listed: false })!;
+    expect(other.next).toBe("$0.010382 was paid. It is no longer listed under open purchases.");
+  });
   it("B1: a paid failure whose error does not name the amount adds it", () => {
     const e = endState(run({ phase: "failed", spent: "paid", payment: kept, error: "the run stopped on an unexpected error" }))!;
     expect(e.next).toBe("$0.010382 was paid. It stays listed under open purchases until you dismiss it.");

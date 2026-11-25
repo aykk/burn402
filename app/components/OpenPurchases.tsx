@@ -8,7 +8,7 @@ import type { Send } from "./MachinePanel";
 import { MARKET_NAME, sentence } from "./market-copy";
 import { BTN, MONO } from "./ui";
 
-function Purchase({ p, send }: { p: OpenPurchase; send: Send }) {
+function Purchase({ p, send, onDone }: { p: OpenPurchase; send: Send; onDone: () => void }) {
   const [busy, setBusy] = useState<"destroy" | "dismiss" | null>(null);
   const [error, setError] = useState<{ what: string; message: string } | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -28,6 +28,7 @@ function Purchase({ p, send }: { p: OpenPurchase; send: Send }) {
       const r = await send("/api/market/destroy", kind === "dismiss" ? { open: { run: p.run }, dismiss: true } : { open: { run: p.run } });
       if (r.error) setError({ what: kind === "dismiss" ? "That purchase wasn't dismissed" : "That machine wasn't destroyed", message: r.error });
       setNote(r.message);
+      if (!r.error) onDone();
     } finally {
       setBusy(null);
       inFlight.current = false;
@@ -74,16 +75,24 @@ function Purchase({ p, send }: { p: OpenPurchase; send: Send }) {
  * Purchases the journal holds open: money may be out and nothing closed them. A machine from a run before
  * this one (a restart, or a reset on the real market) gets Destroy; a payment with no machine gets Dismiss.
  */
-export function OpenPurchases({ purchases, send }: { purchases: OpenPurchase[]; send: Send }) {
+export function OpenPurchases({ purchases, send, onGone }: { purchases: OpenPurchase[]; send: Send; onGone?: () => void }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // After Destroy or Dismiss the entry (and its buttons) may be gone: focus the list's heading, or, once the list
+  // itself is gone, wherever the page says (the meter), never the page body.
+  const onDone = () =>
+    requestAnimationFrame(() => {
+      if (headingRef.current?.isConnected) headingRef.current.focus();
+      else onGone?.();
+    });
   if (purchases.length === 0) return null;
   return (
     <section aria-labelledby="open-heading" className="space-y-3 border-l-2 border-bad pl-3">
-      <h2 id="open-heading" className="font-semibold text-foreground">
+      <h2 id="open-heading" ref={headingRef} tabIndex={-1} className="font-semibold text-foreground focus:outline-none">
         {purchases.length === 1 ? "An open purchase to check" : `${purchases.length} open purchases to check`}
       </h2>
       <ul className="space-y-4">
         {purchases.map((p) => (
-          <Purchase key={p.run} p={p} send={send} />
+          <Purchase key={p.run} p={p} send={send} onDone={onDone} />
         ))}
       </ul>
     </section>

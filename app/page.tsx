@@ -25,7 +25,10 @@ export default function Page() {
   const [drawer, setDrawer] = useState(false);
   const logButton = useRef<HTMLButtonElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [draft, setDraft] = useState<NeedDraft>({ budgetUsd: 1, rateUsdHr: 0.05 });
+  const [draft, setDraft] = useState<NeedDraft>({ budgetUsd: 1, rateUsdHr: 0.05, valid: true });
+  // Bumped when a run starts, so focus moves from the form (which collapses) to the run's heading.
+  const [startSignal, setStartSignal] = useState(0);
+  const meterRef = useRef<HTMLDivElement>(null);
   const [resetSignal, setResetSignal] = useState(0);
   // Server clock minus client clock (ms), refreshed on every poll, so the meter ticks in server time.
   const clockOffset = useRef(0);
@@ -60,6 +63,13 @@ export default function Page() {
   }, [load]);
 
   const run = snap?.market ?? null;
+
+  // A payment the page saw listed under open purchases and that is gone from it now was dismissed: the run's
+  // end line stops saying it stays listed. A run never seen listed keeps the default wording.
+  const listedNow = run !== null && (snap?.openPurchases ?? []).some((p) => p.run === run.id);
+  const [seenListed, setSeenListed] = useState<string | null>(null);
+  if (run && listedNow && seenListed !== run.id) setSeenListed(run.id);
+  const listed = !(run && seenListed === run.id && !listedNow);
 
   // Run milestones for screen readers (stages, approval, payment, machine, how it ended), never the per-second drain.
   // `undefined` until the first snapshot, so loading the page on an old run is a silent baseline.
@@ -147,11 +157,14 @@ export default function Page() {
         <p className="text-muted">It compares live prices, pays with x402, and destroys the machine when the time is up.</p>
       </div>
 
-      <div className="mt-4 shrink-0">
+      {/* Focus lands here after the last open purchase is dismissed, where the run's money is told. */}
+      <div ref={meterRef} tabIndex={-1} className="mt-4 shrink-0 focus:outline-none">
         <BudgetMeter
           agentName={snap?.company?.name ?? null}
           formBudgetUsd={draft.budgetUsd}
           formRateUsdHr={draft.rateUsdHr}
+          draftValid={draft.valid}
+          listed={listed}
           job={run}
           nowMs={nowMs}
         />
@@ -159,7 +172,7 @@ export default function Page() {
 
       {snap && snap.openPurchases.length > 0 && (
         <div className="mt-6 shrink-0">
-          <OpenPurchases purchases={snap.openPurchases} send={send} />
+          <OpenPurchases purchases={snap.openPurchases} send={send} onGone={() => meterRef.current?.focus()} />
         </div>
       )}
 
@@ -190,7 +203,11 @@ export default function Page() {
             running={running}
             resetSignal={resetSignal}
             onDraftChange={setDraft}
-            onStart={(body) => post("/api/market/run", body)}
+            onStart={async (body) => {
+              const failed = await post("/api/market/run", body);
+              if (!failed) setStartSignal((k) => k + 1);
+              return failed;
+            }}
             onAddKey={() => setPickerOpen(true)}
           />
         </div>
@@ -200,7 +217,7 @@ export default function Page() {
             run ? "order-first lg:order-none" : "border-t pt-8 lg:border-t-0"
           }`}
         >
-          <MarketPanel run={run} nowMs={nowMs} walletReady={snap?.walletReady ?? { test: false, real: false }} post={post} send={send} />
+          <MarketPanel run={run} nowMs={nowMs} listed={listed} focusSignal={startSignal} walletReady={snap?.walletReady ?? { test: false, real: false }} post={post} send={send} />
         </div>
       </section>
 

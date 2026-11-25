@@ -166,6 +166,10 @@ export function BudgetMeter(props: {
   agentName: string | null;
   formBudgetUsd: number;
   formRateUsdHr: number;
+  /** False while the form's budget or limit is not valid: the meter is dimmed, since it shows the last valid pair. */
+  draftValid?: boolean;
+  /** False once this run's payment was dismissed from open purchases. */
+  listed?: boolean;
   job: (MeterJob & Pick<MarketRunView, "id" | "market" | "leftOut">) | null;
   /** ms, the server's clock */
   nowMs: number;
@@ -184,7 +188,8 @@ export function BudgetMeter(props: {
   });
   const j = jobGauge(v);
   const who = props.agentName?.trim() || "Your agent";
-  const ended = props.job ? endState(props.job) : null;
+  const ended = props.job ? endState(props.job, { listed: props.listed ?? true }) : null;
+  const stale = !props.job && props.draftValid === false;
 
   if (!j) {
     const r = walletReadout(v);
@@ -198,7 +203,7 @@ export function BudgetMeter(props: {
           {/* A run that ended with money out and no machine: the payment, with its transaction when there is one. */}
           {payment && props.job && <PaymentLine payment={payment} solscan={solscanUrl(payment.tx, props.job.market)} market={props.job.market} fresh={false} />}
         </div>
-        <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
+        <div className={`mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6 ${stale ? "opacity-40" : ""}`}>
           <p className="flex flex-wrap items-baseline gap-x-3">
             <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] tabular-nums text-foreground" style={CONDENSED}>
               <span className="sr-only">{amount}</span>
@@ -211,11 +216,13 @@ export function BudgetMeter(props: {
           </p>
           <ReadoutBlock r={r} />
         </div>
-        <WalletGauge v={v} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:flex" />
-        <WalletGauge v={v} segments={SEGMENTS_NARROW} className="mt-4 flex sm:hidden" />
+        <div className={stale ? "opacity-40" : undefined}>
+          <WalletGauge v={v} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:flex" />
+          <WalletGauge v={v} segments={SEGMENTS_NARROW} className="mt-4 flex sm:hidden" />
+        </div>
         <div className="mt-2 flex items-baseline justify-between gap-x-6 text-[12px] leading-4 text-muted tabular-nums">
-          <p>$0</p>
-          <p>{usd2(v.budgetUsd)}</p>
+          {stale ? <p className="text-foreground">Shown for the last valid budget and hourly limit until the form is fixed.</p> : <p>$0</p>}
+          <p className={stale ? "opacity-40" : undefined}>{usd2(v.budgetUsd)}</p>
         </div>
         {v.phase === "searching" && <Allowance who={who} leftUsd={v.remainingUsd} budgetUsd={v.budgetUsd} share={null} note="Waiting for a firm quote" />}
         {ended && <EndLine e={ended} />}

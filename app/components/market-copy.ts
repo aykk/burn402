@@ -217,7 +217,7 @@ type EndRun = Pick<MarketRunView, "phase" | "refusal" | "error" | "leftOut" | "n
  * exact amount as paid or as sent and not confirmed (left out when `said` already names it), then
  * what is left to do. Null when nothing was signed.
  */
-function moneyNext(run: EndRun, said: string): string | null {
+function moneyNext(run: EndRun, said: string, listed: boolean): string | null {
   if (run.spent === "nothing") return null;
   const amount = run.payment ? usdExact(run.payment.atomic) : null;
   const parts: string[] = [];
@@ -226,18 +226,20 @@ function moneyNext(run: EndRun, said: string): string | null {
     parts.push(run.spent === "paid" ? `${sentence(`${what} was paid`)}` : amount ? `A payment of ${amount} was sent and is not confirmed.` : "A payment was sent and is not confirmed.");
   }
   if (run.machine && run.machine.status !== "destroyed") parts.push("The machine may still be running. Use Destroy now below.");
-  else if (!run.machine) parts.push("It stays listed under open purchases until you dismiss it.");
+  else if (!run.machine) parts.push(listed ? "It stays listed under open purchases until you dismiss it." : "It is no longer listed under open purchases.");
   return parts.join(" ");
 }
 
 /** How a finished run ended, in plain words, with what to do next. Null while it is going or after a clean release. */
-export function endState(run: EndRun): EndState | null {
+export function endState(run: EndRun, opts: { listed?: boolean } = {}): EndState | null {
+  // `listed`: the run's payment is still under open purchases (false once the owner dismissed it).
+  const listed = opts.listed ?? true;
   if (run.phase === "refused") {
     const code = run.refusal?.code ?? "";
     // After a signed payment no refusal may say nothing was spent.
     if (run.spent !== "nothing") {
       const said = sentence(run.refusal?.detail || "The run stopped");
-      return { title: "Stopped", sentence: said, next: moneyNext(run, said), tone: "bad" };
+      return { title: "Stopped", sentence: said, next: moneyNext(run, said, listed), tone: "bad" };
     }
     if (code === "NOTHING_FITS") {
       const summary = leftOutSummary(run.leftOut, run.need);
@@ -259,7 +261,7 @@ export function endState(run: EndRun): EndState | null {
   }
   if (run.phase === "failed") {
     const said = sentence(run.error?.trim() || "The run failed");
-    if (run.spent !== "nothing") return { title: "Run failed", sentence: said, next: moneyNext(run, said), tone: "bad" };
+    if (run.spent !== "nothing") return { title: "Run failed", sentence: said, next: moneyNext(run, said, listed), tone: "bad" };
     const next = /no wallet/i.test(said) ? "Set up the wallet for this market, then start again." : "Nothing was spent. Start a new run to try again.";
     return { title: "Run failed", sentence: said, next, tone: "bad" };
   }
