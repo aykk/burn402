@@ -94,12 +94,18 @@ export type FocusNext = "machine" | "heading" | null;
 export function MarketPanel({
   run,
   nowMs,
+  listed = true,
+  focusSignal = 0,
   walletReady,
   post,
   send,
 }: {
   run: MarketRunView | null;
   nowMs: number;
+  /** False once this run's payment was dismissed from open purchases. */
+  listed?: boolean;
+  /** Bumped when the owner starts a run: focus moves to the run's heading once it shows. */
+  focusSignal?: number;
   walletReady: { test: boolean; real: boolean };
   post: Post;
   send: Send;
@@ -113,6 +119,12 @@ export function MarketPanel({
   const setFocusNext = (next: FocusNext) => {
     focusNext.current = next;
   };
+  const focusedSignal = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal === focusedSignal.current || !headingRef.current) return;
+    focusedSignal.current = focusSignal;
+    headingRef.current.focus();
+  });
   useEffect(() => {
     if (!focusNext.current || !run) return;
     if (focusNext.current === "machine" && machineHeadingRef.current) {
@@ -136,7 +148,7 @@ export function MarketPanel({
     );
   }
 
-  const ended = endState(run);
+  const ended = endState(run, { listed });
   const stop = async () => {
     setStopError(null);
     setStopping(true);

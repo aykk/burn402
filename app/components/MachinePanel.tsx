@@ -81,12 +81,16 @@ export function MachinePanel({
   const inFlight = useRef(false);
   const m = run.machine;
   const p = run.payment;
+  // The run this page watched before its machine existed. Only then can a click meant for Pay land on Destroy
+  // now, so only then is it held off; on a page loaded with the machine already up it works at once.
+  const [watchedRun, setWatchedRun] = useState<string | null>(null);
+  if (!m && watchedRun !== run.id) setWatchedRun(run.id);
 
   // Gone only when the run says released; the seller-reported status alone does not end the machine block.
   const gone = run.phase === "released";
   const releasing = run.phase === "releasing";
   const canDestroy = m !== null && !gone && run.phase !== "paying";
-  const armed = armedRun === run.id;
+  const armed = armedRun === run.id || watchedRun !== run.id;
 
   useEffect(() => {
     if (!canDestroy || armed) return;
