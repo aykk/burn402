@@ -8,6 +8,8 @@ import type { Journal, JournalEntry } from "./journal";
 import { payerSignatureOf, type Payer, type PaymentRequired } from "./pay";
 import { QuoteError, type Instance, type ProvisionOutcome, type Quote, type SellerClient } from "./seller";
 import { newSshKey } from "./sshkey";
+import { buyableFrom, comparePrices, type Buyable, type PriceComparison } from "./prices/compare";
+import type { MarketPrices } from "./prices/fetch";
 import type { HourlyRules, Limits, MarketId, Need, Offer } from "./types";
 
 export type MarketPhase = "scanning" | "choosing" | "quoting" | "approval" | "paying" | "provisioning" | "ready" | "releasing" | "released" | "failed" | "refused";
@@ -95,6 +97,11 @@ export type MarketRunView = {
   releasedAt: number | null;
   error: string | null;
   refusal: { code: string; detail: string } | null;
+  /**
+   * Read-only prices from other providers beside what this run can buy. Null until the chooser
+   * has ranked plans and the prices have arrived, or when they could not be read. Never a quote.
+   */
+  prices: PriceComparison | null;
 };
 
 export type MarketRunDeps = {
@@ -123,6 +130,11 @@ export type MarketRunDeps = {
   findPayment?: (q: { payer: string; payTo: string; atomic: string; sinceMs: number; signature?: string; exclude?: string[] }) => Promise<{ tx: string } | null | "unavailable">;
   /** marks the overspend test's runs so they can never pass for the owner's */
   overspendTest?: boolean;
+  /**
+   * Live prices from providers the agent cannot buy from, shown beside the plan it can buy.
+   * Absent means no comparison. Started with the scan; never awaited, never chooses or pays.
+   */
+  marketPrices?: () => Promise<MarketPrices>;
 };
 
 const MAX_QUOTES = 3;
@@ -328,6 +340,11 @@ export class MarketRun {
   private error: string | null = null;
   private destroyError = false;
   private refusal: MarketRunView["refusal"] = null;
+  /** market prices once they arrive; the comparison is built only after the chooser ranked plans */
+  private marketData: MarketPrices | null = null;
+  private ranksDone = false;
+  private buyable: Buyable | null = null;
+  private prices: PriceComparison | null = null;
 
   private starting: Promise<void> | null = null;
   private ended = false;
@@ -438,6 +455,7 @@ export class MarketRun {
       releasedAt: this.releasedAt,
       error: this.error,
       refusal: this.refusal,
+      prices: this.prices,
     };
     return JSON.parse(JSON.stringify(v)) as MarketRunView;
   }
@@ -466,6 +484,7 @@ export class MarketRun {
     const offers: Offer[] = [];
     let rules: HourlyRules = DEFAULT_RULES;
     const label = this.d.seller.config.label;
+    this.startMarketPrices();
     try {
       const cat = await this.d.seller.catalog();
       offers.push(...cat.offers);
@@ -488,12 +507,46 @@ export class MarketRun {
     return this.choose(offers, rules);
   }
 
+  /** Starts the market price read beside the scan. Not awaited: it can never delay or fail the run. */
+  private startMarketPrices(): void {
+    const get = this.d.marketPrices;
+    if (!get) return;
+    void Promise.resolve()
+      .then(get)
+      .then(
+        (r) => {
+          if (!r || !Array.isArray(r.prices) || !Array.isArray(r.sources)) return;
+          this.marketData = r;
+          this.refreshPrices();
+        },
+        (e) => this.log(`market prices could not be read: ${msg(e)}`),
+      );
+  }
+
+  private setBuyable(b: Buyable | null): void {
+    this.ranksDone = true;
+    this.buyable = b;
+    this.refreshPrices();
+  }
+
+  private refreshPrices(): void {
+    if (!this.marketData || !this.ranksDone) return;
+    try {
+      const { prices, sources, asOf } = this.marketData;
+      this.prices = comparePrices({ prices, sources, asOf, need: this.d.need, buyable: this.buyable });
+    } catch (e) {
+      this.log(`market prices could not be compared: ${msg(e)}`);
+    }
+  }
+
   private async choose(offers: Offer[], rules: HourlyRules): Promise<void> {
     if (this.stopped) return;
     this.setPhase("choosing");
     const { ranked, rejected } = choose(offers, this.d.need, this.d.limits, rules);
     this.ranked = ranked;
     this.leftOut = summarize(rejected);
+    const top = ranked[0];
+    this.setBuyable(top ? buyableFrom({ seller: this.d.seller.config.label, plan: top.offer.id, totalUsd: top.estimateUsd, hours: top.hours, firm: false }) : null);
     this.rows = [...ranked.map((c) => this.candidateRow(c)), ...rejected.map((r) => this.leftOutRow(r))];
     if (ranked.length === 0) {
       const counts = this.leftOut.map((l) => `${l.count} ${leftOutWords(l.reason, this.d.need)}`).join(", ");
@@ -604,6 +657,7 @@ export class MarketRun {
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
     this.used.add(q);
     this.current = q;
+    this.setBuyable(buyableFrom({ seller: this.d.seller.config.label, plan: q.candidate.offer.id, totalUsd: q.amountUsd, hours: q.hours, firm: true }));
     this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
     this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });

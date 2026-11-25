@@ -1,10 +1,13 @@
 import { join } from "node:path";
 import { parseNuzaFeed } from "./catalog";
+import { choose } from "./choose";
 import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
 import { localHosts, localVerdict } from "./local";
 import { makePayer, type Payer } from "./pay";
+import { buyableFrom, comparePrices, type PriceComparison } from "./prices/compare";
+import { fetchMarketPrices, type MarketPrices } from "./prices/fetch";
 import type { MarketRunDeps } from "./run";
 import { SELLERS, SellerClient } from "./seller";
 import type { Limits, MarketId, Need, Offer } from "./types";
@@ -115,24 +118,31 @@ function needFieldError(key: keyof Need, v: unknown): string | null {
 
 const NEED_KEYS: (keyof Need)[] = ["kind", "vcpus", "ramGb", "vramGb", "hours", "regions", "allowSpot"];
 
-export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
-  if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
-  const { market, need, budgetUsd, rateUsdHr, askBeforePaying } = body;
-  if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
+/** The one rule for a need, shared by a run and the price comparison. Extra fields are dropped. */
+export function parseNeed(need: unknown): { ok: true; value: Need } | { ok: false; error: string } {
   if (!isObj(need)) return { ok: false, error: "say what machine you need" };
   for (const key of NEED_KEYS) {
     const error = needFieldError(key, need[key]);
     if (error) return { ok: false, error };
   }
+  const n = need as Need;
+  return { ok: true, value: { kind: n.kind, vcpus: n.vcpus, ramGb: n.ramGb, vramGb: n.vramGb, hours: n.hours, regions: [...n.regions], allowSpot: n.allowSpot } };
+}
+
+export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
+  if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
+  const { market, budgetUsd, rateUsdHr, askBeforePaying } = body;
+  if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
+  const need = parseNeed(body.need);
+  if (!need.ok) return need;
   if (!inRange(budgetUsd, 0.01, 20)) return { ok: false, error: "the budget must be from $0.01 to $20" };
   if (!inRange(rateUsdHr, 0.001, Math.min(budgetUsd, 20))) return { ok: false, error: "the hourly limit must be from $0.001 up to the budget" };
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
-  const n = need as Need;
   return {
     ok: true,
     value: {
       market,
-      need: { kind: n.kind, vcpus: n.vcpus, ramGb: n.ramGb, vramGb: n.vramGb, hours: n.hours, regions: [...n.regions], allowSpot: n.allowSpot },
+      need: need.value,
       limits: { budgetUsd, rateUsdHr },
       askBeforePaying,
     },
@@ -159,4 +169,43 @@ export function needFromModelReply(text: string): { need: Partial<Need>; note: s
   }
   const note = typeof raw.note === "string" ? raw.note.slice(0, 300) : "";
   return { need, note: note || (Object.keys(need).length ? "filled from your description; check the fields" : "nothing in the description matched the form") };
+}
+
+export type PricesInput = { market: MarketId; need: Need };
+
+/** Body of POST /api/market/prices: a market and a need, checked with the run's own rules. */
+export function parsePricesInput(body: unknown): { ok: true; value: PricesInput } | { ok: false; error: string } {
+  if (!isObj(body)) return { ok: false, error: "send the request as a JSON object" };
+  const { market } = body;
+  if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
+  const need = parseNeed(body.need);
+  if (!need.ok) return need;
+  return { ok: true, value: { market, need: need.value } };
+}
+
+/** Live prices from other providers for a run (cached for 60 s, never throws). */
+export function marketPricesFeed(): Promise<MarketPrices> {
+  return fetchMarketPrices();
+}
+
+/** Generous limits used only to find the cheapest plan that fits; nothing is quoted or paid with them. */
+const COMPARE_LIMITS = { budgetUsd: 20, rateUsdHr: 20 };
+
+/**
+ * The comparison without a run: market prices beside the cheapest plan the chosen market's seller
+ * lists for the need (the chooser's estimate, not a quote). Reads the seller's price list only;
+ * never quotes, never pays, never touches the session's run.
+ */
+export async function priceComparison(
+  input: PricesInput,
+  deps: { prices?: () => Promise<MarketPrices>; seller?: SellerClient } = {},
+): Promise<PriceComparison> {
+  const seller = deps.seller ?? sellerFor(input.market, null);
+  const [market, catalog] = await Promise.all([
+    (deps.prices ?? marketPricesFeed)().catch((): MarketPrices => ({ prices: [], sources: [], asOf: Date.now() })),
+    seller.catalog().catch(() => null),
+  ]);
+  const top = catalog ? choose(catalog.offers, input.need, COMPARE_LIMITS, catalog.rules).ranked[0] : undefined;
+  const buyable = top ? buyableFrom({ seller: seller.config.label, plan: top.offer.id, totalUsd: top.estimateUsd, hours: top.hours, firm: false }) : null;
+  return comparePrices({ prices: market.prices, sources: market.sources, asOf: market.asOf, need: input.need, buyable });
 }

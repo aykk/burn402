@@ -8,7 +8,7 @@ import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
 import { clusterForMarket, toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
-import { findPaymentFor, marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { runAgentProgram, runStressTester } from "./agent";
 import { currentModel } from "./models";
@@ -210,6 +210,7 @@ export class DemoSession {
       market: input.market,
       seller: sellerFor(input.market, payer),
       spotFeed: input.market === "real" ? () => nuzaFeed() : undefined,
+      marketPrices: marketPricesFeed,
       payer,
       journal: marketJournal(rt.config.root),
       need: input.need,
