@@ -5,6 +5,9 @@ import { mandateHash, signMandate, toCompact, type Mandate } from "../mandate";
 import { syncBehavior } from "../trust";
 import { publishVerdict } from "../verify";
 import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
+import { toTransactionRecord } from "../market/record";
+import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
+import { marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { runAgentProgram, runStressTester } from "./agent";
 import { currentModel } from "./models";
 import { loadActor, type Actor, type Runtime } from "./runtime";
@@ -19,6 +22,9 @@ export const HELPER_NEED = "at least 1 vCPU and 1 GB of RAM";
 export const ROOT = "You → your agent";
 export const TO_HELPER = "Your agent → helper";
 export const TO_TESTER = "Your agent → stress tester";
+
+/** A market run in one of these phases is over; a new run may start. */
+export const MARKET_ENDED: ReadonlySet<MarketPhase> = new Set(["released", "failed", "refused"]);
 
 export type Turn = { kind: "task" | "text" | "tool_call" | "tool_result"; content: string };
 export type TrustReading = { behavior: number; profile: string; riskFactors: string[] };
@@ -56,6 +62,8 @@ export class DemoSession {
   runs: TrainingRun[] = [];
   company: { name: string; ansName: string; keyFile: string } | null = null;
   stress: StressView = { status: "idle", job: null, target: null, attempts: [], verdict: null, verdictId: null, verdictUrl: null, trustBefore: null, trustAfter: null, error: null };
+  market: MarketRun | null = null;
+  private marketStarting: Promise<MarketRunView> | null = null;
   private direct: string[] = [];
 
   constructor(rt: Runtime) {
@@ -148,6 +156,128 @@ export class DemoSession {
     this.rt.pendingBoot.set(run.mandateJti!, (plan, subject) => run.bootScriptFor(plan, subject));
     void run.run().finally(() => this.rt.pendingBoot.delete(run.mandateJti!));
     return run.view();
+  }
+
+  /** One run at a time: while a run is not over, this returns it instead of starting another. */
+  startMarketRun(input: RunInput): Promise<MarketRunView> {
+    if (this.market && !MARKET_ENDED.has(this.market.view().phase)) return Promise.resolve(this.market.view());
+    this.marketStarting ??= this.newMarketRun(input).finally(() => {
+      this.marketStarting = null;
+    });
+    return this.marketStarting;
+  }
+
+  private async newMarketRun(input: RunInput): Promise<MarketRunView> {
+    const { rt } = this;
+    const id = `mkt_${Date.now().toString(36)}`;
+    const jti = `m_${id}`;
+    const agent = this.company ? { name: this.company.name, ansName: this.company.ansName } : { name: "your agent", ansName: rt.actors.ops.name };
+    const signer = rt.actors.company ?? rt.actors.ops;
+
+    // the run's limits, signed by the owner for the buying agent (the same root mandate TrainingRun makes)
+    const { human } = rt.actors;
+    const now = Math.floor(Date.now() / 1000);
+    const compact = await this.sign(
+      this.mandate({
+        jti,
+        iss: human.name,
+        sub: agent.ansName,
+        max_depth: 2,
+        limit_usd: input.limits.budgetUsd,
+        rate_usd_hr: input.limits.rateUsdHr,
+        nbf: now - 60,
+        exp: now + Math.ceil(input.need.hours * 3600) + 3600,
+      }),
+      human,
+    );
+    const [p, pl, sig] = compact.split(".");
+    const admitted = await rt.registry.admitRoot({ protected: p, payload: pl, signature: sig });
+    if (!admitted.ok) throw new Error("your budget was refused before the run started");
+    const mandate = admitted.mandate.hash;
+
+    const payer = await payerFor(input.market);
+    const run = new MarketRun({
+      id,
+      market: input.market,
+      seller: sellerFor(input.market, payer),
+      spotFeed: input.market === "real" ? () => nuzaFeed() : undefined,
+      payer,
+      journal: marketJournal(rt.config.root),
+      need: input.need,
+      limits: input.limits,
+      askBeforePaying: input.askBeforePaying,
+      agent,
+      keyDir: sshKeyDir(rt.config.root),
+      onRecord: (record) => {
+        void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti }), {
+          signer,
+          cluster: input.market === "real" ? "mainnet" : "devnet",
+        });
+      },
+      log: (line) => rt.log.push("info", "MARKET", line),
+    });
+    this.market = run;
+    rt.log.push(
+      "step",
+      "MARKET",
+      `${agent.name} starts a ${input.market === "real" ? "real (mainnet)" : "test (devnet)"} run ${id}: budget $${input.limits.budgetUsd}, up to $${input.limits.rateUsdHr}/hour, ${payer ? `paying from ${payer.address}` : "no wallet set up"}`,
+    );
+    void run.start();
+    return run.view();
+  }
+
+  approveMarket(runId: string, code: string): { ok: true; run: MarketRunView } | { ok: false; error: string } {
+    const run = this.market;
+    if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    const result = run.approve(code);
+    return result.ok ? { ok: true, run: run.view() } : result;
+  }
+
+  /** Destroys the current run's machine, cancels it at the approval stop, or destroys a machine recovered from the journal. */
+  async destroyMarket(input: { run?: string; cancel?: boolean; open?: { run: string } }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const current = this.market;
+    const target = input.open?.run ?? input.run;
+    if (!target) return { ok: false, error: "say which run" };
+    if (current && current.view().id === target) {
+      if (input.cancel) return current.cancel();
+      await current.destroy();
+      const v = current.view();
+      if (v.error && v.machine && v.machine.status !== "destroyed" && v.phase !== "paying" && v.phase !== "provisioning") return { ok: false, error: v.error };
+      return { ok: true };
+    }
+    if (input.cancel) return { ok: false, error: "only the current run can be cancelled" };
+    if (!input.open) return { ok: false, error: "that run is not the current run" };
+    return this.destroyOpen(target);
+  }
+
+  private async destroyOpen(runId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const journal = marketJournal(this.rt.config.root);
+    const open = journal.open().find((o) => o.run === runId);
+    if (!open) return { ok: false, error: "that purchase is not listed as open" };
+    if (!open.instance) return { ok: false, error: "no machine id is known for that purchase; list the wallet's machines with npm run market:sweep" };
+    try {
+      const seller = sellerFor(open.market, await payerFor(open.market));
+      await seller.destroy(open.instance);
+      const after = await seller.instance(open.instance);
+      if (after && after.status !== "destroyed") throw new Error(`the seller still lists ${open.instance} as ${after.status}`);
+    } catch (error) {
+      return { ok: false, error: `Destroy failed, the machine may still be running: ${(error as Error).message}` };
+    }
+    journal.append({
+      at: Date.now(),
+      run: open.run,
+      market: open.market,
+      seller: open.seller,
+      event: "released",
+      plan: open.plan,
+      region: open.region,
+      usd: open.usd,
+      tx: open.tx,
+      instance: open.instance,
+      detail: "destroyed from the open purchases list",
+    });
+    this.rt.log.push("info", "MARKET", `${open.instance} from run ${open.run} destroyed`);
+    return { ok: true };
   }
 
   jobFor(conv: string): TrainingRun | null {

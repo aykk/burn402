@@ -100,8 +100,13 @@ export type Runtime = {
   ledger: LedgerEntry[];
   transactions: StoredTransaction[];
   pendingBoot: Map<string, (plan: string, subject: string) => string>;
+  /** Stores a transaction record and anchors it on Arweave; anchoring failure is kept on the entry, never thrown. */
+  storeTransaction: (record: TransactionRecord, options?: StoreOptions) => Promise<void>;
   runId: string;
 };
+
+/** `signer` signs the record (default: the broker); `cluster` picks the Solscan link. */
+export type StoreOptions = { signer?: Actor; cluster?: "devnet" | "mainnet" };
 
 export type StoredTransaction = TransactionRecord & {
   mark: number | null;
@@ -184,7 +189,9 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
   const pendingBoot = new Map<string, (plan: string, subject: string) => string>();
   const box: { rt?: Runtime } = {};
 
-  const storeTransaction = async (record: TransactionRecord) => {
+  const storeTransaction = async (record: TransactionRecord, options: StoreOptions = {}) => {
+    const signer = options.signer ?? actors.broker;
+    const cluster = options.cluster ?? "devnet";
     const rtNow = box.rt;
     const network: Network = rtNow?.network ?? defaultNetwork();
     const entry: StoredTransaction = {
@@ -195,12 +202,12 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
       network,
       storage: "uploading",
       storageError: null,
-      solscan: record.tx ? `https://solscan.io/tx/${record.tx}?cluster=devnet` : null,
+      solscan: record.tx ? `https://solscan.io/tx/${record.tx}${cluster === "devnet" ? "?cluster=devnet" : ""}` : null,
     };
     transactions.push(entry);
     try {
       const gateway = new TurboGateway({ network, privateJwk: actors.broker.privateJwk });
-      const { id } = await anchorTransaction({ gateway, broker: actors.broker.name, brokerKey: actors.broker, record });
+      const { id } = await anchorTransaction({ gateway, broker: signer.name, brokerKey: signer, record });
       entry.arweaveId = id;
       entry.arweaveUrl = `${gateway.gatewayUrl}/${id}`;
       entry.storage = "stored";
@@ -300,7 +307,7 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
   const auditor: Auditor = { name: actors.auditor.name, key: actors.auditor, deps: publicAuditDeps(directory, [actors.broker.name]) };
 
   log.info(
-    `runtime up: ${Object.keys(entries).length} agents from the ANS transparency log, servers ${resource.kind === "vultr" ? "rented on Vultr" : "simulated (no VULTR_API_KEY)"}, x402 ${gate ? "on Solana devnet" : "disabled (set AGENT_SOLANA_SECRET_KEY and SOLANA_RECEIVER_ADDRESS)"}, Arweave testnet`,
+    `runtime up: ${Object.keys(entries).length} agents from the ANS transparency log, servers ${resource.kind === "vultr" ? "rented on Vultr" : "simulated (no VULTR_API_KEY)"}, x402 ${gate ? "on Solana devnet" : "disabled (set AGENT_SOLANA_SECRET_KEY and SOLANA_RECEIVER_ADDRESS)"}, Arweave ${network === "production" ? "mainnet" : "testnet"}`,
   );
 
   const rt: Runtime = {
@@ -326,6 +333,7 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
     ledger,
     transactions,
     pendingBoot,
+    storeTransaction,
     runId: Date.now().toString(36),
   };
   box.rt = rt;

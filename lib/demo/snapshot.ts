@@ -1,3 +1,6 @@
+import type { OpenPurchase } from "../market/journal";
+import type { MarketRunView } from "../market/run";
+import { marketJournal, walletReady } from "../market/session";
 import type { LogLine } from "./log";
 import { modelsView, type ModelsView } from "./models";
 import type { LedgerEntry, StoredTransaction } from "./runtime";
@@ -9,7 +12,10 @@ import type { WalletView } from "./wallets";
 export type BudgetView = { label: string; limit: number; rate: number; remaining: number; burn: number; effectiveExp: number; allocated: number };
 
 export type Snapshot = {
+  /** seconds */
   now: number;
+  /** the same instant in ms, for comparing with MarketRunView times (all ms) */
+  nowMs: number;
   busy: boolean;
   network: "testnet" | "production";
   disclosure: "desk-only" | "full";
@@ -28,6 +34,10 @@ export type Snapshot = {
   ledger: LedgerEntry[];
   stress: StressView;
   log: LogLine[];
+  market: MarketRunView | null;
+  /** journal purchases that were paid and not released, other than the current run */
+  openPurchases: OpenPurchase[];
+  walletReady: { test: boolean; real: boolean };
 };
 
 export function snapshot(s: DemoSession): Snapshot {
@@ -38,8 +48,19 @@ export function snapshot(s: DemoSession): Snapshot {
       const st = rt.broker.status(s.hashes[label]);
       return { label, limit: st.limit_usd, rate: st.rate_usd_hr, remaining: st.remaining_usd, burn: st.burn_usd_hr, effectiveExp: st.effective_exp, allocated: st.allocated_usd };
     });
+  const market = s.market?.view() ?? null;
+  let openPurchases: OpenPurchase[] = [];
+  try {
+    openPurchases = marketJournal(rt.config.root)
+      .open()
+      .filter((o) => o.run !== market?.id);
+  } catch {
+    // an unreadable journal must not break the page
+  }
+  const nowMs = Date.now();
   return {
-    now: Date.now() / 1000,
+    now: nowMs / 1000,
+    nowMs,
     busy: s.busy,
     network: rt.network,
     disclosure: rt.disclosure,
@@ -58,5 +79,8 @@ export function snapshot(s: DemoSession): Snapshot {
     ledger: rt.ledger,
     stress: s.stress,
     log: rt.log.lines,
+    market,
+    openPurchases,
+    walletReady: walletReady(),
   };
 }
