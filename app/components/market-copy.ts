@@ -33,8 +33,13 @@ export function shortAddress(a: string): string {
   return a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a;
 }
 
-export function solscanUrl(tx: string, market: MarketId): string {
-  return `https://solscan.io/tx/${encodeURIComponent(tx)}${market === "test" ? "?cluster=devnet" : ""}`;
+/** A Solana transaction signature: base58, about 64 to 90 characters. */
+const SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
+
+/** A Solscan link only for a tx id of the expected shape; anything else gets no link (null). */
+export function solscanUrl(tx: string | null | undefined, market: MarketId): string | null {
+  if (!tx || !SIGNATURE_RE.test(tx)) return null;
+  return `https://solscan.io/tx/${tx}${market === "test" ? "?cluster=devnet" : ""}`;
 }
 
 export const MARKET_NAME: Record<MarketId, string> = { test: "Test market (devnet)", real: "Real market (mainnet)" };

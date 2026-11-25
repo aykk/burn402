@@ -1,20 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { OpenPurchase } from "@/lib/market/journal";
-import { ActionError, type Post } from "./ActionError";
+import { ActionError } from "./ActionError";
 import { clock, usd4 } from "./format";
-import { MARKET_NAME } from "./market-copy";
+import type { Send } from "./MachinePanel";
+import { MARKET_NAME, sentence } from "./market-copy";
 import { BTN, MONO } from "./ui";
 
-function Purchase({ p, post }: { p: OpenPurchase; post: Post }) {
+function Purchase({ p, send }: { p: OpenPurchase; send: Send }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const inFlight = useRef(false);
   const destroy = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setError(null);
+    setNote(null);
     setBusy(true);
-    setError(await post("/api/market/destroy", { open: { run: p.run } }));
+    const r = await send("/api/market/destroy", { open: { run: p.run } });
+    setError(r.error);
+    setNote(r.message);
     setBusy(false);
+    inFlight.current = false;
   };
   return (
     <li className="space-y-2">
@@ -31,6 +40,7 @@ function Purchase({ p, post }: { p: OpenPurchase; post: Post }) {
         <button className={BTN} disabled={busy} onClick={() => void destroy()}>
           {busy ? "Destroying…" : "Destroy"}
         </button>
+        {note && !error && <span className="min-w-0 text-foreground">{sentence(note)}</span>}
       </div>
       <ActionError what="That machine wasn't destroyed" message={error} onDismiss={() => setError(null)} />
     </li>
@@ -41,7 +51,7 @@ function Purchase({ p, post }: { p: OpenPurchase; post: Post }) {
  * Purchases the journal says were paid and never released, from runs before this one (a restart, or a
  * reset on the real market). Each gets a Destroy button so no paid machine is left without a way to end it.
  */
-export function OpenPurchases({ purchases, post }: { purchases: OpenPurchase[]; post: Post }) {
+export function OpenPurchases({ purchases, send }: { purchases: OpenPurchase[]; send: Send }) {
   if (purchases.length === 0) return null;
   return (
     <section aria-labelledby="open-heading" className="space-y-2 border-l-2 border-bad pl-3">
@@ -50,7 +60,7 @@ export function OpenPurchases({ purchases, post }: { purchases: OpenPurchase[]; 
       </h2>
       <ul className="space-y-2">
         {purchases.map((p) => (
-          <Purchase key={p.run} p={p} post={post} />
+          <Purchase key={p.run} p={p} send={send} />
         ))}
       </ul>
     </section>

@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { MarketRunView } from "@/lib/market/run";
-import { ActionError, type Post } from "./ActionError";
+import { ActionError } from "./ActionError";
+
+/** A post that also returns the server's note on success, e.g. destroy answering "nothing is running". */
+export type Send = (path: string, body?: unknown) => Promise<{ error: string | null; message: string | null }>;
 import { Swatch } from "./BudgetMeter";
 import { clock, usd4 } from "./format";
 import { sentence, solscanUrl, timeLeft } from "./market-copy";
@@ -49,25 +52,36 @@ function SshLine({ command }: { command: string }) {
  * The rented machine: where it is, how to reach it, how long it has left, the payment, and Destroy now.
  * Shown from the moment a payment lands until the run is over.
  */
-export function MachinePanel({ run, nowMs, post }: { run: MarketRunView; nowMs: number; post: Post }) {
+export function MachinePanel({ run, nowMs, send }: { run: MarketRunView; nowMs: number; send: Send }) {
   const [destroying, setDestroying] = useState(false);
   const [destroyError, setDestroyError] = useState<string | null>(null);
+  const [destroyNote, setDestroyNote] = useState<string | null>(null);
+  // Blocks a second click in the same tick, before the busy state has rendered.
+  const inFlight = useRef(false);
   const m = run.machine;
   const p = run.payment;
   if (!m && !p) return null;
 
-  const gone = m?.status === "destroyed" || run.phase === "released";
+  // Gone only when the run says released; the seller-reported status alone does not end the machine block.
+  const gone = run.phase === "released";
   const releasing = run.phase === "releasing";
   const canDestroy = m !== null && !gone && run.phase !== "paying";
   // A failed destroy leaves the run on ready (or failed) with the reason in its error.
   const runError = !gone && run.error && /destroy/i.test(run.error) ? run.error : null;
 
   const destroy = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setDestroyError(null);
+    setDestroyNote(null);
     setDestroying(true);
-    setDestroyError(await post("/api/market/destroy", { run: run.id }));
+    const r = await send("/api/market/destroy", { run: run.id });
+    setDestroyError(r.error);
+    setDestroyNote(r.message);
     setDestroying(false);
+    inFlight.current = false;
   };
+  const solscan = p ? solscanUrl(p.tx, run.market) : null;
 
   const secondsLeft = m?.destroyAt != null ? Math.max(0, (m.destroyAt - nowMs) / 1000) : null;
 
@@ -133,8 +147,8 @@ export function MachinePanel({ run, nowMs, post }: { run: MarketRunView; nowMs: 
             <span className="inline-flex flex-wrap items-center gap-x-2">
               <Swatch />
               <span className="font-semibold tabular-nums">{usd4(p.usd)} USDC</span>
-              {p.tx ? (
-                <a href={solscanUrl(p.tx, run.market)} target="_blank" rel="noreferrer" className="text-[12px] leading-4">
+              {solscan ? (
+                <a href={solscan} target="_blank" rel="noreferrer" className="text-[12px] leading-4">
                   Payment on Solscan
                 </a>
               ) : (
@@ -156,6 +170,7 @@ export function MachinePanel({ run, nowMs, post }: { run: MarketRunView; nowMs: 
           <ActionError what="The machine wasn't destroyed" message={destroyError} onDismiss={() => setDestroyError(null)} />
         </div>
       )}
+      {destroyNote && !destroyError && <p className="text-foreground">{sentence(destroyNote)}</p>}
     </section>
   );
 }

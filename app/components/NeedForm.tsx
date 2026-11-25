@@ -363,23 +363,23 @@ export function NeedForm(props: {
 
       <div className="space-y-2">
         <span className="flex items-center gap-2">
-          <input id="spot-input" type="checkbox" aria-label="Interruptible is OK" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
+          <input id="spot-input" type="checkbox" aria-labelledby="spot-label" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
           <Help id="help-spot" text={RENT_HELP.spot} forId="spot-input">
-            Interruptible is OK
+            <span id="spot-label">Interruptible is OK</span>
           </Help>
         </span>
         <span className="flex items-center gap-2">
           <input
             id="ask-input"
             type="checkbox"
-            aria-label="Ask me before paying"
+            aria-labelledby="ask-label"
             aria-describedby="help-ask"
             checked={asks}
             disabled={disabled || market === "real"}
             onChange={(e) => setAsk(e.target.checked)}
           />
           <Help id="help-ask" text={RENT_HELP.ask} forId="ask-input">
-            Ask me before paying
+            <span id="ask-label">Ask me before paying</span>
           </Help>
         </span>
       </div>

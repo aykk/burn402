@@ -5,7 +5,7 @@ import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
 import { usd4 } from "./format";
-import { MachinePanel } from "./MachinePanel";
+import { MachinePanel, type Send } from "./MachinePanel";
 import { PHASE_HEADING, endState } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
@@ -86,7 +86,19 @@ const BEFORE_PAYING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "
  * The right column: the stage row, what the run is doing, the plans compared, the approval stop, the
  * machine, and how the run ended.
  */
-export function MarketPanel({ run, nowMs, walletReady, post }: { run: MarketRunView | null; nowMs: number; walletReady: { test: boolean; real: boolean }; post: Post }) {
+export function MarketPanel({
+  run,
+  nowMs,
+  walletReady,
+  post,
+  send,
+}: {
+  run: MarketRunView | null;
+  nowMs: number;
+  walletReady: { test: boolean; real: boolean };
+  post: Post;
+  send: Send;
+}) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
 
@@ -150,7 +162,7 @@ export function MarketPanel({ run, nowMs, walletReady, post }: { run: MarketRunV
         </p>
       )}
 
-      <MachinePanel run={run} nowMs={nowMs} post={post} />
+      <MachinePanel run={run} nowMs={nowMs} send={send} />
     </div>
   );
 }

@@ -21,6 +21,8 @@ export type MeterView = {
   secondsLeft: number | null;
   /** Seconds from payment to release, once released. */
   ranSeconds: number | null;
+  /** A failed run that paid and still knows of a machine: it may still be running (and can be destroyed). */
+  machineMayRun: boolean;
   error: string | null;
 };
 
@@ -64,6 +66,7 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
       usedUsd: null,
       secondsLeft: null,
       ranSeconds: null,
+      machineMayRun: false,
       error: null,
     };
   }
@@ -105,6 +108,8 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
     usedUsd,
     secondsLeft,
     ranSeconds,
+    // After a successful release the phase is released, so a failed run with a machine never had it destroyed.
+    machineMayRun: phase === "failed" && paid !== null && job.machine !== null,
     error: phase === "failed" ? job.error : null,
   };
 }
@@ -115,7 +120,8 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
  * so the gauge is empty. Null while there is no price to show.
  */
 export type JobGauge = {
-  state: "quoted" | "draining" | "shut";
+  /** held: a failed run whose paid machine may still be running; frozen, not shown as gone. */
+  state: "quoted" | "draining" | "held" | "shut";
   /** What a full gauge stands for: the paid amount, or the quote before payment. */
   scaleUsd: number;
   /** Paid time not yet used, in dollars. */
@@ -128,6 +134,10 @@ export type JobGauge = {
 
 export function jobGauge(v: MeterView): JobGauge | null {
   if (v.paidUsd !== null && v.paidUsd > 0) {
+    if (v.machineMayRun) {
+      const left = Math.min(v.paidUsd, Math.max(0, v.paidUsd - (v.usedUsd ?? 0)));
+      return { state: "held", scaleUsd: v.paidUsd, leftUsd: left, fill: left / v.paidUsd, secondsLeft: null };
+    }
     if (v.phase === "released" || v.phase === "failed" || v.phase === "refused") {
       return { state: "shut", scaleUsd: v.paidUsd, leftUsd: 0, fill: 0, secondsLeft: 0 };
     }

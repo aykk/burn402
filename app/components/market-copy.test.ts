@@ -64,8 +64,14 @@ describe("wording", () => {
     ]);
   });
   it("Solscan links carry the devnet cluster on the test market only", () => {
-    expect(solscanUrl("abc", "test")).toBe("https://solscan.io/tx/abc?cluster=devnet");
-    expect(solscanUrl("abc", "real")).toBe("https://solscan.io/tx/abc");
+    const sig = "DPJTAv4S3EufsQkAhXpPZwZB76NUUrkypxpJnMXcL6KUXXqBAs3Cm6m4SbqiC9DoPVe85EkG9PLjFZCyyVdhZj9";
+    expect(solscanUrl(sig, "test")).toBe(`https://solscan.io/tx/${sig}?cluster=devnet`);
+    expect(solscanUrl(sig, "real")).toBe(`https://solscan.io/tx/${sig}`);
+  });
+  it("only a base58 signature of the expected length becomes a link", () => {
+    for (const bad of ["..", "", "abcdefghijkmnopqrstu", `${"A".repeat(40)}/${"B".repeat(40)}`, `${"A".repeat(40)}?${"B".repeat(40)}`, `0x${"ab".repeat(32)}`]) {
+      expect(solscanUrl(bad, "test")).toBeNull();
+    }
   });
 });
 
