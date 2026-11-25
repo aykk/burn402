@@ -1,7 +1,7 @@
 import { usdExact } from "../../lib/market/money";
 import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
-import { duration, elapsedText } from "./format";
+import { REGIONS, duration, elapsedText } from "./format";
 
 /** Backend prose is lowercase fragments; shown as a sentence. */
 export const sentence = (t: string) => {
@@ -168,12 +168,18 @@ export function sourceLines(sources: MarketRunView["sources"], marketLabel?: str
 export function machineSize(r: Pick<OfferRow, "kind" | "vcpus" | "ramGb" | "vramGb" | "gpu">): string {
   const parts: string[] = [];
   if (r.kind === "gpu") {
-    if (r.gpu) parts.push(r.gpu);
+    if (r.gpu) parts.push(r.gpu.replace(/_/g, " "));
     if (r.vramGb > 0) parts.push(`${r.vramGb} GB GPU`);
   }
   if (r.vcpus > 0) parts.push(`${r.vcpus} vCPU${r.vcpus === 1 ? "" : "s"}`);
   if (r.ramGb > 0) parts.push(`${r.ramGb} GB`);
   return parts.join(", ") || "-";
+}
+
+/** A note that the agent used another region: known region codes named by city ("New Jersey (ewr)"), as a sentence. */
+export function fallbackLine(text: string): string {
+  const named = text.replace(/\b([a-z]{3})\b/g, (code: string) => (REGIONS[code] ? `${REGIONS[code]} (${code})` : code));
+  return sentence(named);
 }
 
 /** What the run is doing, as the right column's heading. */

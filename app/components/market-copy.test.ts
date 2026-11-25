@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
-import { approvalSentence, endState, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalSentence, endState, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -203,5 +203,15 @@ describe("solscanUrlForCluster (the records page)", () => {
     expect(solscanUrlForCluster(sig, null)).toBeNull();
     expect(solscanUrlForCluster(sig, undefined)).toBeNull();
     expect(solscanUrlForCluster("not a signature", "devnet")).toBeNull();
+  });
+});
+
+describe("NN6: plain names", () => {
+  it("GPU names never show an underscore", () => {
+    expect(machineSize({ kind: "gpu", vcpus: 6, ramGb: 16, vramGb: 16, gpu: "NVIDIA_A16" })).toBe("NVIDIA A16, 16 GB GPU, 6 vCPUs, 16 GB");
+  });
+  it("region codes in a fallback note are named by city", () => {
+    expect(fallbackLine("ewr was out of stock, so the agent used ord.")).toBe("New Jersey (ewr) was out of stock, so the agent used Chicago (ord).");
+    expect(fallbackLine("ams3 was out of stock, so the agent used fra1.")).toBe("Ams3 was out of stock, so the agent used fra1.");
   });
 });
