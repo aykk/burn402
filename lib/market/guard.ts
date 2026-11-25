@@ -1,4 +1,4 @@
-import { networkName, tokenName, usdExact, usdPlain } from "./money";
+import { networkName, tokenName, usdExact, usdMoreThan } from "./money";
 import type { MarketId } from "./types";
 
 /** `rpcUrl` is a public JSON-RPC endpoint, used only to read whether a payment landed. */
@@ -113,7 +113,10 @@ function check(input: GuardInput): GuardResult {
     return fail("OVER_QUOTE", `The seller changed the recipient of the payment from ${clip(payTo)} to ${clip(accepts.payTo)}.`);
   }
   const usd = atomicToUsd(accepts.amount);
-  if (usd > budgetLeftUsd) return fail("OVER_BUDGET", `${usdExact(accepts.amount)} is more than the ${usdPlain(budgetLeftUsd)} left in your budget.`);
-  if (usd / hours > rateUsdHr) return fail("OVER_RATE", `${usdPlain(usd / hours)} an hour is more than your hourly limit of ${usdPlain(rateUsdHr)}.`);
+  if (usd > budgetLeftUsd) return fail("OVER_BUDGET", `${usdExact(accepts.amount)} is more than the ${usdMoreThan(usd, budgetLeftUsd)[1]} left in your budget.`);
+  if (usd / hours > rateUsdHr) {
+    const [rate, limit] = usdMoreThan(usd / hours, rateUsdHr);
+    return fail("OVER_RATE", `${rate} an hour is more than your hourly limit of ${limit}.`);
+  }
   return { ok: true, usd };
 }

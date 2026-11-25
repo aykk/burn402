@@ -36,6 +36,21 @@ export function usdPlain(usd: number): string {
   return `${usd < 0 ? "-" : ""}$${group(whole)}.${frac.replace(/(\d{2}\d*?)0+$/, "$1")}`;
 }
 
+/**
+ * The two numbers of a "more than" sentence, `more` > `less`. When plain dollars would print the
+ * same number twice ("$0.009 is more than $0.009"), both show 6 decimals with the larger rounded
+ * up and the smaller rounded down, so the words always differ and stay true.
+ */
+export function usdMoreThan(more: number, less: number): [string, string] {
+  const a = usdPlain(more);
+  const b = usdPlain(less);
+  if (a !== b || !Number.isFinite(more) || !Number.isFinite(less) || more <= less || less < 0) return [a, b];
+  // micro-dollars, tolerant of float noise in the inputs (0.009 * 1e6 is not always exactly 9000)
+  const lo = Math.floor(less * 1e6 + 1e-6);
+  const hi = Math.max(Math.ceil(more * 1e6 - 1e-6), lo + 1);
+  return [usdPlain(hi / 1e6), usdPlain(lo / 1e6)];
+}
+
 const short = (s: string) => (s.length > 10 ? `${s.slice(0, 4)}…${s.slice(-4)}` : s);
 
 /** "USDC", "SOL", or "another token (Abcd…Wxyz)". */

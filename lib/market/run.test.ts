@@ -9,6 +9,7 @@ import { Journal } from "./journal";
 import { MarketRun, probeable, type MarketRunDeps, type PurchaseRecord } from "./run";
 import { SELLERS, SellerClient, type SellerConfig } from "./seller";
 import { newSshKey } from "./sshkey";
+import { base58Encode } from "./auth";
 import { FAKE_PAY_TO, FakeProcessor, fakePayer, inProcess } from "./testing";
 import { NO_FAULTS, TestSeller, type Faults } from "./testseller";
 import type { Limits, MarketId, Need, Offer } from "./types";
@@ -45,6 +46,7 @@ type Setup = {
   probePort?: (ip: string) => Promise<boolean>;
   activeAfterSec?: number;
   findPayment?: MarketRunDeps["findPayment"];
+  payer?: ReturnType<typeof fakePayer>;
 };
 
 function setup(o: Setup = {}) {
@@ -61,7 +63,7 @@ function setup(o: Setup = {}) {
   const config: SellerConfig = market === "real" ? { ...SELLERS.test, market: "real" } : SELLERS.test;
   const seller = new TestSeller({ processor, resourceUrl: `${config.baseUrl}/compute/provision`, now, activeAfterSec: o.activeAfterSec });
   seller.faults = { ...NO_FAULTS, ...o.faults };
-  const payer = fakePayer();
+  const payer = o.payer ?? fakePayer();
   payers.push(payer);
   const base = inProcess(seller);
   const client = new SellerClient(config, { fetch: o.wrap ? o.wrap(base) : base, signer: payer.signer, now, sleep });
@@ -445,7 +447,7 @@ describe("MarketRun never pays twice", () => {
     await run.done;
     const v = run.view();
     expect(v.phase).toBe("failed");
-    expect(v.error).toBe(UNCONFIRMED_UNCLEAR);
+    expect(v.error).toBe(UNCHECKED_UNCLEAR);
     expect(v.spent).toBe("maybe");
     expect(payer.calls).toBe(1);
     expect(processor.settled).toBe(0);
@@ -839,6 +841,10 @@ function chainScript(answers: ({ tx: string } | null | Error)[]) {
 const KEPT = "The seller took one payment of $0.010382 and did not deliver a machine.";
 const UNCONFIRMED_REJECTED =
   "A payment of $0.010382 was signed and sent. The seller says it was not accepted, and no transfer was found on chain yet. Check again later before paying anyone else.";
+const UNCHECKED_REJECTED =
+  "A payment of $0.010382 was signed and sent. The seller says it was not accepted. This app could not check the chain, so check the transaction yourself before paying anyone else.";
+const UNCHECKED_UNCLEAR =
+  "A payment of $0.010382 was signed and sent. The seller did not confirm it. This app could not check the chain, so check the transaction yourself before paying anyone else.";
 const UNCONFIRMED_UNCLEAR =
   "A payment of $0.010382 was signed and sent. The seller did not confirm it, and no transfer was found on chain yet. Check again later before paying anyone else.";
 
@@ -865,7 +871,8 @@ describe("MarketRun after a signed payment (B1)", () => {
     expect(v.payment).toEqual({ usd: CHEAPEST_USD, atomic: "10382", tx: "chainTx", at: expect.any(Number), payer: payer.address, status: "confirmed" });
     expect(v.paidAt).not.toBeNull();
     expect(chain.calls).toHaveLength(2);
-    expect(chain.calls[0]).toEqual({ payer: payer.address, payTo: FAKE_PAY_TO, atomic: "10382", sinceMs: expect.any(Number) });
+    // the fake payer's header carries no Solana transaction, so the run falls back to excluding other runs' transfers
+    expect(chain.calls[0]).toEqual({ payer: payer.address, payTo: FAKE_PAY_TO, atomic: "10382", sinceMs: expect.any(Number), exclude: [] });
     expect(chain.calls[0].sinceMs).toBeLessThanOrEqual(now());
     expect(slept.filter((ms) => ms === 5_000)).toHaveLength(1);
     expect(events()).toEqual(["intent", "unknown", "paid"]);
@@ -893,12 +900,47 @@ describe("MarketRun after a signed payment (B1)", () => {
     expect(payer.calls).toBe(1);
   });
 
-  it("without a chain check it says the same, never that nothing was spent", async () => {
+  it("with the payer's signature readable, the chain check looks for this run's own transaction", async () => {
+    const chain = chainScript([{ tx: "ownTx" }]);
+    const sig = Uint8Array.from({ length: 64 }, (_, i) => 255 - i);
+    const wire = Buffer.concat([Buffer.from([2]), Buffer.alloc(64), Buffer.from(sig), Buffer.from([0x80, 1, 0, 1])]).toString("base64");
+    const signing = fakePayer();
+    const plain = signing.payHeaders.bind(signing);
+    signing.payHeaders = async (required) => {
+      const h = await plain(required);
+      const decoded = JSON.parse(Buffer.from(h["PAYMENT-SIGNATURE"], "base64").toString("utf8"));
+      return { "PAYMENT-SIGNATURE": Buffer.from(JSON.stringify({ ...decoded, payload: { transaction: wire } })).toString("base64") };
+    };
+    const { run, journal, events } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn, payer: signing });
+    journal.append({ at: T0 - 5_000, run: "older-run", market: "test", seller: "test", event: "paid", plan: "vc2-1c-1gb", region: "ewr", usd: CHEAPEST_USD, tx: "olderTx" });
+    await run.start();
+    await run.done;
+    expect(run.view()).toMatchObject({ error: KEPT, spent: "paid", payment: { tx: "ownTx" } });
+    expect(chain.calls[0]).toEqual({ payer: signing.address, payTo: FAKE_PAY_TO, atomic: "10382", sinceMs: expect.any(Number), signature: base58Encode(sig) });
+    expect(events().slice(1)).toEqual(["intent", "unknown", "paid"]);
+    expect(signing.calls).toBe(1);
+  });
+
+  it("without the signature, the chain check skips transactions other runs already recorded", async () => {
+    const chain = chainScript([null]);
+    const { run, journal } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
+    journal.append({ at: T0 - 5_000, run: "older-run", market: "test", seller: "test", event: "paid", plan: "vc2-1c-1gb", region: "ewr", usd: CHEAPEST_USD, tx: "olderTx" });
+    journal.append({ at: T0 - 4_000, run: "older-run", market: "test", seller: "test", event: "active", plan: "vc2-1c-1gb", region: "ewr", usd: CHEAPEST_USD, tx: null });
+    await run.start();
+    await run.done;
+    expect(run.view().error).toBe(UNCONFIRMED_REJECTED);
+    for (const c of chain.calls) {
+      expect(c.signature).toBeUndefined();
+      expect(c.exclude).toEqual(["olderTx"]);
+    }
+  });
+
+  it("without a chain check it says the chain was not checked, never that nothing was spent", async () => {
     const { run, events, records } = setup({ faults: { settleThenReject: true } });
     await run.start();
     await run.done;
     const v = run.view();
-    expect(v.error).toBe(UNCONFIRMED_REJECTED);
+    expect(v.error).toBe(UNCHECKED_REJECTED);
     expect(v.spent).toBe("maybe");
     expect(events()).toEqual(["intent", "unknown"]);
     expect(records[0]).toMatchObject({ usd: CHEAPEST_USD, tx: null });
