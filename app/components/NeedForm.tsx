@@ -24,6 +24,9 @@ export type RunBody = {
   askBeforePaying: boolean;
 };
 
+/** What "Compare prices" sends: the same market and need a run would use. */
+export type CompareBody = { market: MarketId; need: Need };
+
 const START =
   "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-foreground bg-foreground px-5 text-[13.5px] leading-5 font-semibold text-surface enabled:hover:bg-[#2B3644] disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
 
@@ -135,10 +138,12 @@ export function NeedForm(props: {
   resetSignal: number;
   onDraftChange: (draft: NeedDraft) => void;
   onStart: (body: RunBody) => Promise<string | null>;
+  /** Reads market prices for this need; starts no run. Resolves to the failure, or null. */
+  onCompare: (body: CompareBody) => Promise<string | null>;
   /** Opens the model picker in the header, where the key is added. */
   onAddKey: () => void;
 }) {
-  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onAddKey } = props;
+  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, onAddKey } = props;
   const [market, setMarket] = useState<MarketId>("test");
   const [kind, setKind] = useState<"cpu" | "gpu">("cpu");
   const [vcpus, setVcpus] = useState(1);
@@ -156,6 +161,8 @@ export function NeedForm(props: {
   const [fillError, setFillError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
 
   // Page Reset clears what was typed into the description and any errors; the fields keep their values.
   const lastReset = useRef(resetSignal);
@@ -166,6 +173,7 @@ export function NeedForm(props: {
     setFillNote(null);
     setFillError(null);
     setStartError(null);
+    setCompareError(null);
   }, [resetSignal]);
 
   // The meter follows the budget and limit as they are typed, but only valid pairs: while a field holds a value the
@@ -229,10 +237,13 @@ export function NeedForm(props: {
 
   const blocked = running || starting || invalid !== null;
   const asks = market === "real" || ask;
+  const need: Need = { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: regionList, allowSpot };
 
-  // Shown beside the button. A missing wallet does not block the scan or the quotes, only the payment.
+  // Shown beside the buttons. A missing wallet does not block the scan, the quotes or a price comparison, only the payment.
   const reason: ReactNode = invalid ? (
     invalid
+  ) : running || starting ? (
+    "A run is in progress"
   ) : market === "real" && snap && !snap.walletReady.real ? (
     "Fund a mainnet wallet to pay on the real market."
   ) : market === "test" && snap && !snap.walletReady.test ? (
@@ -244,13 +255,20 @@ export function NeedForm(props: {
     setStarting(true);
     const failed = await onStart({
       market,
-      need: { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: regionList, allowSpot },
+      need,
       budgetUsd: budget,
       rateUsdHr: rate,
       askBeforePaying: asks,
     });
     setStartError(failed);
     setStarting(false);
+  };
+
+  const compare = async () => {
+    setCompareError(null);
+    setComparing(true);
+    setCompareError(await onCompare({ market, need }));
+    setComparing(false);
   };
 
   const fill = async () => {
@@ -394,18 +412,23 @@ export function NeedForm(props: {
       </div>
 
       <div className="space-y-2">
-        {/* Why Find and rent is off, or what will not work yet, sits right beside it. */}
+        {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right beside them. */}
         <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button className={START} disabled={blocked} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
             {starting ? "Starting…" : "Find and rent"}
           </button>
-          {reason && !running && (
+          {/* Reads prices only: starts no run and spends nothing. */}
+          <button id="compare-button" type="button" className={BTN} disabled={blocked || comparing} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void compare()}>
+            {comparing ? "Comparing…" : "Compare prices"}
+          </button>
+          {reason && (
             <span id="start-reason" className="min-w-0 text-foreground">
               {reason}
             </span>
           )}
         </span>
         <ActionError what="The run didn't start" message={startError} onDismiss={() => setStartError(null)} />
+        <ActionError what="Prices weren't read" message={compareError} onDismiss={() => setCompareError(null)} />
       </div>
     </div>
   );

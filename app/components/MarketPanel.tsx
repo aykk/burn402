@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
 import { MachinePanel, type Send } from "./MachinePanel";
+import { MarketPrices } from "./MarketPrices";
 import { PHASE_HEADING, endState, fallbackLine, sentence } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
@@ -81,6 +82,11 @@ function StageRow({ run }: { run: MarketRunView | null }) {
 
 const BEFORE_PAYING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "quoting"]);
 const ENDED = new Set<MarketRunView["phase"]>(["released", "failed", "refused"]);
+/**
+ * Phases in which market prices may still be on their way (the run fills them a moment after it has
+ * ranked plans) and the approval bar can sit under them: the block keeps its place and height here.
+ */
+const PRICES_PENDING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "quoting", "approval"]);
 /** Refusals whose detail only repeats the end sentence above it. */
 const SAID_ALREADY = new Set(["CANCELLED", "STOPPED", "NOTHING_FITS"]);
 
@@ -99,6 +105,7 @@ export function MarketPanel({
   walletReady,
   post,
   send,
+  idle,
 }: {
   run: MarketRunView | null;
   nowMs: number;
@@ -109,6 +116,8 @@ export function MarketPanel({
   walletReady: { test: boolean; real: boolean };
   post: Post;
   send: Send;
+  /** Shown in place of the intro while there is no run (the prices compared from the form). */
+  idle?: ReactNode;
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -137,6 +146,7 @@ export function MarketPanel({
   });
 
   if (!run) {
+    if (idle) return <div className="space-y-6">{idle}</div>;
     return (
       <div className="space-y-6">
         <StageRow run={null} />
@@ -204,6 +214,16 @@ export function MarketPanel({
       )}
 
       <OffersTable run={run} />
+
+      {/* The wider market before the approval stop. Before paying it holds its place and height while the prices
+          are read, so the Pay button below never moves when they land. */}
+      <MarketPrices
+        key={run.id}
+        prices={run.prices}
+        loading={run.prices === null && PRICES_PENDING.has(run.phase)}
+        heading="h3"
+        reserve={PRICES_PENDING.has(run.phase) ? run.need.kind : null}
+      />
 
       {run.phase === "approval" && <ApprovalBar run={run} walletReady={walletReady[run.market]} post={post} onFocusNext={setFocusNext} />}
 
