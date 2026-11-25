@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { TrainingRunView } from "@/lib/demo/train";
+import type { MarketRunView } from "@/lib/market/run";
+import type { MarketId } from "@/lib/market/types";
 import { duration, usd2, usd4 } from "./format";
+import { endState, hoursText, solscanUrl, timeLeft, type EndState } from "./market-copy";
 import { budgetShare, jobGauge, leadingZeros, meterView, shareText, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 /** 40 segments from 640px up, 24 below so each segment stays a readable width. */
@@ -13,31 +15,39 @@ const CONDENSED = { fontStretch: "68%", fontVariationSettings: '"wdth" 68' } as 
 
 type Readout = { label: string; value: string; quiet?: boolean };
 
-/** Before there is a price the meter is the allowance being typed (or the one a failed run kept). */
+/** Before there is a price the meter is the allowance being typed (or the one an unpaid run kept). */
 function walletReadout(v: MeterView): Readout {
   switch (v.phase) {
-    case "negotiating":
-      return { label: "Your agent is getting quotes", value: `limit ${usd2(v.rateUsdHr)} an hour`, quiet: true };
-    case "done":
+    case "searching":
+      return { label: "Your agent is comparing prices", value: `limit ${usd2(v.rateUsdHr)} an hour`, quiet: true };
     case "failed":
+    case "refused":
+    case "released":
       return { label: "Nothing spent", value: "$0.00" };
     default:
       return { label: "Limit", value: `${usd2(v.rateUsdHr)} an hour`, quiet: true };
   }
 }
 
-/** Zoomed to the job, the readout is server time: what the quote buys, what is left, how long it ran. */
+/** Zoomed to the rental, the readout is machine time: what the quote buys, what is left, how long it ran. */
 function jobReadout(v: MeterView, j: JobGauge): Readout {
-  if (j.state === "quoted") {
-    return j.secondsLeft !== null ? { label: "Buys server time", value: duration(j.secondsLeft) } : { label: "Quoted", value: usd4(j.scaleUsd) };
-  }
+  if (j.state === "quoted") return { label: "Buys machine time", value: v.quotedHours !== null ? hoursText(v.quotedHours) : usd4(j.scaleUsd) };
   if (j.state === "draining") {
-    // The run outlasted what it paid for (it is still wrapping up); say so rather than count past zero.
-    if (j.leftUsd <= 0) return { label: "Paid server time", value: "used up", quiet: true };
-    return j.secondsLeft !== null ? { label: "Shuts down in", value: duration(j.secondsLeft) } : { label: "Paid", value: usd4(j.scaleUsd) };
+    if (j.leftUsd <= 0) return { label: "Paid time", value: "used up", quiet: true };
+    return j.secondsLeft !== null ? { label: "Destroyed in", value: timeLeft(j.secondsLeft) } : { label: "Paid", value: usd4(j.scaleUsd) };
   }
-  if (v.ranSeconds !== null) return { label: "Server ran for", value: duration(v.ranSeconds) };
+  if (v.ranSeconds !== null) return { label: "Machine ran for", value: v.ranSeconds >= 3600 ? timeLeft(v.ranSeconds) : duration(v.ranSeconds) };
   return { label: "Spent", value: usd4(j.scaleUsd) };
+}
+
+/** How the run ended, frozen under the gauge: what happened, then what to do. */
+function EndLine({ e }: { e: EndState }) {
+  return (
+    <div className="mt-4 space-y-0.5">
+      <p className={`max-w-[72ch] ${e.tone === "bad" ? "text-bad" : "font-medium text-foreground"}`}>{e.sentence}</p>
+      {e.next && <p className="max-w-[72ch] text-muted">{e.next}</p>}
+    </div>
+  );
 }
 
 /** The 8px amber legend square that ties a figure to the amber slot in the gauge. */
@@ -78,7 +88,7 @@ function JobGaugeBar({ j, segments, className }: { j: JobGauge; segments: number
       ? "motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   return (
-    <div role="img" aria-label={`Server time left ${usd4(j.leftUsd)} of ${usd4(j.scaleUsd)}`} className={`relative h-[14px] ${className}`}>
+    <div role="img" aria-label={j.state === "quoted" ? `This rental will use ${usd4(j.scaleUsd)}` : `Machine time left ${usd4(j.leftUsd)} of ${usd4(j.scaleUsd)}`} className={`relative h-[14px] ${className}`}>
       <div className="flex h-full gap-[3px]">
         <Segments n={segments} className="bg-segment" />
       </div>
@@ -98,11 +108,10 @@ function JobGaugeBar({ j, segments, className }: { j: JobGauge; segments: number
  * left (a clip-path wipe, like a receipt printing); reloading on a paid job shows it still. Reduced motion
  * gets a short fade instead.
  */
-function PaymentLine({ usd, solscan, fresh }: { usd: number; solscan: string | null; fresh: boolean }) {
-  const chain = solscan && /cluster=devnet/.test(solscan) ? "Solana devnet" : "Solana";
+function PaymentLine({ usd, solscan, market, fresh }: { usd: number; solscan: string | null; market: MarketId; fresh: boolean }) {
   return (
     <p className={`text-[12px] leading-4 text-muted tabular-nums ${fresh ? "settle-in" : ""}`}>
-      Paid <span className="font-medium text-foreground">{usd4(usd)}</span> over x402, settled on {chain}.
+      Paid <span className="font-medium text-foreground">{usd4(usd)}</span> over x402, settled on Solana {market === "real" ? "mainnet" : "devnet"}.
       {solscan && (
         <>
           {" "}
@@ -139,7 +148,7 @@ function Allowance({ who, leftUsd, budgetUsd, share, note }: { who: string; left
     <div className="mt-5">
       <div
         role="img"
-        aria-label={`${who} has ${usd4(leftUsd)} of ${usd2(budgetUsd)} left${share !== null ? `; this job is ${shareText(share)} of it` : ""}`}
+        aria-label={`${who} has ${usd4(leftUsd)} of ${usd2(budgetUsd)} left${share !== null ? `; this rental is ${shareText(share)} of it` : ""}`}
         className="flex h-[3px] w-full overflow-hidden rounded-[1px] bg-segment"
       >
         <span className="h-full bg-foreground" style={{ width: `${budgetShare(leftUsd, budgetUsd) * 100}%` }} />
@@ -159,23 +168,25 @@ export function BudgetMeter(props: {
   agentName: string | null;
   formBudgetUsd: number;
   formRateUsdHr: number;
-  job: (MeterJob & Partial<Pick<TrainingRunView, "id" | "solscan">>) | null;
-  nowSec: number;
+  job: (MeterJob & Pick<MarketRunView, "id" | "market" | "leftOut">) | null;
+  /** ms, the server's clock */
+  nowMs: number;
 }) {
-  // Remember a job this meter saw before it was paid, so the payment line animates only when it settles here.
+  // Remember a run this meter saw before it was paid, so the payment line animates only when it settles here.
   const [unpaidId, setUnpaidId] = useState<string | null>(null);
   const jobId = props.job?.id ?? null;
-  if (jobId !== null && props.job?.paidUsd === null && unpaidId !== jobId) setUnpaidId(jobId);
+  if (jobId !== null && props.job?.payment === null && unpaidId !== jobId) setUnpaidId(jobId);
   const freshPayment = jobId !== null && unpaidId === jobId;
 
   const v = meterView({
     formBudgetUsd: props.formBudgetUsd,
     formRateUsdHr: props.formRateUsdHr,
     job: props.job,
-    nowSec: props.nowSec,
+    nowMs: props.nowMs,
   });
   const j = jobGauge(v);
   const who = props.agentName?.trim() || "Your agent";
+  const ended = props.job ? endState(props.job) : null;
 
   if (!j) {
     const r = walletReadout(v);
@@ -200,33 +211,36 @@ export function BudgetMeter(props: {
         <WalletGauge v={v} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:flex" />
         <WalletGauge v={v} segments={SEGMENTS_NARROW} className="mt-4 flex sm:hidden" />
         <div className="mt-2 flex items-baseline justify-between gap-x-6 text-[12px] leading-4 text-muted tabular-nums">
-          <p>$0, server shuts down</p>
+          <p>$0</p>
           <p>{usd2(v.budgetUsd)}</p>
         </div>
-        {(v.phase === "negotiating" || v.phase === "running") && <Allowance who={who} leftUsd={v.remainingUsd} budgetUsd={v.budgetUsd} share={null} note={v.phase === "negotiating" ? "Waiting for the broker's quote" : "No price reported yet"} />}
+        {v.phase === "searching" && <Allowance who={who} leftUsd={v.remainingUsd} budgetUsd={v.budgetUsd} share={null} note="Waiting for a firm quote" />}
+        {ended && <EndLine e={ended} />}
       </section>
     );
   }
 
-  // Zoomed to the job. The big figure is server money left; its leading zeros are muted so the digits
-  // that move are the ones in ink. The allowance stays underneath at its real proportion.
+  // Zoomed to the rental. The big figure is paid machine time left; its leading zeros are muted so the
+  // digits that move are the ones in ink. The allowance stays underneath at its real proportion.
   const r = jobReadout(v, j);
   const amount = usd4(j.leftUsd);
   const [lead, digits] = leadingZeros(amount);
   const shut = j.state === "shut";
-  // Before payment the quote is carved out of the allowance; after it, the payment already left it.
   const jobUsd = j.scaleUsd;
+  // Before payment the quote is carved out of the allowance; after it, the payment already left it.
   const allowanceLeft = j.state === "quoted" ? v.budgetUsd - jobUsd : v.remainingUsd;
   const share = budgetShare(jobUsd, v.budgetUsd);
+  const solscan = props.job?.payment?.tx ? solscanUrl(props.job.payment.tx, props.job.market) : null;
+  const used = v.usedUsd ?? 0;
 
   return (
     <section aria-label="Budget meter" className="rounded-[6px] bg-surface px-5 py-5 sm:px-7 sm:py-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
           {!shut && <Swatch />}
-          {j.state === "quoted" ? "This job will use" : "Server time left"}
+          {j.state === "quoted" ? "This rental will use" : "Machine time left"}
         </p>
-        {v.paidUsd !== null && v.paidUsd > 0 && <PaymentLine usd={v.paidUsd} solscan={props.job?.solscan ?? null} fresh={freshPayment} />}
+        {v.paidUsd !== null && v.paidUsd > 0 && props.job && <PaymentLine usd={v.paidUsd} solscan={solscan} market={props.job.market} fresh={freshPayment} />}
       </div>
       <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
         <p className="flex flex-wrap items-baseline gap-x-3">
@@ -248,18 +262,27 @@ export function BudgetMeter(props: {
       <JobGaugeBar j={j} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:block" />
       <JobGaugeBar j={j} segments={SEGMENTS_NARROW} className="mt-4 block sm:hidden" />
 
-      <div className="mt-2 flex items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
-        {/* The shutdown lands here, where the drain ends: the label turns to ink once the amber is gone. */}
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
+        {/* The release lands here, where the drain ends: the label turns to ink once the amber is gone. */}
         <p
           className={`motion-safe:transition-colors motion-safe:duration-300 ${shut ? "font-medium text-foreground motion-safe:delay-500" : "text-muted"}`}
         >
-          {shut ? "$0, server shut down" : "$0, server shuts down"}
+          {j.state === "quoted"
+            ? "$0"
+            : shut
+              ? v.phase === "released"
+                ? `Spent ${usd4(jobUsd)}, machine destroyed`
+                : `Spent ${usd4(jobUsd)}`
+              : "$0, machine is destroyed"}
         </p>
-        <p className="text-muted">{usd4(jobUsd)}</p>
+        <p className="text-muted">
+          {j.state === "quoted" ? `This rental: ${usd4(jobUsd)}` : j.state === "draining" ? `Time used ${usd4(used)} of ${usd4(jobUsd)}` : usd4(jobUsd)}
+        </p>
       </div>
 
-      {/* The allowance at its honest proportion: the job's slice is a hairline, never a whole segment. */}
-      <Allowance who={who} leftUsd={allowanceLeft} budgetUsd={v.budgetUsd} share={share} note={`This job is ${shareText(share)} of the budget`} />
+      {/* The allowance at its honest proportion: the rental's slice is a hairline, never a whole segment. */}
+      <Allowance who={who} leftUsd={allowanceLeft} budgetUsd={v.budgetUsd} share={share} note={`This rental is ${shareText(share)} of the budget`} />
+      {ended && <EndLine e={ended} />}
     </section>
   );
 }
