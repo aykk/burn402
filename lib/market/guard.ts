@@ -74,6 +74,10 @@ function tokenFor(asset: string, market: MarketId): string {
 const fail = (code: GuardCode, detail: string): GuardResult => ({ ok: false, code, detail });
 
 /** Last check before a payment is signed. Never throws: anything unexpected is MALFORMED. */
+/** The most this app will sign in a single payment, whatever the budget says. The payer's own cap (pay.ts) uses the same number. */
+export const MAX_PAYMENT_USD = 5;
+const MAX_PAYMENT_ATOMIC = BigInt(MAX_PAYMENT_USD) * BigInt(1_000_000);
+
 export function checkPayment(input: GuardInput): GuardResult {
   try {
     return check(input);
@@ -115,6 +119,9 @@ function check(input: GuardInput): GuardResult {
   }
   if (payTo !== undefined && payTo !== accepts.payTo) {
     return fail("OVER_QUOTE", `The seller changed the recipient of the payment from ${clip(payTo)} to ${clip(accepts.payTo)}.`);
+  }
+  if (amount > MAX_PAYMENT_ATOMIC) {
+    return fail("OVER_BUDGET", `${usdExact(accepts.amount)} is more than the $${MAX_PAYMENT_USD.toFixed(2)} this app will pay in one payment.`);
   }
   const usd = atomicToUsd(accepts.amount);
   if (usd > budgetLeftUsd) return fail("OVER_BUDGET", `${usdExact(accepts.amount)} is more than the ${usdMoreThan(usd, budgetLeftUsd)[1]} left in your budget.`);

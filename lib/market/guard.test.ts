@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SOLANA_DEVNET } from "../x402";
-import { atomicToUsd, checkPayment, NETWORKS, usdToAtomic, type Accepts } from "./guard";
+import { atomicToUsd, checkPayment, MAX_PAYMENT_USD, NETWORKS, usdToAtomic, type Accepts } from "./guard";
 
 const real: Accepts = {
   scheme: "exact",
@@ -30,6 +30,17 @@ describe("checkPayment", () => {
   it("refuses a higher amount", () => expect(acc({ amount: "10001" })).toBe("OVER_QUOTE"));
   it("refuses over budget", () => expect(code({ budgetLeftUsd: 0.005 })).toBe("OVER_BUDGET"));
   it("refuses over rate", () => expect(code({ rateUsdHr: 0.009 })).toBe("OVER_RATE"));
+  it("pays at most $5.00 in one payment, whatever the budget", () => {
+    expect(MAX_PAYMENT_USD).toBe(5);
+    const big = { budgetLeftUsd: 20, rateUsdHr: 20 };
+    expect(checkPayment({ ...base, ...big, accepts: { ...real, amount: "5000000" }, approvedAtomic: BigInt("5000000") })).toEqual({ ok: true, usd: 5 });
+    expect(checkPayment({ ...base, ...big, accepts: { ...real, amount: "1490000" }, approvedAtomic: BigInt("1490000") })).toEqual({ ok: true, usd: 1.49 });
+    expect(checkPayment({ ...base, ...big, accepts: { ...real, amount: "5000001" }, approvedAtomic: BigInt("5000001") })).toEqual({
+      ok: false,
+      code: "OVER_BUDGET",
+      detail: "$5.000001 is more than the $5.00 this app will pay in one payment.",
+    });
+  });
   it("refuses a requirement that makes the paying wallet pay the network fee", () => {
     const r = checkPayment({ ...base, accepts: { ...real, extra: { feePayer: "Payer11111111111111111111111111111111111111" } }, payer: "Payer11111111111111111111111111111111111111" });
     expect(r).toEqual({ ok: false, code: "WRONG_NETWORK", detail: "The seller asked your wallet to pay the network fee." });
