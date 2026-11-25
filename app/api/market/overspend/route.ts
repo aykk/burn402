@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/demo/session";
 import { OVERSPEND_LIMITS, runOverspendTest } from "@/lib/market/overspend";
 import { takeOverspendLock } from "@/lib/market/overspend-lock";
-import { checkRequest, marketJournal, payerFor, sellerFor, sshKeyDir } from "@/lib/market/session";
+import { checkRequest, findPaymentFor, marketJournal, payerFor, sellerFor, sshKeyDir } from "@/lib/market/session";
 import { getTestSeller } from "@/lib/market/testseller";
 
 /**
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       journal: marketJournal(root),
       keyDir: sshKeyDir(root),
       limits: OVERSPEND_LIMITS,
+      findPayment: findPaymentFor("test"),
     });
     return Response.json(result);
   } catch (error) {

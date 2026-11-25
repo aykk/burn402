@@ -5,6 +5,7 @@ import { authHeaders } from "./auth";
 import { parsePlansFeed } from "./catalog";
 import type { Candidate } from "./choose";
 import { atomicToUsd, type Accepts } from "./guard";
+import { sellerReason, usdPlain } from "./money";
 import { readPaymentRequired, type PaymentRequired } from "./pay";
 import type { HourlyRules, MarketId, Offer } from "./types";
 
@@ -68,7 +69,12 @@ function parseJson(text: string): unknown {
   }
 }
 
-const snippet = (text: string) => text.slice(0, 300);
+/** The seller's short reason and a full stop, never its raw answer. */
+const said = (text: string) => {
+  const r = sellerReason(text);
+  return /[.!?…]$/.test(r) ? r : `${r}.`;
+};
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/[.\s]+$/, "");
 
 function osIdFor(provider: string): number | string | undefined {
   if (provider === "vultr") return 2284;
@@ -148,7 +154,7 @@ export class SellerClient {
   async catalog(): Promise<{ offers: Offer[]; rules: HourlyRules; skipped: number }> {
     const response = await this.fetch(this.url("/compute/plans"), { method: "GET", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(this.timeouts.read) });
     const text = await response.text();
-    if (!response.ok) throw new Error(`${this.config.label} plans feed answered ${response.status}: ${snippet(text)}`);
+    if (!response.ok) throw new Error(`${this.config.label}'s price list could not be read (error ${response.status}): ${said(text)}`);
     return parsePlansFeed(parseJson(text), this.config.id);
   }
 
@@ -177,7 +183,7 @@ export class SellerClient {
       response = await this.postProvision(body);
       text = await response.text();
     } catch (e) {
-      throw new QuoteError("UNREACHABLE", `${this.config.label} could not be reached: ${e instanceof Error ? e.message : String(e)}`);
+      throw new QuoteError("UNREACHABLE", `${this.config.label} could not be reached: ${errText(e)}.`);
     }
 
     if (response.status !== 402) {
@@ -186,7 +192,7 @@ export class SellerClient {
     }
     const required = readPaymentRequired(response, text);
     const req = required ? solanaRequirement(required) : null;
-    if (!req) throw new QuoteError("NO_402", `${this.config.label} answered 402 without a readable Solana payment requirement`);
+    if (!req) throw new QuoteError("NO_402", `${this.config.label} asked for payment but did not say how to pay on Solana.`);
     const accepts = toAccepts(req);
     return {
       seller: this.config.id,
@@ -204,11 +210,15 @@ export class SellerClient {
   /** Why an unpaid request did not return a 402. */
   private refusal(status: number, text: string): { code: "PRICE_CAP" | "OUT_OF_STOCK" | "SELLER_ERROR"; detail: string } {
     const body = parseJson(text);
-    if (status === 409 && isObj(body) && "quote_usd" in body) {
-      return { code: "PRICE_CAP", detail: `${this.config.label} quoted $${str(body.quote_usd)}, above the max total sent` };
-    }
-    if (status >= 400 && STOCK_RE.test(text)) return { code: "OUT_OF_STOCK", detail: `${this.config.label} answered ${status}: ${snippet(text)}` };
-    return { code: "SELLER_ERROR", detail: `${this.config.label} answered ${status}: ${snippet(text)}` };
+    if (status === 409 && isObj(body) && "quote_usd" in body) return { code: "PRICE_CAP", detail: this.priceCap(body.quote_usd, "asks") };
+    if (status >= 400 && STOCK_RE.test(text)) return { code: "OUT_OF_STOCK", detail: `${this.config.label} could not sell it (error ${status}): ${said(text)}` };
+    return { code: "SELLER_ERROR", detail: `${this.config.label} refused the request (error ${status}): ${said(text)}` };
+  }
+
+  private priceCap(quoteUsd: unknown, verb: "asks" | "now asks"): string {
+    const n = Number(str(quoteUsd));
+    const price = str(quoteUsd) !== "" && Number.isFinite(n) ? usdPlain(n) : "a price";
+    return `${this.config.label} ${verb} ${price}, more than your budget allows.`;
   }
 
   /**
@@ -223,13 +233,13 @@ export class SellerClient {
       fresh = await this.postProvision(quote.body);
       freshText = await fresh.text();
     } catch (e) {
-      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} could not be reached: ${errText(e)}.` };
     }
     if (fresh.status !== 402) return { kind: "not_charged", ...this.refusal(fresh.status, freshText) };
     const required = readPaymentRequired(fresh, freshText);
     const req = required ? solanaRequirement(required) : null;
     if (!required || !req) {
-      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} answered 402 without a readable Solana payment requirement` };
+      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} asked for payment but did not say how to pay on Solana.` };
     }
 
     // 2. the only call to pay; it signs for exactly the requirement the guard sees
@@ -241,7 +251,7 @@ export class SellerClient {
       }
       headers = result as Record<string, string>;
     } catch (e) {
-      return { kind: "not_charged", code: "SELLER_ERROR", detail: `The payment could not be signed: ${e instanceof Error ? e.message : String(e)}` };
+      return { kind: "not_charged", code: "SELLER_ERROR", detail: `The payment could not be signed: ${errText(e)}.` };
     }
 
     // 3. paid request, resent unchanged on 5xx or network failure
@@ -254,16 +264,16 @@ export class SellerClient {
         response = await this.postProvision(quote.body, headers, true);
         text = await response.text();
       } catch (e) {
-        last = `the paid request failed: ${e instanceof Error ? e.message : String(e)}`;
+        last = `no answer: ${errText(e)}`;
         continue;
       }
       if (response.status >= 500) {
-        last = `the paid request answered ${response.status}: ${snippet(text)}`;
+        last = `error ${response.status}, ${sellerReason(text)}`;
         continue;
       }
       return this.paidOutcome(response, text);
     }
-    return { kind: "unknown", detail: `Payment outcome unknown after ${PAID_ATTEMPTS} attempts; ${last}` };
+    return { kind: "unknown", detail: `${this.config.label} did not give a clear answer to the paid request after ${PAID_ATTEMPTS} tries (last: ${last}).` };
   }
 
   private paidOutcome(response: Response, text: string): ProvisionOutcome {
@@ -272,18 +282,18 @@ export class SellerClient {
     const obj = isObj(body) ? body : {};
     if (status === 200 || status === 201 || status === 202) {
       const instance = toInstance(obj.order);
-      if (!instance) return { kind: "unknown", detail: `${this.config.label} answered ${status} without an order: ${snippet(text)}` };
+      if (!instance) return { kind: "unknown", detail: `${this.config.label} accepted the paid request but sent back no machine order.` };
       const active = status !== 202 && instance.status === "active" && instance.ip !== null;
       return { kind: active ? "active" : "pending", instance, tx: txFrom(obj, response) };
     }
     if (status === 409 && text.includes("settlement_pending")) {
-      return { kind: "unknown", detail: `${this.config.label} says settlement is pending; do not pay again` };
+      return { kind: "unknown", detail: `${this.config.label} says the payment is still settling; the agent will not pay again.` };
     }
     if (status === 409 && "quote_usd" in obj) {
-      return { kind: "not_charged", code: "PRICE_CAP", detail: `${this.config.label} quoted $${str(obj.quote_usd)}, above the max total sent` };
+      return { kind: "not_charged", code: "PRICE_CAP", detail: this.priceCap(obj.quote_usd, "now asks") };
     }
-    if (status === 402) return { kind: "not_charged", code: "PAYMENT_REJECTED", detail: `${this.config.label} rejected the payment: ${snippet(text)}` };
-    return { kind: "unknown", detail: `${this.config.label} answered ${status} to the paid request: ${snippet(text)}` };
+    if (status === 402) return { kind: "not_charged", code: "PAYMENT_REJECTED", detail: `${this.config.label} said the payment was not accepted: ${said(text)}` };
+    return { kind: "unknown", detail: `${this.config.label} gave an unexpected answer to the paid request (error ${status}): ${said(text)}` };
   }
 
   private async signed(method: "GET" | "DELETE", path: string): Promise<{ response: Response; text: string }> {
@@ -297,7 +307,7 @@ export class SellerClient {
   async instance(id: string): Promise<Instance | null> {
     const { response, text } = await this.signed("GET", `/compute/instances/${encodeURIComponent(id)}`);
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`${this.config.label} answered ${response.status} for instance ${id}: ${snippet(text)}`);
+    if (!response.ok) throw new Error(`${this.config.label} could not show machine ${id} (error ${response.status}): ${said(text)}`);
     const body = parseJson(text);
     const raw = isObj(body) && isObj(body.instance) ? body.instance : isObj(body) && isObj(body.order) ? body.order : body;
     return toInstance(raw);
@@ -305,16 +315,16 @@ export class SellerClient {
 
   async instances(): Promise<Instance[]> {
     const { response, text } = await this.signed("GET", "/compute/instances");
-    if (!response.ok) throw new Error(`${this.config.label} answered ${response.status} for the instance list: ${snippet(text)}`);
+    if (!response.ok) throw new Error(`${this.config.label} could not list your machines (error ${response.status}): ${said(text)}`);
     const body = parseJson(text);
     const rows = Array.isArray(body) ? body : isObj(body) && Array.isArray(body.instances) ? body.instances : isObj(body) && Array.isArray(body.orders) ? body.orders : null;
-    if (!rows) throw new Error(`${this.config.label} instance list has an unexpected shape: ${snippet(text)}`);
+    if (!rows) throw new Error(`${this.config.label}'s machine list has an unexpected shape.`);
     return rows.map(toInstance).filter((i): i is Instance => i !== null);
   }
 
   async destroy(id: string): Promise<void> {
     const { response, text } = await this.signed("DELETE", `/compute/instances/${encodeURIComponent(id)}`);
     if (response.ok || response.status === 404) return;
-    throw new Error(`${this.config.label} answered ${response.status} when destroying ${id}: ${snippet(text)}`);
+    throw new Error(`${this.config.label} could not destroy machine ${id} (error ${response.status}): ${said(text)}`);
   }
 }

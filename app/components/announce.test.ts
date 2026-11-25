@@ -10,8 +10,8 @@ const job = (over: Partial<TrainingRunView>): TrainingRunView =>
 const run = (over: Partial<MarketRunView>): MarketRunView =>
   ({ id: "mkt_1", market: "test", phase: "scanning", rows: [], leftOut: [], approval: null, payment: null, machine: null, error: null, refusal: null, ...over }) as MarketRunView;
 
-const approval = { code: "c", usd: 0.01, atomic: "10000", token: "USDC" as const, network: "Solana devnet", payTo: "ELT2xxxxxxxxd5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "t" };
-const payment = { usd: 0.0104, tx: "tx", at: 1, payer: "p" };
+const approval = { code: "c", usd: 0.01, atomic: "10000", exact: "$0.0100", surcharge: null, token: "USDC" as const, network: "Solana devnet", payTo: "ELT2xxxxxxxxd5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "t" };
+const payment = { usd: 0.0104, atomic: "10400", tx: "tx", at: 1, payer: "p", status: "confirmed" as const };
 const machine = { id: "m", ip: "203.0.113.1", status: "active", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "vc2-1c-1gb", region: "ewr" };
 
 describe("marketAnnouncement", () => {

@@ -9,7 +9,7 @@ import { Journal } from "./journal";
 import { MarketRun, probeable, type MarketRunDeps, type PurchaseRecord } from "./run";
 import { SELLERS, SellerClient, type SellerConfig } from "./seller";
 import { newSshKey } from "./sshkey";
-import { FakeProcessor, fakePayer, inProcess } from "./testing";
+import { FAKE_PAY_TO, FakeProcessor, fakePayer, inProcess } from "./testing";
 import { NO_FAULTS, TestSeller, type Faults } from "./testseller";
 import type { Limits, MarketId, Need, Offer } from "./types";
 
@@ -44,12 +44,15 @@ type Setup = {
   spotFeed?: () => Promise<Offer[]>;
   probePort?: (ip: string) => Promise<boolean>;
   activeAfterSec?: number;
+  findPayment?: MarketRunDeps["findPayment"];
 };
 
 function setup(o: Setup = {}) {
   let t = T0;
   const now = () => t;
+  const slept: number[] = [];
   const sleep = async (ms: number) => {
+    slept.push(ms);
     t += ms;
   };
   const market = o.market ?? "test";
@@ -84,10 +87,11 @@ function setup(o: Setup = {}) {
     newCode: () => `code-${++codes}`,
     onRecord: (r) => records.push(r),
     probePort: o.probePort,
+    findPayment: o.findPayment,
   };
   const run = new MarketRun(deps);
   const events = () => journal.all().map((e) => e.event);
-  return { run, seller, processor, payer, journal, records, events, now, advance: (ms: number) => (t += ms), dir };
+  return { run, seller, client, processor, payer, journal, records, events, now, slept, advance: (ms: number) => (t += ms), dir };
 }
 
 /** A seller that never sees max_total_usd, so only the run's own guard stands in the way. */
@@ -294,9 +298,9 @@ describe("MarketRun refusals and failures", () => {
     expect(v.phase).toBe("failed");
     const failed = v.rows.filter((r) => r.state === "quote failed");
     expect(failed.length).toBeGreaterThan(0);
-    expect(failed[0].note).toContain("WRONG_ASSET");
+    expect(failed[0].code).toBe("WRONG_ASSET");
     expect(v.attempts.filter((a) => !a.ok)).toHaveLength(8); // gives up after 8 failed quotes
-    expect(v.error).toContain("WRONG_ASSET");
+    expect(v.error).toContain("asked to be paid in SOL");
     expect(payer.calls).toBe(0);
     expect(events()).toEqual([]);
   });
@@ -308,7 +312,7 @@ describe("MarketRun refusals and failures", () => {
     await run.done;
     const v = run.view();
     expect(v.phase).toBe("failed");
-    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", note: expect.stringContaining("PRICE_CAP") });
+    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", code: "PRICE_CAP" });
     expect(v.rows.some((r) => r.state === "chosen")).toBe(false);
     expect(payer.calls).toBe(0);
   });
@@ -319,7 +323,7 @@ describe("MarketRun refusals and failures", () => {
     await run.done;
     const v = run.view();
     expect(v.phase).toBe("failed");
-    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", note: expect.stringContaining("OVER_BUDGET") });
+    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", code: "OVER_BUDGET" });
     expect(v.rows.some((r) => r.state === "chosen")).toBe(false);
     expect(payer.calls).toBe(0);
   });
@@ -330,7 +334,7 @@ describe("MarketRun refusals and failures", () => {
     await run.done;
     const v = run.view();
     expect(v.phase).toBe("failed");
-    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", note: expect.stringContaining("OVER_RATE") });
+    expect(v.rows.find((r) => r.id === "vc2-1c-1gb")).toMatchObject({ state: "quote failed", code: "OVER_RATE" });
     expect(payer.calls).toBe(0);
   });
 
@@ -441,7 +445,8 @@ describe("MarketRun never pays twice", () => {
     await run.done;
     const v = run.view();
     expect(v.phase).toBe("failed");
-    expect(v.error).toContain("payment outcome unknown; check the journal");
+    expect(v.error).toBe(UNCONFIRMED_UNCLEAR);
+    expect(v.spent).toBe("maybe");
     expect(payer.calls).toBe(1);
     expect(processor.settled).toBe(0);
     expect(events()).toEqual(["intent", "unknown"]);
@@ -549,11 +554,24 @@ describe("probeable", () => {
     ["::ffff:7f00:1", "IPv4-mapped loopback, hex spelling"],
     ["0:0:0:0:0:ffff:a00:1", "IPv4-mapped private, long spelling"],
     ["fe80::1%en0", "link-local with a zone id"],
+    // IPv6 is an allowlist: only global unicast 2000::/3, minus the special blocks inside it
+    ["::1", "loopback, outside 2000::/3"],
+    ["::", "unspecified"],
+    ["fe80::1", "link-local, outside 2000::/3"],
+    ["fd00::1", "unique local, outside 2000::/3"],
+    ["4000::1", "unassigned, outside 2000::/3"],
+    ["1fff:ffff::1", "just below 2000::/3"],
+    ["64:ff9b:1::a00:1", "local-use NAT64 64:ff9b:1::/48"],
+    ["2001::1", "Teredo 2001::/32, in 2001::/23"],
+    ["2001:1ff:ffff::1", "top of the IETF block 2001::/23"],
+    ["2001:db8:ffff::1", "top of documentation 2001:db8::/32"],
+    ["2002:808:808::1", "6to4 2002::/16 wrapping a public IPv4"],
+    ["3fff::1", "documentation 3fff::/20"],
   ];
   for (const [ip, why] of notPublic) {
     it(`does not probe ${ip} (${why})`, () => expect(probeable(ip)).toBe(false));
   }
-  for (const ip of ["8.8.8.8", "1.1.1.1", "100.128.0.1", "198.20.0.1", "223.255.255.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
+  for (const ip of ["8.8.8.8", "1.1.1.1", "100.128.0.1", "198.20.0.1", "223.255.255.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "2000::1", "2001:200::1", "2001:4860:4860::8888", "2003::1", "3ffe::1", "2a00:1450::1"]) {
     it(`probes the public address ${ip}`, () => expect(probeable(ip)).toBe(true));
   }
 });
@@ -803,5 +821,289 @@ describe("MarketRun destroy", () => {
     await run.destroy();
     expect(vi.getTimerCount()).toBe(0);
     expect(events().filter((e) => e === "released")).toHaveLength(1);
+  });
+});
+
+/** A findPayment that answers from a script, one entry per call (the last entry repeats). */
+function chainScript(answers: ({ tx: string } | null | Error)[]) {
+  const calls: Parameters<NonNullable<MarketRunDeps["findPayment"]>>[0][] = [];
+  const fn: NonNullable<MarketRunDeps["findPayment"]> = async (q) => {
+    calls.push(q);
+    const a = answers[Math.min(calls.length - 1, answers.length - 1)];
+    if (a instanceof Error) throw a;
+    return a;
+  };
+  return { fn, calls };
+}
+
+const KEPT = "The seller took one payment of $0.010382 and did not deliver a machine.";
+const UNCONFIRMED_REJECTED =
+  "A payment of $0.010382 was signed and sent. The seller says it was not accepted, and no transfer was found on chain yet. Check again later before paying anyone else.";
+const UNCONFIRMED_UNCLEAR =
+  "A payment of $0.010382 was signed and sent. The seller did not confirm it, and no transfer was found on chain yet. Check again later before paying anyone else.";
+
+/** Answers every signed (paid) request with `answer`; everything else goes to the seller. */
+const onPaid = (answer: () => Response | Promise<Response>, forward = true) => (f: typeof fetch) =>
+  (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (new Headers(init?.headers).has("PAYMENT-SIGNATURE")) {
+      if (forward) await f(input, init); // the seller settles it
+      return answer();
+    }
+    return f(input, init);
+  }) as typeof fetch;
+
+describe("MarketRun after a signed payment (B1)", () => {
+  it("seller keeps the payment and says rejected; the chain shows it: failed, paid, record with amount and tx, no second payment", async () => {
+    const chain = chainScript([null, { tx: "chainTx" }]);
+    const { run, payer, events, records, processor, slept, now } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.phase).toBe("failed");
+    expect(v.error).toBe(KEPT);
+    expect(v.spent).toBe("paid");
+    expect(v.payment).toEqual({ usd: CHEAPEST_USD, atomic: "10382", tx: "chainTx", at: expect.any(Number), payer: payer.address, status: "confirmed" });
+    expect(v.paidAt).not.toBeNull();
+    expect(chain.calls).toHaveLength(2);
+    expect(chain.calls[0]).toEqual({ payer: payer.address, payTo: FAKE_PAY_TO, atomic: "10382", sinceMs: expect.any(Number) });
+    expect(chain.calls[0].sinceMs).toBeLessThanOrEqual(now());
+    expect(slept.filter((ms) => ms === 5_000)).toHaveLength(1);
+    expect(events()).toEqual(["intent", "unknown", "paid"]);
+    expect(records).toEqual([expect.objectContaining({ outcome: "failed", usd: CHEAPEST_USD, tx: "chainTx", reason: `SELLER_KEPT_PAYMENT: ${KEPT}` })]);
+    expect(payer.calls).toBe(1);
+    expect(processor.settled).toBe(1);
+    expect(v.machine).toBeNull();
+    for (const a of v.attempts) expect(a.what).not.toMatch(/[{}]|quote_usd/);
+  });
+
+  it("seller says rejected and nothing is found on chain: checks 6 times 5 s apart, journal unknown, record without tx", async () => {
+    const chain = chainScript([null]);
+    const { run, payer, events, records, slept } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.phase).toBe("failed");
+    expect(v.error).toBe(UNCONFIRMED_REJECTED);
+    expect(v.spent).toBe("maybe");
+    expect(v.payment).toMatchObject({ usd: CHEAPEST_USD, atomic: "10382", tx: null, status: "unconfirmed" });
+    expect(chain.calls).toHaveLength(6);
+    expect(slept.filter((ms) => ms === 5_000)).toHaveLength(5);
+    expect(events()).toEqual(["intent", "unknown"]);
+    expect(records).toEqual([expect.objectContaining({ outcome: "failed", usd: CHEAPEST_USD, tx: null, reason: `PAYMENT_UNCONFIRMED: ${UNCONFIRMED_REJECTED}` })]);
+    expect(payer.calls).toBe(1);
+  });
+
+  it("without a chain check it says the same, never that nothing was spent", async () => {
+    const { run, events, records } = setup({ faults: { settleThenReject: true } });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.error).toBe(UNCONFIRMED_REJECTED);
+    expect(v.spent).toBe("maybe");
+    expect(events()).toEqual(["intent", "unknown"]);
+    expect(records[0]).toMatchObject({ usd: CHEAPEST_USD, tx: null });
+  });
+
+  it("a chain check that throws counts as not found", async () => {
+    const chain = chainScript([new Error("rpc down")]);
+    const { run } = setup({ faults: { settleThenReject: true }, findPayment: chain.fn });
+    await run.start();
+    await run.done;
+    expect(run.view().error).toBe(UNCONFIRMED_REJECTED);
+    expect(chain.calls).toHaveLength(6);
+  });
+
+  it("a price cap after signing is checked the same way", async () => {
+    const chain = chainScript([{ tx: "capTx" }]);
+    const { run, payer, events } = setup({ wrap: onPaid(() => new Response(JSON.stringify({ quote_usd: 0.5 }), { status: 409 })), findPayment: chain.fn });
+    await run.start();
+    await run.done;
+    expect(run.view()).toMatchObject({ phase: "failed", error: KEPT, spent: "paid", payment: { tx: "capTx", status: "confirmed" } });
+    expect(events()).toEqual(["intent", "unknown", "paid"]);
+    expect(payer.calls).toBe(1);
+  });
+
+  it("an unknown outcome with no machine checks the chain and does not claim the seller refused", async () => {
+    const chain = chainScript([null]);
+    const { run, events, records } = setup({ wrap: onPaid(() => new Response("gateway timeout", { status: 504 }), false), findPayment: chain.fn });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.error).toBe(UNCONFIRMED_UNCLEAR);
+    expect(v.spent).toBe("maybe");
+    expect(events()).toEqual(["intent", "unknown"]);
+    expect(records[0]).toMatchObject({ outcome: "failed", usd: CHEAPEST_USD, tx: null });
+  });
+
+  it("an error thrown after signing is handled as a payment that may have gone through", async () => {
+    const chain = chainScript([{ tx: "thrownTx" }]);
+    const { run, client, payer, records } = setup({ findPayment: chain.fn });
+    const orig = client.provision.bind(client);
+    client.provision = async (q, pay) => {
+      await orig(q, pay);
+      throw new Error("boom");
+    };
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.phase).toBe("failed");
+    expect(v.error).toBe(KEPT);
+    expect(v.spent).toBe("paid");
+    expect(records[0]).toMatchObject({ outcome: "failed", tx: "thrownTx" });
+    expect(payer.calls).toBe(1);
+  });
+
+  it("the payment shows as sent, unconfirmed, while the paid request is in flight", async () => {
+    let during: ReturnType<MarketRun["view"]> | null = null;
+    let runRef: MarketRun | null = null;
+    const wrap = (f: typeof fetch) =>
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new Headers(init?.headers).has("PAYMENT-SIGNATURE")) during = runRef!.view();
+        return f(input, init);
+      }) as typeof fetch;
+    const { run, payer } = setup({ wrap });
+    runRef = run;
+    await run.start();
+    expect(during!.payment).toEqual({ usd: CHEAPEST_USD, atomic: "10382", tx: null, at: expect.any(Number), payer: payer.address, status: "unconfirmed" });
+    expect(during!.spent).toBe("maybe");
+    expect(run.view().payment).toMatchObject({ tx: "tx-1", status: "confirmed" });
+    expect(run.view().spent).toBe("paid");
+  });
+
+  it("409 settlement_pending: the adopted machine's payment gets its tx from the chain (N7)", async () => {
+    const chain = chainScript([{ tx: "pendingTx" }]);
+    const { run, events } = setup({ faults: { settlementPending409: true }, findPayment: chain.fn });
+    await run.start();
+    const v = run.view();
+    expect(v.phase).toBe("ready");
+    expect(v.payment).toMatchObject({ tx: "pendingTx", status: "confirmed" });
+    expect(chain.calls).toHaveLength(1);
+    expect(events()).toEqual(["intent", "unknown", "paid", "active"]);
+    expect(run.view().spent).toBe("paid");
+  });
+
+  it("409 settlement_pending without a chain check: machine adopted, payment unconfirmed", async () => {
+    const { run } = setup({ faults: { settlementPending409: true } });
+    await run.start();
+    expect(run.view().phase).toBe("ready");
+    expect(run.view().payment).toMatchObject({ tx: null, status: "unconfirmed" });
+    expect(run.view().spent).toBe("maybe");
+  });
+
+  it("spent is nothing when no payment was signed, and the record carries no amount", async () => {
+    const a = setup({ ask: true });
+    await a.run.start();
+    expect(a.run.view().spent).toBe("nothing");
+    a.run.cancel();
+    expect(a.run.view().spent).toBe("nothing");
+    expect(a.records[0]).toMatchObject({ outcome: "refused", usd: null, tx: null, reason: "CANCELLED: You cancelled before paying. Nothing was spent." });
+
+    const b = setup({ faults: { quoteBumpPct: 20 } });
+    await b.run.start();
+    await b.run.done;
+    expect(b.run.view().spent).toBe("nothing");
+    expect(b.records[0]).toMatchObject({ outcome: "refused", usd: null });
+  });
+});
+
+describe("MarketRun approval details (S1, S2)", () => {
+  it("carries the exact amount and the short-rental surcharge", async () => {
+    const { run } = setup({ ask: true });
+    await run.start();
+    expect(run.view().approval).toMatchObject({ usd: CHEAPEST_USD, atomic: "10382", exact: "$0.010382", surcharge: { pct: 15, underHours: 24 } });
+    expect(run.view().rows.find((r) => r.state === "chosen")).toMatchObject({ quoteExact: "$0.010382" });
+  });
+
+  it("has no surcharge for a rental of 24 hours or more", async () => {
+    const { run } = setup({ ask: true, need: { hours: 24 } });
+    await run.start();
+    expect(run.view().approval?.surcharge).toBeNull();
+  });
+});
+
+describe("MarketRun fallback notes (N6)", () => {
+  it("none on the happy path", async () => {
+    const { run } = setup();
+    await run.start();
+    expect(run.view().fallbacks).toEqual([]);
+  });
+
+  it("a region out of stock at quote time", async () => {
+    const { run } = setup({ faults: { outOfStockRegions: ["ewr"] } });
+    await run.start();
+    expect(run.view().fallbacks).toEqual(["ewr was out of stock, so the agent used ord."]);
+  });
+
+  it("a region out of stock at pay time", async () => {
+    const { run, seller } = setup({ ask: true });
+    await run.start();
+    seller.faults = { ...seller.faults, outOfStockRegions: ["ewr"] };
+    run.approve("code-1");
+    await waitPhase(run, "approval");
+    expect(run.view().fallbacks).toEqual(["ewr was out of stock, so the agent used ord."]);
+  });
+
+  it("a whole plan out of stock", async () => {
+    const { run } = setup({ faults: { outOfStockRegions: ["ewr", "ord", "dfw", "sea"] } });
+    await run.start();
+    expect(run.view().fallbacks).toEqual([
+      "vc2-1c-1gb was out of stock in ewr, ord and dfw, so the agent used do:s-1vcpu-1gb.",
+      "vhp-1c-1gb-amd was out of stock in ewr, ord and dfw, so the agent used do:s-1vcpu-1gb.",
+    ]);
+  });
+});
+
+describe("MarketRun plain words (S3)", () => {
+  const CODE = /\b[A-Z]{2,}_[A-Z_]+\b|atomic units|So1111/;
+
+  it("nothing fits: counts in words, codes kept in leftOut and rows' code", async () => {
+    const { run } = setup({ need: { vcpus: 64 } });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    expect(v.refusal?.code).toBe("NOTHING_FITS");
+    expect(v.refusal?.detail).not.toMatch(CODE);
+    expect(v.refusal?.detail).toMatch(/^No plan fits what you asked for inside your limits: \d+ too small/);
+    const left = v.rows.filter((r) => r.state === "left out");
+    expect(left.every((r) => r.code !== null && !CODE.test(r.note ?? ""))).toBe(true);
+  });
+
+  it("wrong token: plain error and notes, code on the rows and attempts", async () => {
+    const { run } = setup({ faults: { wrongAsset: true } });
+    await run.start();
+    await run.done;
+    const v = run.view();
+    const failed = v.rows.filter((r) => r.state === "quote failed");
+    expect(failed[0]).toMatchObject({ code: "WRONG_ASSET", note: "The seller asked to be paid in SOL instead of USDC on Solana devnet." });
+    expect(v.attempts.filter((a) => !a.ok).every((a) => a.code === "WRONG_ASSET")).toBe(true);
+    expect(v.error).toBe("No seller gave a usable quote. The last problem: The seller asked to be paid in SOL instead of USDC on Solana devnet.");
+    for (const t of [v.error, ...v.attempts.map((a) => a.what), ...v.rows.map((r) => r.note ?? "")]) expect(t).not.toMatch(CODE);
+  });
+
+  it("quote bump: the refusal names dollars", async () => {
+    const { run } = setup({ faults: { quoteBumpPct: 20 } });
+    await run.start();
+    await run.done;
+    expect(run.view().refusal).toEqual({ code: "OVER_QUOTE", detail: "The seller now asks $0.012458, more than the $0.010382 you approved." });
+  });
+
+  it("happy path attempts use exact dollars", async () => {
+    const { run } = setup();
+    await run.start();
+    expect(run.view().attempts.map((a) => a.what)).toEqual(["quoted $0.010382", "quoted $0.012458", "quoted $0.013351", "paying $0.010382"]);
+  });
+
+  it("stopping and cancelling read as the owner's choice", async () => {
+    const a = setup({ ask: true });
+    await a.run.start();
+    a.run.cancel();
+    expect(a.run.view().refusal).toEqual({ code: "CANCELLED", detail: "You cancelled before paying. Nothing was spent." });
+  });
+});
+
+describe("MarketRun overspend marker (S6)", () => {
+  it("a run is the owner's unless the overspend test made it", async () => {
+    const a = setup();
+    expect(a.run.view().overspendTest).toBe(false);
   });
 });

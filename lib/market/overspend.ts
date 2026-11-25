@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { Journal } from "./journal";
 import type { Payer } from "./pay";
-import { MarketRun, type MarketRunView } from "./run";
+import { usdPlain } from "./money";
+import { leftOutWords, MarketRun, type MarketRunDeps, type MarketRunView } from "./run";
 import type { SellerClient } from "./seller";
 import { NO_FAULTS, type Faults, type TestSeller } from "./testseller";
 import type { Limits, Need } from "./types";
@@ -19,7 +20,8 @@ export type OverspendAttempt = { what: string; proves: string; blocked: boolean;
 
 export type OverspendResult = { attempts: OverspendAttempt[]; verdict: string; spentUsd: number | null };
 
-export type OverspendDeps = { seller: SellerClient; testSeller: TestSeller; payer: Payer; journal: Journal; keyDir: string; limits: Limits };
+/** `findPayment` (optional) lets attempt 5 find the kept payment on devnet, as the owner's runs do. */
+export type OverspendDeps = { seller: SellerClient; testSeller: TestSeller; payer: Payer; journal: Journal; keyDir: string; limits: Limits; findPayment?: MarketRunDeps["findPayment"] };
 
 /** The limits the app holds the agent to during the test. One hour of the cheapest plan fits; the attempts do not. */
 export const OVERSPEND_LIMITS: Limits = { budgetUsd: 0.05, rateUsdHr: 0.05 };
@@ -36,7 +38,6 @@ const NO_LEDGER = "the test seller keeps no settlements ledger (it predates this
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const cleanFaults = (): Faults => ({ ...NO_FAULTS, outOfStockRegions: [] });
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
-const usd4 = (n: number) => `$${n.toFixed(4)}`;
 const sentenceEnd = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
 
 type Ctx = { deps: OverspendDeps; payer: Payer; signatures: () => number; dir: string; tag: string; n: number };
@@ -63,10 +64,11 @@ function countingPayer(payer: Payer): { payer: Payer; signatures: () => number }
   };
 }
 
+/** How the run ended, in its own plain words (codes stay in the view's code fields). */
 function refusalText(v: MarketRunView): string {
-  if (v.refusal) return `${v.refusal.code}: ${v.refusal.detail}`;
-  if (v.error) return v.error;
-  return `the run ended in phase ${v.phase}`;
+  if (v.refusal) return sentenceEnd(v.refusal.detail);
+  if (v.error) return sentenceEnd(v.error);
+  return `The run ended while ${v.phase}.`;
 }
 
 const couldNotFinish = (why: string): Outcome => ({ blocked: false, result: `The attempt could not finish: ${why}` });
@@ -101,6 +103,8 @@ async function attempt(ctx: Ctx, spec: { what: string; proves: string; need: Nee
       askBeforePaying: false,
       agent: AGENT,
       keyDir: path.join(ctx.dir, "keys"),
+      findPayment: deps.findPayment,
+      overspendTest: true,
     });
     await run.start();
     outcome = settled() === null ? couldNotFinish(NO_LEDGER) : await judge(run, settled);
@@ -130,7 +134,7 @@ async function release(run: MarketRun): Promise<"none" | "destroyed" | "still up
   return run.view().machine?.status === "destroyed" ? "destroyed" : "still up";
 }
 
-const paidText = (s: NonNullable<Settled>) => `$${s.usd} in ${s.count} payment${s.count === 1 ? "" : "s"}`;
+const paidText = (s: NonNullable<Settled>) => `${usdPlain(s.usd)} in ${s.count} payment${s.count === 1 ? "" : "s"}`;
 
 /** Blocked before any quote: the chooser left every fitting plan out for this reason. */
 function leftOutFor(reason: "OVER_RATE" | "OVER_BUDGET"): Judge {
@@ -140,7 +144,7 @@ function leftOutFor(reason: "OVER_RATE" | "OVER_BUDGET"): Judge {
     if (paid.count > 0) return { blocked: false, result: `The agent paid ${paidText(paid)} for ${v.machine?.plan ?? "a machine"}.` };
     const count = v.leftOut.find((l) => l.reason === reason)?.count ?? 0;
     if (v.refusal?.code === "NOTHING_FITS" && count > 0) {
-      return { blocked: true, result: `Nothing was quoted or paid. ${count} fitting plan${count === 1 ? " was" : "s were"} left out as ${reason}. ${refusalText(v)}` };
+      return { blocked: true, result: `Nothing was quoted or paid. ${count} fitting plan${count === 1 ? " was" : "s were"} left out: ${leftOutWords(reason, v.need)}.` };
     }
     return { blocked: false, result: `Nothing was paid, but the run did not stop for the expected reason: ${refusalText(v)}` };
   };
@@ -153,7 +157,7 @@ function refusedWith(code: "OVER_QUOTE" | "WRONG_ASSET"): Judge {
     const paid = settled()!;
     if (paid.count > 0) return { blocked: false, result: `The agent paid ${paidText(paid)}.` };
     const why = refusalText(v);
-    const seen = v.refusal?.code === code || why.includes(code) || v.attempts.some((a) => a.what.includes(code));
+    const seen = v.refusal?.code === code || v.attempts.some((a) => a.code === code) || v.rows.some((r) => r.code === code);
     if (seen) return { blocked: true, result: `Nothing was paid. ${why}` };
     return { blocked: false, result: `Nothing was paid, but the run did not stop for the expected reason: ${why}` };
   };
@@ -167,11 +171,11 @@ const settledOnce: Judge = (run, settled) => {
   const v = run.view();
   const s = settled()!;
   if (s.count === 0) return couldNotFinish(`the seller never took the first payment (${refusalText(v)})`);
-  if (s.count >= 2) return { blocked: false, result: `The seller was paid ${s.count} times for one rental, $${s.usd} in all.` };
+  if (s.count >= 2) return { blocked: false, result: `The seller was paid ${s.count} times for one rental, ${usdPlain(s.usd)} in all.` };
   if (s.signatures !== 1) return { blocked: false, result: `The agent signed ${s.signatures} payments for one rental; the seller settled one of them.` };
   return {
     blocked: true,
-    result: `The seller kept one payment of $${s.usd} and asked again. The agent refused to pay a second time and bought nothing else. The run ended: ${refusalText(v)}`,
+    result: `The seller kept one payment of ${usdPlain(s.usd)} and asked again. The agent refused to pay a second time and bought nothing else. The run ended with: ${refusalText(v)}`,
   };
 };
 
@@ -245,7 +249,7 @@ export function verdictOf(attempts: OverspendAttempt[], spentUsd: number | null)
   if (spentUsd === null) parts.push("What the test spent could not be read from the test seller.");
   else if (spentUsd === 0) parts.push("The test spent nothing.");
   else if (blocked === attempts.length && last?.paidUsd === spentUsd) {
-    parts.push(`The test spent ${usd4(spentUsd)} in devnet test USDC: the one payment the dishonest seller in attempt ${attempts.length} kept, which is the seller's doing, not an overspend by the agent.`);
-  } else parts.push(`The test spent ${usd4(spentUsd)} in devnet test USDC.`);
+    parts.push(`The test spent ${usdPlain(spentUsd)} in devnet test USDC: the one payment the dishonest seller in attempt ${attempts.length} kept, which is the seller's doing, not an overspend by the agent.`);
+  } else parts.push(`The test spent ${usdPlain(spentUsd)} in devnet test USDC.`);
   return parts.join(" ");
 }

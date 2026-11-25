@@ -135,3 +135,37 @@ describe("Journal", () => {
     for (const k of Object.keys(j.all()[0])) expect(["secret", "key", "privateKey"]).not.toContain(k);
   });
 });
+
+describe("open purchases say plainly what they are", () => {
+  const file2 = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "journal-what-")), "p.jsonl");
+  const at = (run: string, event: JournalEvent, extra: Partial<JournalEntry> = {}): JournalEntry => ({ at: 1, run, market: "test", seller: "testseller", event, plan: "vc2-1c-1gb", region: "ewr", usd: 0.010382, ...extra });
+
+  it("labels each kind, with the last event and the overspend-test marker", () => {
+    const j = new Journal(file2());
+    j.append(at("kept", "intent"));
+    j.append(at("kept", "unknown"));
+    j.append(at("kept", "paid", { tx: "t1", instance: null }));
+    j.append(at("maybe", "intent"));
+    j.append(at("maybe", "unknown"));
+    j.append(at("intent-only", "intent"));
+    j.append(at("live", "intent"));
+    j.append(at("live", "paid", { tx: "t2", instance: "m1" }));
+    j.append(at("live", "active", { instance: "m1" }));
+    j.append(at("ovs_ab12_3", "intent"));
+    j.append(at("ovs_ab12_3", "paid", { instance: "m2" }));
+    const byRun = Object.fromEntries(j.open().map((o) => [o.run, o]));
+    expect(byRun.kept).toMatchObject({ state: "paid", lastEvent: "paid", instance: null, tx: "t1", overspendTest: false, what: "The seller kept a payment of $0.010382 for vc2-1c-1gb in ewr and delivered no machine." });
+    expect(byRun.maybe).toMatchObject({
+      state: "unknown",
+      lastEvent: "unknown",
+      what: "A payment of $0.010382 for vc2-1c-1gb in ewr was signed and sent, and it is not known whether it went through. No machine is known for it.",
+    });
+    expect(byRun["intent-only"]).toMatchObject({
+      state: "unknown",
+      lastEvent: "intent",
+      what: "A purchase of vc2-1c-1gb in ewr was started and its outcome was never recorded. A payment of up to $0.010382 may have been made.",
+    });
+    expect(byRun.live).toMatchObject({ state: "active", lastEvent: "active", what: "Paid $0.010382 for vc2-1c-1gb in ewr. Machine m1 may still be running." });
+    expect(byRun.ovs_ab12_3).toMatchObject({ overspendTest: true });
+  });
+});

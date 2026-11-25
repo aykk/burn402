@@ -8,7 +8,7 @@ import { FAMILIES, suggestRequest, type DatasetSource } from "../train";
 import { toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
-import { marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { findPaymentFor, marketJournal, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { runAgentProgram, runStressTester } from "./agent";
 import { currentModel } from "./models";
@@ -217,6 +217,7 @@ export class DemoSession {
       askBeforePaying: input.askBeforePaying,
       agent,
       keyDir: sshKeyDir(rt.config.root),
+      findPayment: findPaymentFor(input.market),
       onRecord: (record) => {
         void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti }), {
           signer,

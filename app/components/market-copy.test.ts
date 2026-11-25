@@ -10,12 +10,13 @@ function run(over: Partial<MarketRunView>): MarketRunView {
     id: "mkt_1", market: "test", marketLabel: "Test seller", phase: "scanning", need, limits: { budgetUsd: 1, rateUsdHr: 0.05 },
     askBeforePaying: true, agent: { name: "your agent", ansName: "ans://x" }, sources: [], rows: [], leftOut: [], approval: null,
     payment: null, machine: null, attempts: [], startedAt: 0, paidAt: null, readyAt: null, releasedAt: null, error: null, refusal: null,
+    spent: "nothing", fallbacks: [], overspendTest: false,
     ...over,
   };
 }
 
 const approval = {
-  code: "c", usd: 0.01, atomic: "10000", token: "USDC" as const, network: "Solana mainnet",
+  code: "c", usd: 0.01, atomic: "10000", exact: "$0.0100", surcharge: null, token: "USDC" as const, network: "Solana mainnet",
   payTo: "ELT2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxd5Ux", plan: "vc2-1c-1gb", region: "ewr", hours: 1, seller: "x402layer",
 };
 
@@ -100,7 +101,7 @@ describe("endState", () => {
   it("a failure after paying with the machine up points at Destroy now", () => {
     const e = endState(
       run({
-        phase: "failed", error: "the machine did not become active", payment: { usd: 0.01, tx: null, at: 1, payer: "p" },
+        phase: "failed", error: "the machine did not become active", payment: { usd: 0.01, atomic: "10000", tx: null, at: 1, payer: "p", status: "confirmed" },
         machine: { id: "m", ip: null, status: "pending", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked", plan: "p", region: "ewr" },
       }),
     )!;
@@ -118,9 +119,9 @@ describe("marketStage", () => {
   });
   it("a refused or failed run stays on the stage it reached", () => {
     expect(marketStage(run({ phase: "refused", refusal: { code: "STOPPED", detail: "" } }))).toBe(0);
-    const row = { seller: "s", id: "a", provider: "p", kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, region: null, hours: null, listHourlyUsd: null, hourlyUsd: 1, estimateUsd: null, quoteUsd: null, state: "left out" as const, note: "TOO_SMALL" };
+    const row = { seller: "s", id: "a", provider: "p", kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, region: null, hours: null, listHourlyUsd: null, hourlyUsd: 1, estimateUsd: null, quoteUsd: null, quoteExact: null, state: "left out" as const, note: "TOO_SMALL", code: "TOO_SMALL" };
     expect(marketStage(run({ phase: "refused", rows: [row], refusal: { code: "NOTHING_FITS", detail: "" } }))).toBe(1);
     expect(marketStage(run({ phase: "refused", approval, refusal: { code: "CANCELLED", detail: "" } }))).toBe(2);
-    expect(marketStage(run({ phase: "failed", payment: { usd: 0.01, tx: null, at: 1, payer: "p" } }))).toBe(3);
+    expect(marketStage(run({ phase: "failed", payment: { usd: 0.01, atomic: "10000", tx: null, at: 1, payer: "p", status: "confirmed" } }))).toBe(3);
   });
 });
