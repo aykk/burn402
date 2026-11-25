@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetShare, jobGauge, leadingZeros, meterView, shareText, type MeterJob } from "./meter-model";
+import { allowanceWords, budgetShare, draftLimits, jobGauge, leadingZeros, meterView, shareText, walletReadout, type MeterJob } from "./meter-model";
 
 const HOUR = 3_600_000;
 
@@ -13,13 +13,13 @@ function job(over: Partial<MeterJob>): MeterJob {
     phase: "scanning",
     limits: { budgetUsd: 1, rateUsdHr: 0.05 },
     need: { kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false },
-    approval: null, payment: null, machine: null, paidAt: null, releasedAt: null, error: null, refusal: null,
+    approval: null, payment: null, machine: null, paidAt: null, releasedAt: null, error: null, refusal: null, spent: "nothing",
     ...over,
   };
 }
 
 const T0 = 1_795_000_000_000;
-const paid = { approval, payment: { usd: 0.01, atomic: "10000", tx: "5xTx", at: T0, payer: "3Ybt", status: "confirmed" as const }, paidAt: T0 };
+const paid = { approval, payment: { usd: 0.01, atomic: "10000", tx: "5xTx", at: T0, payer: "3Ybt", status: "confirmed" as const }, paidAt: T0, spent: "paid" as const };
 const base = { formBudgetUsd: 1, formRateUsdHr: 0.05 };
 
 describe("meterView", () => {
@@ -98,9 +98,10 @@ describe("jobGauge", () => {
     const end = jobGauge(view({ ...paid, phase: "ready" }, T0 + HOUR))!;
     expect(end).toMatchObject({ leftUsd: 0, fill: 0, secondsLeft: 0 });
   });
-  it("released, or failed after paying with no machine known, shows the machine gone, empty", () => {
-    expect(jobGauge(view({ ...paid, phase: "released", releasedAt: T0 + 1000 }, T0 + HOUR))).toMatchObject({ state: "shut", scaleUsd: 0.01, leftUsd: 0, fill: 0 });
-    expect(jobGauge(view({ ...paid, phase: "failed", error: "x" }, T0 + 1000))).toMatchObject({ state: "shut", fill: 0 });
+  it("released, or failed after the machine was destroyed, shows the machine gone, empty", () => {
+    const machine = { id: "m", ip: null, status: "destroyed", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "p", region: "ewr" };
+    expect(jobGauge(view({ ...paid, phase: "released", releasedAt: T0 + 1000, machine }, T0 + HOUR))).toMatchObject({ state: "shut", scaleUsd: 0.01, leftUsd: 0, fill: 0 });
+    expect(jobGauge(view({ ...paid, phase: "failed", error: "x", machine }, T0 + 1000))).toMatchObject({ state: "shut", fill: 0 });
   });
   it("failed after paying with a machine still known is held, not shut: it may still be running", () => {
     const machine = { id: "m", ip: null, status: "pending", expiresAt: null, destroyAt: null, ssh: null, port22: "not checked" as const, plan: "p", region: "ewr" };
@@ -111,6 +112,50 @@ describe("jobGauge", () => {
     expect(g.scaleUsd).toBe(0.01);
     expect(g.leftUsd).toBeCloseTo(0.005, 9);
     expect(view({ ...paid, phase: "released", releasedAt: T0 + 1000, machine }, T0 + HOUR).machineMayRun).toBe(false);
+  });
+});
+
+describe("B1: money after a signed payment", () => {
+  const kept = { usd: 0.010382, atomic: "10382", tx: "4uwC", at: T0, payer: "3Ybt", status: "confirmed" as const };
+  const ended = (over: Partial<MeterJob>) => meterView({ ...base, job: job({ phase: "failed", approval, error: "x", ...over }), nowMs: T0 + 5000 });
+
+  it("a payment the seller kept, no machine: the meter shows it spent, the budget less the amount, no machine gauge", () => {
+    const v = ended({ spent: "paid", payment: kept });
+    expect(v.remainingUsd).toBeCloseTo(1 - 0.010382, 9);
+    expect(jobGauge(v)).toBeNull();
+    expect(walletReadout(v)).toEqual({ label: "Spent", value: "$0.010382" });
+  });
+  it("an unconfirmed payment: sent and not confirmed, the exact amount, never nothing spent", () => {
+    const v = ended({ spent: "maybe", payment: { ...kept, status: "unconfirmed" } });
+    expect(v.remainingUsd).toBeCloseTo(1 - 0.010382, 9);
+    expect(jobGauge(v)).toBeNull();
+    expect(walletReadout(v)).toEqual({ label: "Sent, not confirmed", value: "$0.010382" });
+  });
+  it("nothing spent only when spent is nothing", () => {
+    const v = ended({ spent: "nothing" });
+    expect(v.remainingUsd).toBe(1);
+    expect(walletReadout(v)).toEqual({ label: "Nothing spent", value: "$0.00" });
+  });
+  it("a payment sent but not yet confirmed, with no machine, is not machine time draining", () => {
+    const v = meterView({ ...base, job: job({ phase: "paying", approval, spent: "maybe", payment: { ...kept, status: "unconfirmed" } }), nowMs: T0 + 5000 });
+    expect(v.phase).toBe("paying");
+    expect(jobGauge(v)).toMatchObject({ state: "sent", scaleUsd: 0.010382, fill: 1, secondsLeft: null });
+  });
+});
+
+describe("allowance and draft", () => {
+  it("S4: at the approval stop the allowance is what would be left after paying", () => {
+    expect(allowanceWords("quoted")).toEqual({ verb: "would have", tail: "left after paying" });
+    expect(allowanceWords("draining")).toEqual({ verb: "has", tail: "left" });
+    expect(allowanceWords(null)).toEqual({ verb: "has", tail: "left" });
+  });
+  it("N2: only a valid budget and limit reach the meter", () => {
+    expect(draftLimits(1, 0.05)).toEqual({ budgetUsd: 1, rateUsdHr: 0.05 });
+    expect(draftLimits(99999999, 0.05)).toBeNull();
+    expect(draftLimits(1, 5)).toBeNull();
+    expect(draftLimits(Number.NaN, 0.05)).toBeNull();
+    expect(draftLimits(0.001, 0.001)).toBeNull();
+    expect(draftLimits(20, 20)).toEqual({ budgetUsd: 20, rateUsdHr: 20 });
   });
 });
 

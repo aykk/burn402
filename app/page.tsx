@@ -177,17 +177,11 @@ export default function Page() {
         </div>
       )}
 
-      {/* The run column is wide while a run is live so the plan table keeps its columns; the form gives the
-          space back once the run is over. Below lg the columns stack, with the run first while there is one. */}
-      <section
-        className={`mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:gap-10 ${
-          running
-            ? "lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
-            : run
-              ? "lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]"
-              : "lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]"
-        }`}
-      >
+      {/* One column template in every phase, so nothing jumps when a run starts, pays or ends. The form column
+          is 26rem: its container is 25rem after the padding, wide enough for three number fields in a row
+          (NeedForm switches at 24rem), and the run column keeps room for the plan table. Below lg the columns
+          stack, with the run first while there is one. */}
+      <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-10">
         <div className={`lg:pr-4 lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
           <NeedForm
             snap={snap}

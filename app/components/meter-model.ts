@@ -1,8 +1,10 @@
+import { usdExact } from "../../lib/market/money";
 import type { MarketRunView } from "@/lib/market/run";
+import { usd2 } from "./format";
 
 export type MeterPhase = "ready" | "searching" | "approval" | "paying" | "running" | "released" | "failed" | "refused";
 
-export type MeterJob = Pick<MarketRunView, "phase" | "limits" | "approval" | "payment" | "machine" | "paidAt" | "releasedAt" | "error" | "refusal" | "need">;
+export type MeterJob = Pick<MarketRunView, "phase" | "limits" | "approval" | "payment" | "machine" | "paidAt" | "releasedAt" | "error" | "refusal" | "need" | "spent">;
 
 export type MeterView = {
   phase: MeterPhase;
@@ -13,8 +15,16 @@ export type MeterView = {
   quotedUsd: number | null;
   /** Hours the quote buys (the seller's billed hours). */
   quotedHours: number | null;
-  /** What was actually paid over x402. Never an estimate. */
+  /** What was signed and sent over x402 (confirmed or not; see `spent`). Never an estimate. */
   paidUsd: number | null;
+  /** That amount exactly, from the atomic units ("$0.010382"). */
+  paidExact: string | null;
+  /** The run's own word on the money: "nothing" only when no payment was ever signed. */
+  spent: MarketRunView["spent"];
+  /** The run knew of a machine at some point. */
+  hadMachine: boolean;
+  /** Seconds of prepaid time the payment bought (the hours asked for, or until the destroy time). */
+  spanSeconds: number | null;
   /** The share of the paid amount the machine time used so far stands for; prepaid, so nothing moves. */
   usedUsd: number | null;
   /** Seconds of rented time left while the machine runs; null otherwise. */
@@ -28,6 +38,7 @@ export type MeterView = {
 
 const finite = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n);
 
+/** `paid`: a payment counts as machine time once it is confirmed or a machine is known; until then it is only sent. */
 function phaseOf(job: MeterJob, paid: boolean): MeterPhase {
   switch (job.phase) {
     case "scanning":
@@ -63,6 +74,10 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
       quotedUsd: null,
       quotedHours: null,
       paidUsd: null,
+      paidExact: null,
+      spent: "nothing",
+      hadMachine: false,
+      spanSeconds: null,
       usedUsd: null,
       secondsLeft: null,
       ranSeconds: null,
@@ -72,18 +87,20 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
   }
 
   const paid = job.payment && finite(job.payment.usd) ? job.payment.usd : null;
-  const phase = phaseOf(job, paid !== null);
+  const phase = phaseOf(job, paid !== null && (job.payment?.status === "confirmed" || job.machine !== null));
   const { budgetUsd, rateUsdHr } = job.limits;
 
   let usedUsd: number | null = null;
   let secondsLeft: number | null = null;
   let ranSeconds: number | null = null;
+  let spanSeconds: number | null = null;
   const start = finite(job.paidAt) ? job.paidAt : job.payment && finite(job.payment.at) ? job.payment.at : null;
   if (paid !== null && start !== null) {
     // The prepaid time runs over the hours asked for, or until the machine's destroy time if that is sooner.
     let span = job.need.hours * 3_600_000;
     const destroyAt = job.machine?.destroyAt;
     if (finite(destroyAt) && destroyAt > start && destroyAt - start < span) span = destroyAt - start;
+    spanSeconds = span / 1000;
     const end = finite(job.releasedAt) ? Math.min(nowMs, job.releasedAt) : nowMs;
     const elapsed = Math.max(0, end - start);
     const share = span > 0 ? Math.min(1, elapsed / span) : 1;
@@ -105,11 +122,15 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
     quotedUsd: quote ? quote.usd : null,
     quotedHours: quote && finite(quote.hours) ? quote.hours : null,
     paidUsd: paid,
+    paidExact: paid !== null && job.payment ? usdExact(job.payment.atomic) : null,
+    spent: job.spent,
+    hadMachine: job.machine !== null,
+    spanSeconds,
     usedUsd,
     secondsLeft,
     ranSeconds,
     // After a successful release the phase is released, so a failed run with a machine never had it destroyed.
-    machineMayRun: phase === "failed" && paid !== null && job.machine !== null,
+    machineMayRun: phase === "failed" && paid !== null && job.machine !== null && job.machine.status !== "destroyed",
     error: phase === "failed" ? job.error : null,
   };
 }
@@ -120,8 +141,11 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
  * so the gauge is empty. Null while there is no price to show.
  */
 export type JobGauge = {
-  /** held: a failed run whose paid machine may still be running; frozen, not shown as gone. */
-  state: "quoted" | "draining" | "held" | "shut";
+  /**
+   * held: a failed run whose paid machine may still be running; frozen, not shown as gone.
+   * sent: the payment is out and not confirmed yet, and no machine is known; not machine time.
+   */
+  state: "quoted" | "sent" | "draining" | "held" | "shut";
   /** What a full gauge stands for: the paid amount, or the quote before payment. */
   scaleUsd: number;
   /** Paid time not yet used, in dollars. */
@@ -138,9 +162,12 @@ export function jobGauge(v: MeterView): JobGauge | null {
       const left = Math.min(v.paidUsd, Math.max(0, v.paidUsd - (v.usedUsd ?? 0)));
       return { state: "held", scaleUsd: v.paidUsd, leftUsd: left, fill: left / v.paidUsd, secondsLeft: null };
     }
+    // A run that ended with money out and no machine ever known is a wallet story, not machine time.
+    if ((v.phase === "failed" || v.phase === "refused") && !v.hadMachine) return null;
     if (v.phase === "released" || v.phase === "failed" || v.phase === "refused") {
       return { state: "shut", scaleUsd: v.paidUsd, leftUsd: 0, fill: 0, secondsLeft: 0 };
     }
+    if (v.phase === "paying") return { state: "sent", scaleUsd: v.paidUsd, leftUsd: v.paidUsd, fill: 1, secondsLeft: null };
     const left = Math.min(v.paidUsd, Math.max(0, v.paidUsd - (v.usedUsd ?? 0)));
     return { state: "draining", scaleUsd: v.paidUsd, leftUsd: left, fill: left / v.paidUsd, secondsLeft: v.secondsLeft };
   }
@@ -148,6 +175,35 @@ export function jobGauge(v: MeterView): JobGauge | null {
     return { state: "quoted", scaleUsd: v.quotedUsd, leftUsd: v.quotedUsd, fill: 1, secondsLeft: v.quotedHours !== null ? v.quotedHours * 3600 : null };
   }
   return null;
+}
+
+/** The figure in the meter's corner while it shows the allowance: the limit, or once the run is over, what was spent. */
+export function walletReadout(v: MeterView): { label: string; value: string; quiet?: boolean } {
+  switch (v.phase) {
+    case "searching":
+      return { label: "Your agent is comparing prices", value: `limit ${usd2(v.rateUsdHr)} an hour`, quiet: true };
+    case "failed":
+    case "refused":
+    case "released":
+      if (v.spent === "paid" && v.paidExact) return { label: "Spent", value: v.paidExact };
+      if (v.spent === "maybe" && v.paidExact) return { label: "Sent, not confirmed", value: v.paidExact };
+      if (v.spent !== "nothing") return { label: "Spent", value: "unknown" };
+      return { label: "Nothing spent", value: "$0.00" };
+    default:
+      return { label: "Limit", value: `${usd2(v.rateUsdHr)} an hour`, quiet: true };
+  }
+}
+
+/** The allowance line: at the approval stop nothing has left the wallet yet, so it is what would be left after paying. */
+export function allowanceWords(state: JobGauge["state"] | null): { verb: string; tail: string } {
+  return state === "quoted" ? { verb: "would have", tail: "left after paying" } : { verb: "has", tail: "left" };
+}
+
+/** The budget and hourly limit the form would send, or null while either is out of range (the meter keeps the last valid pair). */
+export function draftLimits(budgetUsd: number, rateUsdHr: number): { budgetUsd: number; rateUsdHr: number } | null {
+  const ok = (n: number, lo: number, hi: number) => finite(n) && n >= lo && n <= hi;
+  if (!ok(budgetUsd, 0.01, 20) || !ok(rateUsdHr, 0.001, Math.min(budgetUsd, 20))) return null;
+  return { budgetUsd, rateUsdHr };
 }
 
 /** part / budget as a fraction clamped to 0..1; 0 for a missing or non-positive budget. */

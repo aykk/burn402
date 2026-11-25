@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./guard";
 import { Journal, type OpenPurchase } from "./journal";
-import { destroyOpenPurchase, settleOnReset, visibleOpenPurchases } from "./recover";
+import { destroyOpenPurchase, dismissOpenPurchase, settleOnReset, visibleOpenPurchases } from "./recover";
 import { MarketRun } from "./run";
 import { SELLERS, SellerClient, type Instance } from "./seller";
 import { FakeProcessor, fakePayer, inProcess } from "./testing";
@@ -185,6 +185,40 @@ describe("destroyOpenPurchase", () => {
     const r = await destroyOpenPurchase(OPEN, s, j);
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining("401") });
     expect(j.all()).toHaveLength(1);
+  });
+});
+
+describe("dismissOpenPurchase", () => {
+  const kept = () => {
+    const j = new Journal(path.join(tmp(), "purchases.jsonl"));
+    j.append({ at: 1, run: OPEN.run, market: "test", seller: "testseller", event: "intent", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    j.append({ at: 2, run: OPEN.run, market: "test", seller: "testseller", event: "paid", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd, tx: "t1", instance: null });
+    return j;
+  };
+
+  it("closes a kept payment with no machine: one journal line, dismissed by owner, and it leaves the list", () => {
+    const j = kept();
+    const r = dismissOpenPurchase(j.open()[0], j, { now: () => 5 });
+    expect(r).toMatchObject({ ok: true, destroyed: [] });
+    expect(j.all()).toHaveLength(3);
+    expect(j.all().at(-1)).toMatchObject({ at: 5, run: OPEN.run, event: "failed", instance: null, tx: "t1", usd: OPEN.usd, detail: "dismissed by owner" });
+    expect(j.open()).toEqual([]);
+  });
+
+  it("closes an unconfirmed payment with no machine", () => {
+    const j = new Journal(path.join(tmp(), "purchases.jsonl"));
+    j.append({ at: 1, run: OPEN.run, market: "test", seller: "testseller", event: "unknown", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd });
+    expect(dismissOpenPurchase(j.open()[0], j).ok).toBe(true);
+    expect(j.open()).toEqual([]);
+  });
+
+  it("refuses an entry with a machine on record, in plain words, and writes nothing", () => {
+    const j = kept();
+    j.append({ at: 3, run: OPEN.run, market: "test", seller: "testseller", event: "active", plan: OPEN.plan, region: OPEN.region, usd: OPEN.usd, instance: "m1" });
+    const r = dismissOpenPurchase(j.open()[0], j);
+    expect(r).toEqual({ ok: false, error: "This purchase has a machine on record (m1). Destroy it instead; it cannot be dismissed." });
+    expect(j.all()).toHaveLength(3);
+    expect(j.open()).toHaveLength(1);
   });
 });
 

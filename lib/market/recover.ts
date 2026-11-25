@@ -51,6 +51,18 @@ export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, jo
 }
 
 /**
+ * The owner closes an open purchase that has no machine (a payment the seller kept, or one never
+ * confirmed) after checking it themselves. One journal line records it; nothing is destroyed or paid.
+ * An entry with a machine on record is refused: that machine has to be destroyed instead.
+ */
+export function dismissOpenPurchase(open: OpenPurchase, journal: Journal, opts: { now?: () => number } = {}): RecoverResult {
+  if (open.instance) return { ok: false, error: `This purchase has a machine on record (${open.instance}). Destroy it instead; it cannot be dismissed.` };
+  const now = opts.now ?? Date.now;
+  journal.append({ at: now(), run: open.run, market: open.market, seller: open.seller, event: "failed", plan: open.plan, region: open.region, usd: open.usd, tx: open.tx, instance: null, detail: "dismissed by owner" });
+  return { ok: true, destroyed: [], message: "Dismissed. The purchase journal keeps a line saying you dismissed it." };
+}
+
+/**
  * What a session reset does with the current run. Nothing was signed at the approval stop, so
  * that is cancelled; a test-market machine is destroyed. A real-market machine is never destroyed
  * automatically: it stays in the journal and is listed with the open purchases.

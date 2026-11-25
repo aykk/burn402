@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
-import { usd4 } from "./format";
 import { MachinePanel, type Send } from "./MachinePanel";
-import { PHASE_HEADING, endState } from "./market-copy";
+import { PHASE_HEADING, endState, sentence } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
 import { TEXT_BTN } from "./ui";
@@ -81,6 +80,12 @@ function StageRow({ run }: { run: MarketRunView | null }) {
 }
 
 const BEFORE_PAYING = new Set<MarketRunView["phase"]>(["scanning", "choosing", "quoting"]);
+const ENDED = new Set<MarketRunView["phase"]>(["released", "failed", "refused"]);
+/** Refusals whose detail only repeats the end sentence above it. */
+const SAID_ALREADY = new Set(["CANCELLED", "STOPPED", "NOTHING_FITS"]);
+
+/** Where focus goes once the control that was pressed has gone: the machine block after Pay, the end heading after Cancel or Destroy. */
+export type FocusNext = "machine" | "heading" | null;
 
 /**
  * The right column: the stage row, what the run is doing, the plans compared, the approval stop, the
@@ -101,6 +106,23 @@ export function MarketPanel({
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  // Set before Pay, Cancel or Destroy is sent and cleared if it fails, so focus never drops to the page when that control goes.
+  const focusNext = useRef<FocusNext>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const machineHeadingRef = useRef<HTMLHeadingElement>(null);
+  const setFocusNext = (next: FocusNext) => {
+    focusNext.current = next;
+  };
+  useEffect(() => {
+    if (!focusNext.current || !run) return;
+    if (focusNext.current === "machine" && machineHeadingRef.current) {
+      machineHeadingRef.current.focus();
+      focusNext.current = null;
+    } else if (ENDED.has(run.phase) && headingRef.current) {
+      headingRef.current.focus();
+      focusNext.current = null;
+    }
+  });
 
   if (!run) {
     return (
@@ -129,7 +151,9 @@ export function MarketPanel({
 
       <div>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <h2 className="text-[16px] leading-[22px] font-semibold text-foreground">{heading}</h2>
+          <h2 ref={headingRef} tabIndex={-1} className="text-[16px] leading-[22px] font-semibold text-foreground focus:outline-none">
+            {heading}
+          </h2>
           {BEFORE_PAYING.has(run.phase) && (
             <button type="button" className={`text-[12px] leading-4 ${TEXT_BTN}`} disabled={stopping} onClick={() => void stop()}>
               {stopping ? "Stopping…" : "Stop"}
@@ -139,11 +163,16 @@ export function MarketPanel({
         <p className="mt-0.5 text-[12px] leading-4 text-muted" title={`Agent ${run.agent.ansName}`}>
           {run.marketLabel}
         </p>
+        {run.overspendTest && <p className="mt-1 font-medium text-foreground">This run was made by the overspend test, not by you.</p>}
         {ended && (
           <div className="mt-3 space-y-1">
-            <p className={`max-w-[64ch] ${ended.tone === "bad" ? "text-bad" : "text-foreground"}`}>{ended.sentence}</p>
-            {run.refusal && run.refusal.code !== "CANCELLED" && run.refusal.code !== "NOTHING_FITS" && (
-              <p className="max-w-[64ch] text-[12px] leading-4 text-muted [overflow-wrap:anywhere]">{run.refusal.detail}</p>
+            <p className={`max-w-[64ch] ${ended.tone === "bad" ? "text-bad" : "text-foreground"}`} title={run.refusal?.code}>
+              {ended.sentence}
+            </p>
+            {run.refusal && run.refusal.detail.trim() && !SAID_ALREADY.has(run.refusal.code) && sentence(run.refusal.detail) !== ended.sentence && (
+              <p className="max-w-[64ch] text-[12px] leading-4 text-muted [overflow-wrap:anywhere]" title={run.refusal.code}>
+                {run.refusal.detail}
+              </p>
             )}
           </div>
         )}
@@ -152,17 +181,27 @@ export function MarketPanel({
         </div>
       </div>
 
+      {(run.fallbacks ?? []).length > 0 && (
+        <div className="space-y-0.5">
+          {run.fallbacks.map((f, i) => (
+            <p key={i} className="max-w-[64ch] text-foreground">
+              {f}
+            </p>
+          ))}
+        </div>
+      )}
+
       <OffersTable run={run} />
 
-      {run.phase === "approval" && <ApprovalBar run={run} walletReady={walletReady[run.market]} post={post} />}
+      {run.phase === "approval" && <ApprovalBar run={run} walletReady={walletReady[run.market]} post={post} onFocusNext={setFocusNext} />}
 
       {run.phase === "paying" && !run.payment && run.approval && (
         <p className="border-l-2 border-foreground pl-3 text-foreground tabular-nums">
-          Paying {usd4(run.approval.usd)} {run.approval.token} over x402 on {run.approval.network}. Your agent signs once and never pays twice for this run.
+          Paying {run.approval.exact} {run.approval.token} over x402 on {run.approval.network}. Your agent signs once and never pays twice for this run.
         </p>
       )}
 
-      <MachinePanel run={run} nowMs={nowMs} send={send} />
+      <MachinePanel run={run} nowMs={nowMs} send={send} headingRef={machineHeadingRef} onFocusNext={setFocusNext} />
     </div>
   );
 }

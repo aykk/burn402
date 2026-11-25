@@ -24,6 +24,7 @@ type Record = {
   outcome: Outcome;
   verified: boolean;
   steps: Step[];
+  paymentTx?: string | null;
 };
 type Response = { network: string; fqdn: string | null; gatewayUrl?: string; records?: Record[]; error?: string };
 
@@ -318,6 +319,11 @@ export default function RecordsPage() {
                 <div className="min-w-0">
                   <div className="font-medium text-foreground">{sentence(moneyCopy(headline))}</div>
                   {r.reason && <div className="text-muted">{sentence(moneyCopy(r.reason))}</div>}
+                  {r.paymentTx && (
+                    <div className="text-muted">
+                      Payment transaction <span className={`text-foreground [overflow-wrap:anywhere] ${MONO}`}>{r.paymentTx}</span>
+                    </div>
+                  )}
                   {r.subject && <div className={`mt-0.5 break-all text-muted ${MONO}`}>{shortAgent(r.subject)}</div>}
                 </div>
                 <div>

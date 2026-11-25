@@ -90,6 +90,17 @@
     outline-offset: 1px;
   }
 
+  /* One focus ring for every control: the ink outline the fields use, never the browser's blue. */
+  button:focus-visible,
+  a:focus-visible,
+  summary:focus-visible,
+  [tabindex="0"]:focus-visible,
+  input[type="checkbox"]:focus-visible,
+  input[type="range"]:focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 2px;
+  }
+
   input::placeholder,
   textarea::placeholder {
     /* Secondary ink at full strength: 5.5:1 on the field surface. Still clearly lighter than typed text. */

@@ -16,12 +16,15 @@ const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote 
  */
 export function OffersTable({ run }: { run: MarketRunView }) {
   const [all, setAll] = useState(false);
-  const sorted = run.rows.map((r, i) => ({ r, i })).sort((a, b) => ORDER[a.r.state] - ORDER[b.r.state] || a.i - b.i).map(({ r }) => r);
+  // The plan the run chose stays first in every state, including after its payment was refused.
+  const picked = (r: OfferRow) => r.state === "chosen" || (run.approval !== null && r.id === run.approval.plan && r.region === run.approval.region);
+  const rank = (r: OfferRow) => (picked(r) ? -1 : ORDER[r.state]);
+  const sorted = run.rows.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(({ r }) => r);
   const usable = sorted.filter((r) => r.state !== "left out");
   const shown = all ? sorted : usable.slice(0, MAX_ROWS);
   const hidden = sorted.length - shown.length;
   const summary = leftOutSummary(run.leftOut, run.need);
-  const sources = sourceLines(run.sources);
+  const sources = sourceLines(run.sources, run.marketLabel);
   const quoting = run.phase === "scanning" || run.phase === "choosing" || run.phase === "quoting";
 
   const status = (r: OfferRow): { word: string; title?: string; tone: string } => {
@@ -33,9 +36,9 @@ export function OffersTable({ run }: { run: MarketRunView }) {
       case "candidate":
         return { word: quoting ? "waiting" : "not asked", tone: "text-muted" };
       case "quote failed":
-        return { word: quoteNote(r.note), title: r.note ?? undefined, tone: "text-bad" };
+        return { word: quoteNote(r.code), title: [r.note, r.code].filter(Boolean).join(" ") || undefined, tone: "text-bad" };
       case "left out":
-        return { word: leftOutPhrase(r.note ?? "", run.need), tone: "text-muted" };
+        return { word: leftOutPhrase(r.code, run.need), title: r.code ?? undefined, tone: "text-muted" };
     }
   };
 
@@ -75,9 +78,10 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 const out = r.state === "left out";
                 return (
                   <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule ${out ? "text-muted" : ""}`}>
-                    <td className={`border-l-2 py-2 pr-4 pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`}>
-                      <span className="break-all">{r.id}</span>
-                      {r.region && <span className="font-normal text-muted"> {r.region}</span>}
+                    {/* Plan ids never break mid-word: the table scrolls sideways instead, and the full id is in the title. */}
+                    <td className={`border-l-2 py-2 pr-4 pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
+                      <span className="whitespace-nowrap">{r.id}</span>
+                      {r.region && <span className="font-normal whitespace-nowrap text-muted"> {r.region}</span>}
                     </td>
                     <td className="hidden py-2 pr-4 sm:table-cell">{r.provider}</td>
                     <td className="hidden py-2 pr-4 md:table-cell">{machineSize(r)}</td>
@@ -88,10 +92,10 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                         ""
                       ) : chosen ? (
                         <span className="font-semibold text-foreground underline decoration-amber decoration-2 underline-offset-4" title="The amount this rental pays, shown amber in the meter">
-                          {usd4(r.quoteUsd)}
+                          {r.quoteExact ?? usd4(r.quoteUsd)}
                         </span>
                       ) : (
-                        usd4(r.quoteUsd)
+                        (r.quoteExact ?? usd4(r.quoteUsd))
                       )}
                     </td>
                     <td className={`py-2 text-[12px] leading-4 ${s.tone}`} title={s.title}>

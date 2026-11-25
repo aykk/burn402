@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Nav } from "@/app/nav";
 import { ActionError, failureMessage } from "@/app/components/ActionError";
 import { AttemptLedger } from "@/app/components/AttemptLedger";
-import { usd2, usd4 } from "@/app/components/format";
+import { usd2 } from "@/app/components/format";
+import { usdPlain } from "@/lib/market/money";
 import { BTN_PRIMARY } from "@/app/components/ui";
 import type { OverspendAttempt, OverspendResult } from "@/lib/market/overspend";
 import type { Snapshot } from "@/lib/demo/snapshot";
@@ -66,11 +67,12 @@ export default function OverspendPage() {
 
       {result && (
         <section className="mt-6 max-w-[80ch] space-y-4 border-t border-rule pt-6">
-          <AttemptLedger attempts={result.attempts.map(toRow)} status="done" verdict={result.verdict} />
+          {/* The test's own sentences carry exact amounts ("$0.010382"); the ledger shows them as they are. */}
+          <AttemptLedger attempts={result.attempts.map(toRow)} status="done" verdict={result.verdict} exact />
           <p className="flex items-center gap-x-2 text-muted">
             <span aria-hidden className="inline-block size-2.5 shrink-0 bg-amber" />
             <span>
-              Paid during the test: <span className="font-semibold text-foreground tabular-nums">{result.spentUsd === null ? "unknown" : `${usd4(result.spentUsd)} USDC`}</span> on Solana devnet.
+              Paid during the test: <span className="font-semibold text-foreground tabular-nums">{result.spentUsd === null ? "unknown" : `${usdPlain(result.spentUsd)} USDC`}</span> on Solana devnet.
             </span>
           </p>
         </section>

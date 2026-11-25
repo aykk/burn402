@@ -8,9 +8,10 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const period = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 /** Backend prose is lowercase machine copy ("it asked the broker for x, at $0.262 an hour"); the UI reads it as a sentence. */
-function attemptText(what: string): string {
+function attemptText(what: string, exact = false): string {
+  const money = exact ? (t: string) => t : moneyText;
   return sentence(
-    moneyText(
+    money(
       what
         .replace(/^it /, "")
         .replace(/, at \$/, " at $")
@@ -20,8 +21,14 @@ function attemptText(what: string): string {
   );
 }
 
-/** "/hour" and "/hr" read as "an hour", as everywhere else on the site; amounts in the site's money format. */
-const hourly = (text: string) => moneyText(text.replace(/\/(hour|hr)\b/g, " an hour"));
+/**
+ * "/hour" and "/hr" read as "an hour", as everywhere else on the site; amounts in the site's money format,
+ * unless the text already carries exact amounts (the purchasing agent's overspend test), which stay as they are.
+ */
+const hourly = (text: string, exact = false) => {
+  const t = text.replace(/\/(hour|hr)\b/g, " an hour");
+  return exact ? t : moneyText(t);
+};
 
 /** A backend message about the test (an error) in the UI's words: one name for the feature, site money, a sentence. */
 export function testCopy(text: string): string {
@@ -68,7 +75,7 @@ export function attemptVerdict(attempts: Attempt[], status: Status): string | nu
  * `outcomeLabel()` does on /records. Blocked by the broker is the expected result, so it is ink (as
  * "Refused by the broker" is on /records); only an attempt that got through is red.
  */
-export function attemptOutcome(a: Attempt): { word: string; reason: string; color: string } {
+export function attemptOutcome(a: Attempt, exact = false): { word: string; reason: string; color: string } {
   // The trust-index step: a score change, not a listing.
   if (/^the trust index/i.test(a.what) || /→/.test(a.result)) {
     const dir = /\b(lowered|raised)\b/i.exec(a.what)?.[1].toLowerCase();
@@ -85,11 +92,11 @@ export function attemptOutcome(a: Attempt): { word: string; reason: string; colo
     const head = split[1].toLowerCase();
     const word = head === "refused" ? "Blocked" : head === "caught it" ? "Caught it" : "Got through";
     const rest = head === "unexpected" ? `The broker answered ${split[2] || "something else"}` : split[2];
-    return { word, reason: rest ? period(sentence(hourly(rest))) : "", color };
+    return { word, reason: rest ? period(sentence(hourly(rest, exact))) : "", color };
   }
   // The auditor's own listing: a count, then any instances with no receipt.
   const word = a.blocked === true ? "Blocked" : a.blocked === false ? "Got through" : a.ok ? "Found it" : "Missed it";
-  return { word, reason: period(sentence(hourly(a.result))), color };
+  return { word, reason: period(sentence(hourly(a.result, exact))), color };
 }
 
 /** ANS names inside the prose render in mono and may break anywhere; the prose itself only breaks at spaces. */
@@ -115,7 +122,7 @@ function Prose({ text }: { text: string }) {
  * "Step N" on the left of every row (the attempt that went around the broker included) and the attempt,
  * the outcome and what it proves behind one 2px ink rule. Stacks under 640px.
  */
-export function AttemptLedger({ attempts, status, verdict: given }: { attempts: Attempt[]; status: Status; verdict?: string }) {
+export function AttemptLedger({ attempts, status, verdict: given, exact = false }: { attempts: Attempt[]; status: Status; verdict?: string; exact?: boolean }) {
   // a caller with its own verdict (the purchasing agent's overspend test) passes it in
   const verdict = given ?? attemptVerdict(attempts, status);
   return (
@@ -123,13 +130,13 @@ export function AttemptLedger({ attempts, status, verdict: given }: { attempts: 
       {verdict && <p className="max-w-[64ch] font-semibold text-foreground">{verdict}</p>}
       <ol className="space-y-3">
       {attempts.map((a, i) => {
-        const o = attemptOutcome(a);
+        const o = attemptOutcome(a, exact);
         return (
           <li key={i} className="grid grid-cols-1 gap-y-1 sm:grid-cols-[88px_minmax(0,1fr)] sm:gap-x-4">
             <div className="text-[12px] leading-5 font-semibold text-foreground">Step {i + 1}</div>
             <div className="min-w-0 border-l-2 border-foreground pl-3 break-words">
               <div className="text-foreground">
-                <Prose text={attemptText(a.what)} />
+                <Prose text={attemptText(a.what, exact)} />
               </div>
               <div>
                 <span className="font-semibold" style={{ color: o.color }}>
