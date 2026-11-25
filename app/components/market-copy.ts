@@ -71,7 +71,7 @@ export function prepaidLine(p: PaymentFacts, hours: number, ranSeconds: number |
   const amount = usdExact(p.atomic);
   const paid = p.status === "confirmed" ? `Paid ${amount} for ${hoursText(hours)}.` : `Sent ${amount} for ${hoursText(hours)}, not confirmed yet.`;
   const ran = ranSeconds !== null ? ` Destroyed after ${elapsedText(ranSeconds)}.` : "";
-  return `${paid}${ran} The seller does not refund unused time.`;
+  return `${paid}${ran} Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.`;
 }
 
 /**
