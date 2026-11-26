@@ -143,8 +143,10 @@ export async function GET(request: Request) {
     });
   // an older good answer is shown now; the read above replaces it for the next visitor
   if (good) return Response.json(good.answer.body);
-  const { status, body } = await held.reading;
-  return Response.json(body, { status });
+  // A failed read is answered with 200 and an `error` field, which the page shows as "couldn't read". A 502
+  // or 504 here would be replaced by the tunnel's own error page, and the page would get HTML it cannot read.
+  const { body } = await held.reading;
+  return Response.json(body);
 }
 
 async function load(network: Network, fqdn: string | null): Promise<{ status: number; body: unknown }> {
