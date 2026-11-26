@@ -5,6 +5,7 @@ import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import { Fold } from "./Fold";
 import { usd4 } from "./format";
 import { leftOutPhrase, leftOutSummary, machineSize, quoteNote, sourceLines } from "./market-copy";
+import { MONO_ID } from "./ui";
 
 const MAX_ROWS = 8;
 /** Cell padding: a little tighter while the table is narrow. */
@@ -16,7 +17,7 @@ const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote 
  * one line counting what was left out and why. "Show all" opens every plan, left-out ones included, in
  * the same table. Columns follow the width the table actually has (a container query), so the firm quote
  * and the status are always in view without scrolling: under 30rem the status sits under the plan name,
- * Provider and the list price join from 37rem, Size from 43rem. The list price here is the seller's figure
+ * Provider and Size join from 37rem, the list price from 46rem. The list price here is the seller's figure
  * (the provider's monthly price ÷ 720 hours), so it can differ by a few hundredths of a cent from the hourly
  * price the provider publishes, which Market prices shows; a visible line under the table says so.
  */
@@ -64,14 +65,14 @@ export function OffersTable({ run }: { run: MarketRunView }) {
       {shown.length > 0 && (
         // relative: the visually hidden header text is positioned against this wrapper, so it cannot widen the page.
         <div className="@container relative overflow-x-auto">
-          <table className="w-full border-collapse text-[13.5px] leading-5">
+          <table className="w-full border-collapse text-[14px] leading-5">
             <thead>
               <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
                 <th className={`${PAD} pl-[13px] font-medium`}>Plan</th>
                 <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Provider</th>
-                <th className={`hidden ${PAD} font-medium @min-[43rem]:table-cell`}>Size</th>
+                <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Size</th>
                 <th
-                  className={`hidden ${PAD} text-right font-medium @min-[37rem]:table-cell`}
+                  className={`hidden ${PAD} text-right font-medium @min-[46rem]:table-cell`}
                   title="The seller's figure: the provider's monthly price divided by 720 hours. Market prices shows the hourly price the provider publishes."
                 >
                   List price/h
@@ -92,16 +93,16 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                   <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule transition-colors hover:bg-surface/70 ${out ? "text-muted" : ""}`}>
                     {/* Plan ids never break mid-word: the table scrolls sideways instead, and the full id is in the title. */}
                     <td className={`border-l-2 ${PAD} pl-3 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
-                      <span className="whitespace-nowrap">{r.id}</span>
-                      {r.region && <span className="font-normal whitespace-nowrap text-muted"> {r.region}</span>}
+                      <span className={`whitespace-nowrap ${MONO_ID}`}>{r.id}</span>
+                      {r.region && <span className={`font-normal whitespace-nowrap text-muted ${MONO_ID}`}> {r.region}</span>}
                       {/* Narrow tables: the status under the plan name instead of a column that would scroll out of view. */}
                       <span className={`block text-[12px] leading-4 @min-[30rem]:hidden ${s.tone}`} title={s.title}>
                         {s.word}
                       </span>
                     </td>
                     <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>{r.provider}</td>
-                    <td className={`hidden ${PAD} @min-[43rem]:table-cell`}>{machineSize(r)}</td>
-                    <td className={`hidden ${PAD} text-right @min-[37rem]:table-cell`}>{r.listHourlyUsd !== null ? usd4(r.listHourlyUsd) : "-"}</td>
+                    <td className={`hidden ${PAD} whitespace-nowrap @min-[37rem]:table-cell`}>{machineSize(r)}</td>
+                    <td className={`hidden ${PAD} text-right @min-[46rem]:table-cell`}>{r.listHourlyUsd !== null ? usd4(r.listHourlyUsd) : "-"}</td>
                     <td className={`${PAD} text-right`}>{usd4(r.hourlyUsd)}</td>
                     <td className={`${PAD} text-right`}>
                       {r.quoteUsd === null ? (
@@ -114,7 +115,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                         (r.quoteExact ?? usd4(r.quoteUsd))
                       )}
                     </td>
-                    <td className={`hidden py-2 text-[12px] leading-4 @min-[30rem]:table-cell ${s.tone}`} title={s.title}>
+                    <td className={`hidden py-2 text-[12px] leading-4 whitespace-nowrap @min-[30rem]:table-cell ${s.tone}`} title={s.title}>
                       {s.word}
                     </td>
                   </tr>
@@ -123,7 +124,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
             </tbody>
           </table>
           {/* Only where the List price/h column shows (the same container width). */}
-          <p className="mt-2 hidden max-w-[64ch] text-[12px] leading-4 text-muted @min-[37rem]:block">
+          <p className="mt-2 hidden max-w-[64ch] text-[12px] leading-4 text-muted @min-[46rem]:block">
             List price here is the provider&apos;s monthly price spread over a 30-day month; the provider&apos;s own hourly price is in Market prices.
           </p>
         </div>

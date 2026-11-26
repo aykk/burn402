@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "burn402",
-  description: "burn402",
+  description: "Give an AI agent a budget and it rents the cheapest compute that fits, pays with x402 on Solana, and destroys the machine when the time is up.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -8,11 +8,11 @@ import type { FocusNext } from "./MarketPanel";
 import { BTN } from "./ui";
 
 const PAY_TEST =
-  "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-foreground bg-foreground px-5 text-[13.5px] leading-5 font-semibold text-surface enabled:hover:bg-[#2B3644] disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
+  "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-foreground bg-foreground px-5 text-[14px] leading-5 font-semibold text-surface enabled:hover:bg-[#2B3644] disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
 
 /** The one control that spends real money: amber, the site's money colour, with ink text (7.3:1). */
 const PAY_REAL =
-  "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-amber bg-amber px-5 text-[13.5px] leading-5 font-semibold text-foreground enabled:hover:border-foreground disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
+  "inline-flex h-10 shrink-0 items-center rounded-[3px] border border-amber bg-amber px-5 text-[14px] leading-5 font-semibold text-foreground enabled:hover:border-foreground disabled:cursor-not-allowed disabled:border-segment disabled:bg-segment disabled:text-muted";
 
 /**
  * The approval stop: exactly what will be paid, to whom and for what, then Pay and rent or Cancel.
@@ -70,7 +70,7 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
   return (
     <section aria-labelledby="approval-heading" className="space-y-3 border-l-2 border-foreground pl-3">
       <div>
-        <h3 id="approval-heading" className="text-[13.5px] leading-5 font-semibold text-foreground">
+        <h3 id="approval-heading" className="text-[14px] leading-5 font-semibold text-foreground">
           Your approval
         </h3>
         <p className="mt-1 max-w-[60ch] text-[16px] leading-[22px] font-semibold text-foreground tabular-nums [overflow-wrap:anywhere]">{approvalSentence(a)}</p>

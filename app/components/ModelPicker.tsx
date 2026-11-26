@@ -81,20 +81,17 @@ export function ModelPicker({
         className="flex h-9 items-center rounded-[3px] border border-rule-strong px-3 text-foreground hover:border-foreground enabled:hover:bg-surface"
         aria-expanded={open}
         aria-controls="model-picker"
-        aria-label={`Agent model: ${selected.modelName}`}
+        aria-label={`Agent model: ${selected.modelName}${missingKey ? ", no key yet: add one" : ""}`}
         onClick={() => setOpen(!open)}
       >
         {/* One line of text with the mark set inline, so the button's baseline is the name's, not the mark's edge. */}
         <span className="whitespace-nowrap">
           <Image src={`/models/${selected.id}.svg`} alt="" width={14} height={14} unoptimized style={MONO_MARK} className="mr-2 inline-block align-[-2px]" />
           {selected.modelName}
+          {/* One setting, one control: a missing key is said inside the model button, which opens on the key field. */}
+          {missingKey && <span className="ml-2.5 border-l border-rule-strong pl-2.5 text-muted">Add key</span>}
         </span>
       </button>
-      {missingKey && (
-        <button className={TEXT_BTN} onClick={() => setOpen(true)}>
-          Add key
-        </button>
-      )}
 
       {open && (
         <span

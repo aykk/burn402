@@ -82,15 +82,18 @@ const NETWORK: Record<MarketId, string> = { test: "Solana devnet", real: "Solana
 type PaymentFacts = Pick<NonNullable<MarketRunView["payment"]>, "atomic" | "status">;
 
 /** The payment as the meter states it: settled only once confirmed, always the exact amount. */
-export function paymentLine(p: PaymentFacts, market: MarketId): string {
-  const amount = usdExact(p.atomic);
-  return p.status === "confirmed" ? `Paid ${amount} over x402, settled on ${NETWORK[market]}.` : `Sent ${amount} over x402 on ${NETWORK[market]}, not confirmed yet.`;
+export function paymentLine(p: PaymentFacts, market: MarketId, opts: { amount?: boolean } = {}): string {
+  // Without the amount when the meter's big figure already is that amount.
+  const amount = opts.amount === false ? "" : ` ${usdExact(p.atomic)}`;
+  return p.status === "confirmed" ? `Paid${amount} over x402, settled on ${NETWORK[market]}.` : `Sent${amount} over x402 on ${NETWORK[market]}, not confirmed yet.`;
 }
 
-/** After the machine is destroyed: what the prepaid time cost, how long it ran, and that unused time stays paid. */
+/**
+ * After the machine is destroyed: what the payment bought, how long it ran, and that unused time stays paid.
+ * The amount itself is the meter's big figure right above, so it is not repeated here.
+ */
 export function prepaidLine(p: PaymentFacts, hours: number, ranSeconds: number | null): string {
-  const amount = usdExact(p.atomic);
-  const paid = p.status === "confirmed" ? `Paid ${amount} for ${hoursText(hours)}.` : `Sent ${amount} for ${hoursText(hours)}, not confirmed yet.`;
+  const paid = p.status === "confirmed" ? `Paid for ${hoursText(hours)}.` : `Sent for ${hoursText(hours)}, not confirmed yet.`;
   const ran = ranSeconds !== null ? ` Destroyed after ${timeLeft(ranSeconds)}.` : "";
   return `${paid}${ran} Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.`;
 }
