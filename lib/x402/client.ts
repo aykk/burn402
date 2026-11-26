@@ -1,12 +1,3 @@
-import { x402Client } from "@x402/core/client";
-import { decodePaymentResponseHeader } from "@x402/core/http";
-import { wrapFetchWithPayment } from "@x402/fetch";
-import { toClientSvmSigner } from "@x402/svm";
-import { ExactSvmScheme } from "@x402/svm/exact/client";
-import { createKeyPairSignerFromBytes } from "@solana/kit";
-import type { SigningKey } from "../mandate";
-import { signProvisionRequest } from "./signed";
-
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 export function base58Decode(input: string): Uint8Array {
@@ -21,41 +12,4 @@ export function base58Decode(input: string): Uint8Array {
   let zeros = 0;
   while (zeros < input.length && input[zeros] === "1") zeros++;
   return new Uint8Array([...new Uint8Array(zeros), ...Buffer.from(n === BigInt(0) ? "" : hex, "hex")]);
-}
-
-export async function payingFetch(solanaSecretKeyBase58: string, baseFetch: typeof fetch = fetch): Promise<typeof fetch> {
-  const signer = toClientSvmSigner(await createKeyPairSignerFromBytes(base58Decode(solanaSecretKeyBase58)));
-  const client = new x402Client().register("solana:*", new ExactSvmScheme(signer));
-  return wrapFetchWithPayment(baseFetch, client);
-}
-
-export type ProvisionCall = {
-  url: string;
-  chain: string[];
-  mandate: string;
-  subject: string;
-  subjectKey: SigningKey;
-  plan: string;
-  region: string;
-  fetch: typeof fetch;
-};
-
-export async function requestProvision(call: ProvisionCall): Promise<{ status: number; body: unknown; payment: unknown }> {
-  const request = await signProvisionRequest({ iss: call.subject, mandate: call.mandate, plan: call.plan, region: call.region }, call.subjectKey);
-  const response = await call.fetch(call.url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chain: call.chain, request }),
-  });
-  const header = response.headers.get("PAYMENT-RESPONSE");
-  // the server may already have provisioned by the time it answers, so an
-  // unreadable body must not throw and lose the lease
-  const text = await response.text();
-  let body: unknown;
-  try {
-    body = text.length > 0 ? JSON.parse(text) : { error: `the broker answered ${response.status} with an empty body` };
-  } catch {
-    body = { error: `the broker answered ${response.status} with a body that is not JSON`, raw: text.slice(0, 400) };
-  }
-  return { status: response.status, body, payment: header ? decodePaymentResponseHeader(header) : null };
 }

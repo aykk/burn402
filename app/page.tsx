@@ -248,7 +248,7 @@ export default function Page() {
           big enough to spare the room); the page-colored strip above it hides what scrolls underneath. */}
       <div ref={meterRef} tabIndex={-1} className={`mt-1 shrink-0 bg-background pt-3 focus:outline-none ${pinned || lingering ? "meter-pinned" : ""}`}>
         <BudgetMeter
-          agentName={snap?.company?.name ?? null}
+          agentName={null}
           formBudgetUsd={draft.budgetUsd}
           formRateUsdHr={draft.rateUsdHr}
           draftValid={draft.valid}

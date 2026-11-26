@@ -1,4 +1,3 @@
-import { VultrResource } from "../burn";
 import { resetRefusal, settleOnReset } from "../market/recover";
 import { configFromEnv, createRuntime } from "./runtime";
 import { DemoSession } from "./script";
@@ -37,13 +36,6 @@ export async function resetSession(): Promise<DemoSession> {
     try {
       // test machine destroyed, approval cancelled, real machine kept (see settleOnReset)
       await settleOnReset((await previous).market);
-    } catch {}
-    try {
-      const old = (await previous).rt;
-      old.broker.stopReaper();
-      old.wallets.stop();
-      old.servers.stop();
-      if (old.resource.kind === "vultr") await (old.resource as VultrResource).sweep();
     } catch {}
   }
   return getSession();

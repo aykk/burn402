@@ -8,8 +8,10 @@ import {
   type Refusal,
   type VerifiedMandate,
 } from "../mandate";
-import { PROVISION_SCOPE } from "../burn";
 import { fqdnOf, sha256Of } from "./canonical";
+
+/** The scope a budget needs to rent compute. */
+const PROVISION_SCOPE = "compute:provision";
 
 export type UsageRecord = {
   mandate_jti: string;

@@ -103,7 +103,7 @@ export function ModelPicker({
           <span className="block space-y-1">
             <span className="block text-[16px] leading-[22px] font-semibold">Agent model</span>
             <span className="block text-muted">
-              This model reads your request, talks to the broker, decides what to rent and pays for it.
+              This model only turns “Describe what you need” into the form below. It never picks the plan or pays.
             </span>
           </span>
           <span className="flex flex-wrap gap-2">
