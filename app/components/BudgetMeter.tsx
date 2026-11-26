@@ -7,9 +7,6 @@ import { duration, usd2, usd4 } from "./format";
 import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
 import { allowanceWords, budgetShare, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
-/** 40 segments from 640px up, 24 below so each segment stays a readable width. */
-const SEGMENTS_WIDE = 40;
-const SEGMENTS_NARROW = 24;
 
 const CONDENSED = { fontStretch: "68%", fontVariationSettings: '"wdth" 68' } as const;
 
@@ -43,23 +40,16 @@ export function Swatch() {
   return <span aria-hidden className="inline-block size-2 shrink-0 rounded-[1px] bg-amber" />;
 }
 
-function Segments({ n, className }: { n: number; className: string }) {
-  return (
-    <>
-      {Array.from({ length: n }, (_, i) => (
-        <span key={i} className={`h-full flex-1 rounded-[1px] ${className}`} />
-      ))}
-    </>
-  );
-}
+/** The gauge's height: a fine tick scale, like a dial on an instrument. */
+const GAUGE = "relative h-5 sm:h-6";
 
-/** The allowance: ink segments for what is left of the budget being typed. */
-function WalletGauge({ v, segments, className }: { v: MeterView; segments: number; className: string }) {
-  const ink = Math.round(budgetShare(v.remainingUsd, v.budgetUsd) * segments);
+/** The allowance: light ticks for what is left of the budget being typed, dark ticks for what is gone. */
+function WalletGauge({ v, className }: { v: MeterView; className: string }) {
+  const left = budgetShare(v.remainingUsd, v.budgetUsd);
   return (
-    <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`gauge-in h-[14px] gap-[3px] ${className}`}>
-      <Segments n={ink} className="bg-foreground" />
-      <Segments n={segments - ink} className="bg-segment" />
+    <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`gauge-in ${GAUGE} ${className}`}>
+      <span className="ticks absolute inset-0 text-segment" />
+      <span className="ticks absolute inset-y-0 left-0 text-foreground/80" style={{ width: `${left * 100}%` }} />
     </div>
   );
 }
@@ -68,25 +58,21 @@ function WalletGauge({ v, segments, className }: { v: MeterView; segments: numbe
  * The job: a full amber gauge is the paid amount (or the quote). The amber layer is clipped from the
  * right as the server burns it, one linear second per tick so the drain is continuous between polls;
  * when the run ends the remainder collapses to $0 in one quick ease-out, the shutdown. Clipping keeps
- * the last partial segment honest and animates without layout. Reduced motion steps instead.
+ * the last partial tick honest and animates without layout. Reduced motion steps instead.
  */
-function JobGaugeBar({ j, v, segments, className }: { j: JobGauge; v: MeterView; segments: number; className: string }) {
+function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className: string }) {
   const timing =
     j.state === "shut"
       ? "motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   const fill = Math.min(1, Math.max(0, j.fill));
   return (
-    <div role="img" aria-label={gaugeLabel(j, v)} className={`relative h-[14px] ${className}`}>
-      <div className="flex h-full gap-[3px]">
-        <Segments n={segments} className="bg-segment" />
-      </div>
-      <div
-        className={`absolute inset-0 flex gap-[3px] motion-safe:transition-[clip-path] ${timing}`}
+    <div role="img" aria-label={gaugeLabel(j, v)} className={`${GAUGE} ${className}`}>
+      <span className="ticks absolute inset-0 text-segment" />
+      <span
+        className={`ticks absolute inset-0 text-amber motion-safe:transition-[clip-path] ${timing}`}
         style={{ clipPath: `inset(0 ${(1 - fill) * 100}% 0 0)` }}
-      >
-        <Segments n={segments} className="bg-amber" />
-      </div>
+      />
     </div>
   );
 }
@@ -127,7 +113,7 @@ function ReadoutBlock({ r }: { r: Readout }) {
     <div className="mt-3 sm:mt-0 sm:text-right">
       <p className="text-[12px] leading-4 text-muted">{r.label}</p>
       <p
-        className={`text-[20px] leading-[26px] tabular-nums ${r.quiet ? "font-normal text-muted" : "font-semibold text-foreground"}`}
+        className={`text-[22px] leading-[28px] tabular-nums ${r.quiet ? "font-normal text-muted" : "font-semibold text-foreground"}`}
         style={r.quiet ? undefined : CONDENSED}
       >
         {r.value}
@@ -198,7 +184,7 @@ export function BudgetMeter(props: {
     const amount = usd4(v.remainingUsd);
     const payment = props.job?.payment ?? null;
     return (
-      <section aria-label="Budget meter" className="rounded-[8px] border border-rule/70 bg-surface px-5 py-5 shadow-(--lift) sm:px-7 sm:py-6">
+      <section aria-label="Budget meter" className="meter-dark rounded-[12px] px-5 py-5 sm:px-8 sm:py-7">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
           <p className="text-[13.5px] leading-5 font-medium text-foreground">Budget left for {props.agentName?.trim() || "your agent"}</p>
           {/* A run that ended with money out and no machine: the payment, with its transaction when there is one. */}
@@ -206,7 +192,7 @@ export function BudgetMeter(props: {
         </div>
         <div className={`mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6 ${stale ? "opacity-40" : ""}`}>
           <p className="flex flex-wrap items-baseline gap-x-3">
-            <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] tabular-nums text-foreground" style={CONDENSED}>
+            <span className="text-[56px] leading-none font-semibold sm:text-[76px] tracking-[-0.01em] tabular-nums text-foreground" style={CONDENSED}>
               <span className="sr-only">{amount}</span>
               <span aria-hidden>
                 {amount.slice(0, -2)}
@@ -218,8 +204,7 @@ export function BudgetMeter(props: {
           <ReadoutBlock r={r} />
         </div>
         <div className={stale ? "opacity-40" : undefined}>
-          <WalletGauge v={v} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:flex" />
-          <WalletGauge v={v} segments={SEGMENTS_NARROW} className="mt-4 flex sm:hidden" />
+          <WalletGauge v={v} className="mt-5" />
         </div>
         <div className="mt-2 flex items-baseline justify-between gap-x-6 text-[12px] leading-4 text-muted tabular-nums">
           {stale ? <p className="text-foreground">Shown for the last valid budget and hourly limit until the form is fixed.</p> : <p>$0</p>}
@@ -249,7 +234,7 @@ export function BudgetMeter(props: {
   const paidText = v.paidExact ?? usd4(jobUsd);
 
   return (
-    <section aria-label="Budget meter" className="rounded-[8px] border border-rule/70 bg-surface px-5 py-5 shadow-(--lift) sm:px-7 sm:py-6">
+    <section aria-label="Budget meter" className="meter-dark rounded-[12px] px-5 py-5 sm:px-8 sm:py-7">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
           {!shut && <Swatch />}
@@ -260,11 +245,11 @@ export function BudgetMeter(props: {
       <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
         <p className="flex flex-wrap items-baseline gap-x-3">
           {h.time !== null ? (
-            <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] text-foreground tabular-nums" style={CONDENSED}>
+            <span className="text-[56px] leading-none font-semibold sm:text-[76px] tracking-[-0.01em] text-foreground tabular-nums" style={CONDENSED}>
               {h.time}
             </span>
           ) : (
-            <span className="text-[56px] leading-none font-semibold tracking-[-0.01em] tabular-nums" style={CONDENSED}>
+            <span className="text-[56px] leading-none font-semibold sm:text-[76px] tracking-[-0.01em] tabular-nums" style={CONDENSED}>
               <span className="sr-only">{h.amount}</span>
               <span aria-hidden>
                 <span className="text-muted">{lead}</span>
@@ -277,8 +262,7 @@ export function BudgetMeter(props: {
         <ReadoutBlock r={r} />
       </div>
 
-      <JobGaugeBar j={j} v={v} segments={SEGMENTS_WIDE} className="mt-4 hidden sm:block" />
-      <JobGaugeBar j={j} v={v} segments={SEGMENTS_NARROW} className="mt-4 block sm:hidden" />
+      <JobGaugeBar j={j} v={v} className="mt-5" />
 
       <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
         {/* The release lands here, where the drain ends: the label turns to ink once the amber is gone. */}
