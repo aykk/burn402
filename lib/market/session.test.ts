@@ -9,7 +9,7 @@ const good = {
   askBeforePaying: true,
 };
 
-const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers: { host: "127.0.0.1:3000", ...headers }, body: "{}" });
+const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers: { host: "127.0.0.1:3000", "content-length": "2", ...headers }, body: "{}" });
 
 describe("parseRunInput", () => {
   it("accepts the brief's example run", () => {
@@ -60,6 +60,11 @@ describe("checkRequest", () => {
     // the same local name arriving through a tunnel is not the owner, and is refused
     expect(isOwner(req({ host: "127.0.0.1:3000", "cf-connecting-ip": "203.0.113.9" }))).toBe(false);
     expect(checkRequest(req({ "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }))?.status).toBe(403);
+  });
+  it("refuses a body with no stated size with 411 (a chunked body would be read whole)", () => {
+    const r = new Request("http://127.0.0.1:3000/api/market/run", { method: "POST", headers: { host: "127.0.0.1:3000", "content-type": "application/json" }, body: "{}" });
+    expect(checkRequest(r)?.status).toBe(411);
+    expect(checkRequest(req({ "content-type": "application/json", "content-length": "abc" }))?.status).toBe(411);
   });
   it("refuses a body that is too large with 413", () => {
     expect(checkRequest(req({ "content-type": "application/json", "content-length": "20000" }))?.status).toBe(413);

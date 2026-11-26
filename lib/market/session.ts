@@ -110,8 +110,10 @@ export function checkRequest(request: Request): Response | null {
   if (refused) return Response.json({ error: refused }, { status: 403 });
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type)) return Response.json({ error: "send the request as JSON (Content-Type: application/json)" }, { status: 415 });
-  const length = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(length) || length > MAX_BODY_BYTES) return Response.json({ error: "that request is too large" }, { status: 413 });
+  // the size must be stated: a body sent in chunks with no length would be read whole into memory
+  const stated = request.headers.get("content-length");
+  if (stated === null || !/^\d{1,9}$/.test(stated)) return Response.json({ error: "send the request with a Content-Length" }, { status: 411 });
+  if (Number(stated) > MAX_BODY_BYTES) return Response.json({ error: "that request is too large" }, { status: 413 });
   return null;
 }
 

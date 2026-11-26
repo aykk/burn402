@@ -167,6 +167,9 @@ export class DemoSession {
     const open = journal.open().find((o) => o.run === runId);
     // a public visitor can only reach purchases their own session made
     if (!open || (this.kind === "public" && !this.runIds.has(runId))) return { ok: false, error: "that purchase is not listed as open" };
+    // with no machine id the search goes by plan and region through everything the wallet owns; every public
+    // visitor shares that wallet, so the search could land on someone else's machine
+    if (this.kind === "public" && !open.instance) return { ok: false, error: "This purchase has no machine on record. Dismiss it instead." };
     // machines known to belong to other runs are never picked by the plan-and-region match
     const exclude = new Set(journal.all().filter((e) => e.run !== runId && e.instance).map((e) => e.instance!));
     const live = this.market?.view().machine?.id;

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getRuntime } from "@/lib/demo/session";
+import { isOwner } from "@/lib/market/session";
 import { clusterOf } from "@/lib/market/record";
 import { recordWords } from "@/app/components/record-words";
 import { fromCompact, verifyJws } from "@/lib/mandate";
@@ -84,7 +85,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const network = (url.searchParams.get("network") === "testnet" ? "testnet" : "production") as Network;
   const asked = url.searchParams.get("fqdn");
-  const fqdn = asked !== null && FQDN_RE.test(asked) ? asked : null;
+  // only the owner may ask for one agent's records: each distinct name is a fresh search on Arweave
+  const fqdn = asked !== null && FQDN_RE.test(asked) && isOwner(request) ? asked : null;
   const key = `${network}|${fqdn ?? ""}`;
   const now = Date.now();
   let hit = cache.get(key);

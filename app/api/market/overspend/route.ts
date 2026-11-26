@@ -44,7 +44,8 @@ export async function POST(request: Request) {
     });
     return Response.json(result);
   } catch (error) {
-    return Response.json({ error: (error as Error).message }, { status: 500 });
+    // a public visitor gets no detail: a failure here can name files on the server
+    return Response.json({ error: who.v.kind === "owner" ? (error as Error).message : "The overspend test could not run. Try again later." }, { status: 500 });
   } finally {
     release();
   }

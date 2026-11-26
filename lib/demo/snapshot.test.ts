@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { snapshot } from "./snapshot";
+import { snapshot, withoutPaths } from "./snapshot";
 import type { Runtime } from "./runtime";
 import type { DemoSession } from "./script";
 
@@ -35,5 +35,14 @@ describe("snapshot", () => {
     expect(s.visitor).toBe("owner");
     expect(s.market?.machine?.ssh).toBe(machine.ssh);
     expect(s.models).not.toBeNull();
+  });
+  it("no text a public visitor sees carries a path on the server", () => {
+    expect(withoutPaths({ error: "ENOENT: no such file, open '/Users/owner/app/.burn402/purchases.jsonl'", n: 3, list: ["mkdtemp /private/tmp/x failed", "fine"] })).toEqual({
+      error: "ENOENT: no such file, open 'a file on the server'",
+      n: 3,
+      list: ["mkdtemp a file on the server failed", "fine"],
+    });
+    // addresses, prices and urls are untouched
+    expect(withoutPaths("paid $0.010382 to 7avJ...FpEk, see https://solscan.io/tx/abc?cluster=devnet")).toBe("paid $0.010382 to 7avJ...FpEk, see https://solscan.io/tx/abc?cluster=devnet");
   });
 });
