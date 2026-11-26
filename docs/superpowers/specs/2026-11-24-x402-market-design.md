@@ -195,3 +195,24 @@ Rules:
 - The view shows, per source, the cheapest fit (on-demand price and, when published, the interruptible price), then two plain facts: the cheapest fit anywhere, and the cheapest the agent can actually buy with how much more that is per hour. Sources the agent cannot buy from say so ("no x402 payment yet").
 - Prices from other providers are never called quotes and never enter the payment path; only the buyable seller's firm quote can be approved.
 - Available two ways: inside a run (fetched during the scan), and on demand through a "Compare prices" action that starts no run.
+
+## Addendum 2026-11-26: public demo mode
+
+**Why.** The owner wants a working public site. Strangers renting with their own money needs wallet signing in the browser and cannot be verified without real funds, so the public site is a demo on the test market; real rentals stay on the owner's computer.
+
+**Two visitors** (`lib/market/access.ts`):
+- *Owner*: Host is `127.0.0.1:3000` or `localhost:3000` and the request was not forwarded (no Cloudflare headers, forwarded address is loopback). Everything is allowed.
+- *Public*: Host is listed in `BURN402_PUBLIC_HOSTS`. Test market only.
+- Anything else is refused (403).
+
+**Public visitors get:** a private session named by an HttpOnly, Secure, SameSite=Lax cookie that `proxy.ts` sets (own run, log, open purchases; the approval code only reaches the session that owns the run), the whole test-market flow, the overspend test, the records page and the price comparison.
+
+**Public visitors never get:** the real market, the model key or the model call, the test seller's HTTP API, another visitor's run, or a server path (the SSH line is `ssh root@<ip>`).
+
+**Limits.** Starts per hour: 10 a session, 20 an address, 150 overall; overspend tests 3, 5 and 20. At most 300 public sessions, 8 an address, dropped after 45 idle minutes (approval cancelled, test machine destroyed; never while a payment is in flight). Request bodies up to 16 KB. `/api/records` answers are cached for a minute.
+
+**Shared test seller.** All sessions use one wallet and one in-process test seller. The overspend test sets its fault switches, so it runs alone: refused while any session's run is talking to the seller, and no run or approval starts while it runs. Payments from the wallet are signed one at a time, 1.5 s apart, so two identical transfers never share a blockhash.
+
+**Known limits.** (1) After an unclear payment outcome a run adopts a new machine of the same plan and region from the wallet's list; with a shared wallet that could be another visitor's. On the test market this path only occurs under the overspend test's faults, which run alone. (2) The devnet wallet is finite (about $0.0104 a rental); when it runs dry, rentals fail before paying until it is refilled. (3) A quick tunnel's address changes when it restarts, and the site is only up while the owner's computer is.
+
+**Going live.** `npm run public` builds, opens a Cloudflare quick tunnel, and starts the production server with `BURN402_PUBLIC_HOSTS` set to the tunnel's host and `BURN402_TEST_SELLER=1`.
