@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, findPaymentFor, isLocalHost, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, findPaymentFor, isOwner, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
 
 const good = {
   market: "test",
@@ -56,7 +56,13 @@ describe("checkRequest", () => {
   });
   it("allows both local host names", () => {
     expect(checkRequest(req({ "content-type": "application/json", host: "localhost:3000" }))).toBeNull();
-    expect(isLocalHost(req({ host: "127.0.0.1:3000" }))).toBe(true);
+    expect(isOwner(req({ host: "127.0.0.1:3000" }))).toBe(true);
+    // the same local name arriving through a tunnel is not the owner, and is refused
+    expect(isOwner(req({ host: "127.0.0.1:3000", "cf-connecting-ip": "203.0.113.9" }))).toBe(false);
+    expect(checkRequest(req({ "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }))?.status).toBe(403);
+  });
+  it("refuses a body that is too large with 413", () => {
+    expect(checkRequest(req({ "content-type": "application/json", "content-length": "20000" }))?.status).toBe(413);
   });
   it.each(["evil.example:3000", "127.0.0.1", "localhost:3001", "127.0.0.1:3000.evil.example", "LOCALHOST:3000.x", ""])("refuses Host %j with 403 even for same-origin JSON", (host) => {
     const r = checkRequest(req({ "content-type": "application/json", origin: "http://127.0.0.1:3000", host }));

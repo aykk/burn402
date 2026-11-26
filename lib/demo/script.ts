@@ -4,18 +4,36 @@ import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
+import { DemoLog } from "./log";
 import type { Actor, Runtime } from "./runtime";
 
 export const MARKET_ENDED: ReadonlySet<MarketPhase> = new Set(["released", "failed", "refused"]);
+/** Phases in which a run is talking to the seller right now (not waiting for a person, not holding a machine). */
+const MARKET_WORKING: ReadonlySet<MarketPhase> = new Set(["scanning", "choosing", "quoting", "paying", "provisioning", "releasing"]);
 
-/** The app's one session: the current market run, signed by the owner's key and recorded on Arweave. */
+/**
+ * One visitor's session: their current market run, signed by the owner's key and recorded on Arweave.
+ * The owner's session logs to the runtime's log; a public visitor's has a log of its own, so nobody
+ * reads another visitor's lines.
+ */
 export class DemoSession {
   readonly rt: Runtime;
+  readonly kind: "owner" | "public";
+  readonly log: DemoLog;
+  /** Every run this session started, so it can only see and destroy its own purchases. */
+  readonly runIds = new Set<string>();
   market: MarketRun | null = null;
   private marketStarting: Promise<MarketRunView> | null = null;
 
-  constructor(rt: Runtime) {
+  constructor(rt: Runtime, kind: "owner" | "public" = "owner") {
     this.rt = rt;
+    this.kind = kind;
+    this.log = kind === "owner" ? rt.log : new DemoLog();
+  }
+
+  /** True while this session's run is talking to the seller (the overspend test must not set faults meanwhile). */
+  get marketWorking(): boolean {
+    return this.marketStarting !== null || (this.market !== null && MARKET_WORKING.has(this.market.view().phase));
   }
 
   mandate(overrides: Partial<Mandate> & Pick<Mandate, "jti" | "iss" | "sub">): Mandate {
@@ -56,7 +74,9 @@ export class DemoSession {
 
   private async newMarketRun(input: RunInput): Promise<MarketRunView> {
     const { rt } = this;
-    const id = `mkt_${Date.now().toString(36)}`;
+    // public sessions can start in the same millisecond: a random tail keeps run ids unique
+    const id = `mkt_${Date.now().toString(36)}${this.kind === "public" ? Math.random().toString(36).slice(2, 6) : ""}`;
+    this.runIds.add(id);
     const jti = `m_${id}`;
     const agent = { name: "your agent", ansName: rt.actors.ops.name };
     const signer = rt.actors.ops;
@@ -101,12 +121,13 @@ export class DemoSession {
         void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti, cluster: clusterForMarket(input.market) }), {
           signer,
           cluster: clusterForMarket(input.market),
+          log: this.log,
         });
       },
-      log: (line) => rt.log.push("info", "MARKET", line),
+      log: (line) => this.log.push("info", "MARKET", line),
     });
     this.market = run;
-    rt.log.push(
+    this.log.push(
       "step",
       "MARKET",
       `${agent.name} starts a ${input.market === "real" ? "real (mainnet)" : "test (devnet)"} run ${id}: budget $${input.limits.budgetUsd}, up to $${input.limits.rateUsdHr}/hour, ${payer ? `paying from ${payer.address}` : "no wallet set up"}`,
@@ -118,6 +139,8 @@ export class DemoSession {
   approveMarket(runId: string, code: string): { ok: true; run: MarketRunView } | { ok: false; error: string } {
     const run = this.market;
     if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    // the overspend test sets the test seller's faults; a payment must not start while it runs
+    if (overspendRunning()) return { ok: false, error: OVERSPEND_BUSY };
     const result = run.approve(code);
     return result.ok ? { ok: true, run: run.view() } : result;
   }
@@ -142,7 +165,8 @@ export class DemoSession {
   private async destroyOpen(runId: string): Promise<{ ok: true; message?: string } | { ok: false; error: string }> {
     const journal = marketJournal(this.rt.config.root);
     const open = journal.open().find((o) => o.run === runId);
-    if (!open) return { ok: false, error: "that purchase is not listed as open" };
+    // a public visitor can only reach purchases their own session made
+    if (!open || (this.kind === "public" && !this.runIds.has(runId))) return { ok: false, error: "that purchase is not listed as open" };
     // machines known to belong to other runs are never picked by the plan-and-region match
     const exclude = new Set(journal.all().filter((e) => e.run !== runId && e.instance).map((e) => e.instance!));
     const live = this.market?.view().machine?.id;
@@ -154,7 +178,7 @@ export class DemoSession {
       return { ok: false, error: (error as Error).message };
     }
     if (!result.ok) return result;
-    this.rt.log.push("info", "MARKET", `run ${open.run}: ${result.message}`);
+    this.log.push("info", "MARKET", `run ${open.run}: ${result.message}`);
     return { ok: true, message: result.message };
   }
 }

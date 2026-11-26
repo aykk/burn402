@@ -4,7 +4,7 @@ import { choose } from "./choose";
 import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
-import { localHosts, localVerdict } from "./local";
+import { accessVerdict, headersOf, visitorOf } from "./access";
 import { makePayer, type Payer } from "./pay";
 import { buyableFor, comparePrices, type PriceComparison } from "./prices/compare";
 import { fetchMarketPrices, type MarketPrices } from "./prices/fetch";
@@ -35,12 +35,31 @@ type PayerCache = Map<string, Promise<Payer>>;
 const payers: PayerCache = ((globalThis as unknown as { __burn402MarketPayers?: PayerCache }).__burn402MarketPayers ??= new Map());
 
 /** Built on first use and cached per key; null when no key is set. A bad key throws a message without the key. */
+/**
+ * Payments from one wallet are signed one at a time, a little apart. Many visitors share the test
+ * wallet; two identical transfers built on the same blockhash would be the same transaction, and the
+ * chain would take only one of them.
+ */
+const PAYMENT_GAP_MS = 1500;
+function spaced(payer: Payer): Payer {
+  let last: Promise<unknown> = Promise.resolve();
+  return {
+    ...payer,
+    payHeaders(required) {
+      const turn = last.then(() => payer.payHeaders(required));
+      // the next payment waits for this one to be signed, whether it worked or not, then a little longer
+      last = turn.catch(() => {}).then(() => new Promise((r) => setTimeout(r, PAYMENT_GAP_MS)));
+      return turn;
+    },
+  };
+}
+
 export async function payerFor(market: MarketId): Promise<Payer | null> {
   const secret = secretFor(market);
   if (!secret) return null;
   let p = payers.get(secret);
   if (!p) {
-    p = makePayer(secret).catch(() => {
+    p = makePayer(secret).then(spaced).catch(() => {
       payers.delete(secret);
       throw new Error(`the wallet key for the ${market === "real" ? "real" : "test"} market is not a valid Solana keypair`);
     });
@@ -74,17 +93,25 @@ export async function nuzaFeed(fetchImpl: typeof fetch = fetch): Promise<Offer[]
   return parseNuzaFeed(await response.json());
 }
 
-/** True when the request was addressed to this app by its local name; a DNS-rebinding page arrives with its own host name. */
-export function isLocalHost(request: Request): boolean {
-  return localHosts().has(request.headers.get("host") ?? "");
+/** True when the request was made on this computer, addressed to the app by its local name (never through a tunnel). */
+export function isOwner(request: Request): boolean {
+  return visitorOf(headersOf(request.headers))?.kind === "owner";
 }
 
-/** Market routes: local host, same-origin JSON only, so another website cannot drive a run through the browser. */
+/** The largest request body a market route reads: every one of them is a few fields of JSON. */
+const MAX_BODY_BYTES = 16 * 1024;
+
+/**
+ * Market routes: the owner's local page or a listed public host, same-origin JSON only (so another
+ * website cannot drive a run through the browser), and small.
+ */
 export function checkRequest(request: Request): Response | null {
-  const refused = localVerdict({ host: request.headers.get("host"), origin: request.headers.get("origin") }, { origin: true });
+  const refused = accessVerdict(request.method, new URL(request.url).pathname, headersOf(request.headers));
   if (refused) return Response.json({ error: refused }, { status: 403 });
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type)) return Response.json({ error: "send the request as JSON (Content-Type: application/json)" }, { status: 415 });
+  const length = Number(request.headers.get("content-length") ?? "0");
+  if (!Number.isFinite(length) || length > MAX_BODY_BYTES) return Response.json({ error: "that request is too large" }, { status: 413 });
   return null;
 }
 

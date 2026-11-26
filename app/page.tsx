@@ -197,7 +197,7 @@ export default function Page() {
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/" burning={running}>
-        {snap && (
+        {snap?.models && (
           <ModelPicker
             models={snap.models}
             disabled={running}

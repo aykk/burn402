@@ -58,8 +58,8 @@ export type Runtime = {
   storeTransaction: (record: TransactionRecord, options?: StoreOptions) => Promise<void>;
 };
 
-/** `signer` signs the record (default: the broker); `cluster` picks the Solscan link. */
-export type StoreOptions = { signer?: Actor; cluster?: "devnet" | "mainnet" };
+/** `signer` signs the record (default: the broker); `cluster` picks the Solscan link; `log` is the session's log (default: the runtime's). */
+export type StoreOptions = { signer?: Actor; cluster?: "devnet" | "mainnet"; log?: DemoLog };
 
 export type StoredTransaction = TransactionRecord & {
   mark: number | null;
@@ -98,6 +98,7 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
   const storeTransaction = async (record: TransactionRecord, options: StoreOptions = {}) => {
     const signer = options.signer ?? actors.broker;
     const cluster = options.cluster ?? "devnet";
+    const out = options.log ?? log;
     const entry: StoredTransaction = {
       ...record,
       mark: null,
@@ -109,17 +110,19 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
       solscan: record.tx ? `https://solscan.io/tx/${record.tx}${cluster === "devnet" ? "?cluster=devnet" : ""}` : null,
     };
     transactions.push(entry);
+    // nothing reads old entries: keep the list from growing without end
+    if (transactions.length > 200) transactions.splice(0, transactions.length - 200);
     try {
       const gateway = new TurboGateway({ network, privateJwk: actors.broker.privateJwk });
       const { id } = await anchorTransaction({ gateway, broker: signer.name, brokerKey: signer, record });
       entry.arweaveId = id;
       entry.arweaveUrl = `${gateway.gatewayUrl}/${id}`;
       entry.storage = "stored";
-      log.push("anchor", "ARWEAVE", `transaction by ${record.subject} (${record.outcome}) stored`, { label: `ar://${id.slice(0, 10)}..`, href: entry.arweaveUrl });
+      out.push("anchor", "ARWEAVE", `transaction by ${record.subject} (${record.outcome}) stored`, { label: `ar://${id.slice(0, 10)}..`, href: entry.arweaveUrl });
     } catch (error) {
       entry.storage = "failed";
       entry.storageError = (error as Error).message;
-      log.push("error", "ARWEAVE", `could not store transaction: ${entry.storageError}`);
+      out.push("error", "ARWEAVE", `could not store transaction: ${entry.storageError}`);
     }
   };
 
