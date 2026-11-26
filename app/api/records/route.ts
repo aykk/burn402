@@ -225,9 +225,11 @@ async function load(network: Network, fqdn: string | null): Promise<{ status: nu
     ]);
 
     checked.sort((a, b) => (b.issuedAt ?? b.anchoredAt ?? 0) - (a.issuedAt ?? a.anchoredAt ?? 0));
-    // the Arweave live test (lib/anchor/live.test.ts) writes a throwaway verdict for an agent named rogue-<time>
-    // on every run; those are test fixtures, not anything an agent did, so the list leaves them out
-    const shown = checked.filter((r) => !TEST_FIXTURE.test(r.subject ?? ""));
+    // The Arweave live test (lib/anchor/live.test.ts) writes a throwaway "no violation" verdict for an agent
+    // named rogue-<time> on every run. Only those are left out, and only on testnet: a record is never hidden
+    // by name alone, so nothing that says an agent broke a rule, no purchase, and nothing on mainnet can be
+    // hidden by picking a name.
+    const shown = checked.filter((r) => !(network === "testnet" && r.kind === "verdict" && r.outcome.tone === "good" && TEST_FIXTURE.test(r.subject ?? "")));
     return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: shown } };
   } catch (error) {
     return { status: 502, body: { network, fqdn, error: (error as Error).message } };
