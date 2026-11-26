@@ -75,17 +75,20 @@ export function ModelPicker({
   };
 
   return (
-    <span className="relative flex items-center gap-3">
+    <span className="relative flex items-baseline gap-3">
       <button
         ref={triggerRef}
-        className="flex h-8 items-center gap-2 rounded-[3px] border border-rule-strong px-3 text-foreground hover:border-foreground"
+        className="flex h-9 items-center rounded-[3px] border border-rule-strong px-3 text-foreground hover:border-foreground enabled:hover:bg-surface"
         aria-expanded={open}
         aria-controls="model-picker"
         aria-label={`Agent model: ${selected.modelName}`}
         onClick={() => setOpen(!open)}
       >
-        <Image src={`/models/${selected.id}.svg`} alt="" width={14} height={14} unoptimized style={MONO_MARK} />
-        {selected.modelName}
+        {/* One line of text with the mark set inline, so the button's baseline is the name's, not the mark's edge. */}
+        <span className="whitespace-nowrap">
+          <Image src={`/models/${selected.id}.svg`} alt="" width={14} height={14} unoptimized style={MONO_MARK} className="mr-2 inline-block align-[-2px]" />
+          {selected.modelName}
+        </span>
       </button>
       {missingKey && (
         <button className={TEXT_BTN} onClick={() => setOpen(true)}>

@@ -34,9 +34,9 @@ function StageRow({ run }: { run: MarketRunView | null }) {
   return (
     <div>
       {!run && (
-        <p id="stages-label" className="mb-2 text-[12px] leading-4 font-medium text-foreground">
+        <h2 id="stages-label" className="mb-4 text-[16px] leading-[22px] font-semibold text-foreground">
           What happens when you start
-        </p>
+        </h2>
       )}
       <ol aria-label={run ? "Run stages" : undefined} aria-labelledby={run ? undefined : "stages-label"} className="grid grid-cols-4 gap-[3px]">
         {MARKET_STAGES.map((label, i) => {

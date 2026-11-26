@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId } from "@/lib/market/types";
-import { duration, elapsedText, usd2, usd4 } from "./format";
+import { duration, usd2, usd4 } from "./format";
 import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
 import { Flame } from "./Flame";
 import { allowanceWords, budgetShare, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
@@ -22,7 +22,7 @@ function jobReadout(v: MeterView, j: JobGauge): Readout {
   if (j.state === "held") return { label: "Machine", value: "may still be running", quiet: true };
   if (j.state === "draining") {
     if (j.leftUsd <= 0) return { label: "Prepaid time", value: "used up", quiet: true };
-    if (v.spanSeconds !== null && j.secondsLeft !== null) return { label: "Time used", value: elapsedText(Math.max(0, v.spanSeconds - j.secondsLeft)) };
+    if (v.spanSeconds !== null && j.secondsLeft !== null) return { label: "Time used", value: timeLeft(Math.max(0, v.spanSeconds - j.secondsLeft)) };
     return { label: "Prepaid", value: v.paidExact ?? usd4(j.scaleUsd) };
   }
   if (v.ranSeconds !== null) return { label: "Machine ran for", value: v.ranSeconds >= 3600 ? timeLeft(v.ranSeconds) : duration(v.ranSeconds) };

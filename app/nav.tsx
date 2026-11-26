@@ -19,9 +19,13 @@ export function Nav({
   children?: ReactNode;
 }) {
   return (
-    // min-h-13 keeps the header the same height on pages with nothing on the right (36px row + 16px padding).
-    <header className="flex min-h-13 shrink-0 flex-wrap items-center gap-x-8 gap-y-3 pb-4">
-      {/* Wordmark and page links share one baseline; the group is centred against the controls on the right. */}
+    // Everything in the header sits on one baseline: the wordmark, the page links and the controls on the right.
+    <header className="flex shrink-0 flex-wrap items-baseline gap-x-8 gap-y-3 pb-4">
+      {/* A zero-width strut the size of a control (36px, body text centred in it). It sets the row's height and
+          baseline, so the header is identical on pages with a button on the right and pages with nothing there. */}
+      <span aria-hidden className="-mr-8 inline-flex h-9 w-0 items-center">
+        &nbsp;
+      </span>
       <div className="flex items-baseline gap-x-8">
         <Link
           href="/"
@@ -55,7 +59,7 @@ export function Nav({
         </nav>
       </div>
       {children && (
-        <span className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:ml-auto">
+        <span className="flex flex-wrap items-baseline gap-x-6 gap-y-2 sm:ml-auto">
           {children}
         </span>
       )}

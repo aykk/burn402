@@ -136,7 +136,7 @@ export function MarketPrices({
                 <caption className="sr-only">The cheapest machine that fits at each provider, beside the plan your agent can buy</caption>
                 <thead>
                   <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
-                    <th scope="col" className={`${PAD} pl-2.5 font-medium`}>
+                    <th scope="col" className={`${PAD} pl-[13px] font-medium`}>
                       Where
                     </th>
                     <th scope="col" className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>
@@ -158,7 +158,7 @@ export function MarketPrices({
                 <tbody>
                   {b && (
                     <tr className="border-b border-rule">
-                      <th scope="row" className={`border-l-2 border-foreground ${PAD} pl-2 text-left font-semibold`}>
+                      <th scope="row" className={`border-l-2 border-foreground ${PAD} pl-3 text-left font-semibold`}>
                         Through {b.seller}
                         {/* Narrow tables: the plan and its size under the seller instead of a column that would scroll out of view. */}
                         <span className="block text-[12px] leading-4 font-normal text-muted @min-[37rem]:hidden">
@@ -194,7 +194,7 @@ export function MarketPrices({
                     const place = r.region ? `host in ${r.region}${r.outsideRegions ? ", outside the regions you asked for" : ""}` : null;
                     return (
                       <tr key={r.key} className="border-b border-rule">
-                        <th scope="row" className={`border-l-2 border-transparent ${PAD} pl-2 text-left font-normal`}>
+                        <th scope="row" className={`border-l-2 border-transparent ${PAD} pl-3 text-left font-normal`}>
                           {href ? (
                             <a href={href} target="_blank" rel="noreferrer noopener">
                               {r.sourceLabel}

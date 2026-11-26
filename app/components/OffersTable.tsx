@@ -67,7 +67,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
           <table className="w-full border-collapse text-[13.5px] leading-5">
             <thead>
               <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
-                <th className={`${PAD} pl-2.5 font-medium`}>Plan</th>
+                <th className={`${PAD} pl-[13px] font-medium`}>Plan</th>
                 <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Provider</th>
                 <th className={`hidden ${PAD} font-medium @min-[43rem]:table-cell`}>Size</th>
                 <th
@@ -91,7 +91,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 return (
                   <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule transition-colors hover:bg-surface/70 ${out ? "text-muted" : ""}`}>
                     {/* Plan ids never break mid-word: the table scrolls sideways instead, and the full id is in the title. */}
-                    <td className={`border-l-2 ${PAD} pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
+                    <td className={`border-l-2 ${PAD} pl-3 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
                       <span className="whitespace-nowrap">{r.id}</span>
                       {r.region && <span className="font-normal whitespace-nowrap text-muted"> {r.region}</span>}
                       {/* Narrow tables: the status under the plan name instead of a column that would scroll out of view. */}
