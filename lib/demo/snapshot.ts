@@ -1,62 +1,82 @@
+import type { Visitor } from "../market/access";
+import type { OpenPurchase } from "../market/journal";
+import { visibleOpenPurchases } from "../market/recover";
+import type { MarketRunView } from "../market/run";
+import { marketJournal, walletReady } from "../market/session";
 import type { LogLine } from "./log";
 import { modelsView, type ModelsView } from "./models";
-import type { LedgerEntry, StoredTransaction } from "./runtime";
-import { AGENT_BUDGET, HOURLY_CAP, ROOT, TO_HELPER, TO_TESTER, type AgentRunView, type DemoSession, type StressView } from "./script";
-import type { ServerView } from "./servers";
-import type { TrainingRunView } from "./train";
-import type { WalletView } from "./wallets";
-
-export type BudgetView = { label: string; limit: number; rate: number; remaining: number; burn: number; effectiveExp: number; allocated: number };
+import type { Runtime } from "./runtime";
+import type { DemoSession } from "./script";
+import { allSessions } from "./session";
 
 export type Snapshot = {
+  /** seconds */
   now: number;
-  busy: boolean;
+  /** the same instant in ms, for comparing with MarketRunView times (all ms) */
+  nowMs: number;
+  /** "owner": this computer, everything allowed. "public": a visitor on the public demo, test market only. */
+  visitor: "owner" | "public";
   network: "testnet" | "production";
-  disclosure: "desk-only" | "full";
-  helper: { ansName: string; budget: number; hourlyCap: number };
-  agent: AgentRunView;
-  company: { name: string; ansName: string } | null;
-  runs: TrainingRunView[];
-  agents: string[];
-  job: TrainingRunView | null;
-  previous: TrainingRunView | null;
-  models: ModelsView;
-  budgets: BudgetView[];
-  servers: ServerView[];
-  transactions: StoredTransaction[];
-  wallets: WalletView[];
-  ledger: LedgerEntry[];
-  stress: StressView;
+  /** The model picker's state; null for public visitors, who have no model. */
+  models: ModelsView | null;
   log: LogLine[];
+  market: MarketRunView | null;
+  /** journal purchases that were paid and not released; the current run is left out only while it is still going */
+  openPurchases: OpenPurchase[];
+  walletReady: { test: boolean; real: boolean };
 };
 
-export function snapshot(s: DemoSession): Snapshot {
-  const rt = s.rt;
-  const budgets: BudgetView[] = [ROOT, TO_HELPER, TO_TESTER]
-    .filter((label) => s.hashes[label])
-    .map((label) => {
-      const st = rt.broker.status(s.hashes[label]);
-      return { label, limit: st.limit_usd, rate: st.rate_usd_hr, remaining: st.remaining_usd, burn: st.burn_usd_hr, effectiveExp: st.effective_exp, allocated: st.allocated_usd };
-    });
+/** An absolute path on this computer, as it might appear inside an error message. */
+const SERVER_PATH = /(?:\/(?:Users|home|private|var|tmp|opt|Volumes)\/[^\s'"`,;)]*)/g;
+
+/** Every string in `value` with server paths replaced; a public visitor never learns the owner's folders. */
+export function withoutPaths<T>(value: T): T {
+  if (typeof value === "string") return value.replace(SERVER_PATH, "a file on the server") as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => withoutPaths(v)) as unknown as T;
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutPaths(v)])) as T;
+  return value;
+}
+
+/** A public visitor's machine never shows where its key sits on the server, and no error text carries a server path. */
+function publicView(market: MarketRunView): MarketRunView {
+  const m = market.machine;
+  const view = m && m.ssh !== null ? { ...market, machine: { ...m, ssh: m.ip ? `ssh root@${m.ip}` : null } } : market;
+  return withoutPaths(view);
+}
+
+/**
+ * What one visitor sees. `s` is null for a public visitor who has not started anything yet: an idle
+ * page, with no session kept for them. A public visitor only ever sees their own run, log and purchases.
+ */
+export function snapshot(rt: Runtime, s: DemoSession | null, kind: "owner" | "public"): Snapshot {
+  const market = s?.market?.view() ?? null;
+  let openPurchases: OpenPurchase[] = [];
+  try {
+    if (kind === "owner") {
+      // everything in the journal, except purchases a live public session is still looking after
+      const theirs = new Set(allSessions().filter((o) => o.kind === "public").flatMap((o) => [...o.runIds]));
+      openPurchases = visibleOpenPurchases(marketJournal(rt.config.root).open(), market).filter((o) => !theirs.has(o.run));
+    }
+    else if (s && s.runIds.size > 0) openPurchases = visibleOpenPurchases(marketJournal(rt.config.root).open(), market).filter((o) => s.runIds.has(o.run));
+  } catch {
+    // an unreadable journal must not break the page
+  }
+  const nowMs = Date.now();
+  const ready = walletReady();
   return {
-    now: Date.now() / 1000,
-    busy: s.busy,
+    now: nowMs / 1000,
+    nowMs,
+    visitor: kind,
     network: rt.network,
-    disclosure: rt.disclosure,
-    helper: { ansName: rt.actors.helper.name, budget: AGENT_BUDGET, hourlyCap: HOURLY_CAP },
-    agent: s.agent,
-    company: s.company ? { name: s.company.name, ansName: s.company.ansName } : null,
-    runs: s.finished().map((r) => r.view()),
-    agents: Object.keys(s.rt.entries),
-    job: s.job?.view() ?? null,
-    previous: s.previous,
-    models: modelsView(),
-    budgets,
-    servers: rt.servers.servers,
-    transactions: rt.transactions,
-    wallets: rt.wallets.wallets,
-    ledger: rt.ledger,
-    stress: s.stress,
-    log: rt.log.lines,
+    models: kind === "owner" ? modelsView() : null,
+    log: s ? (kind === "public" ? withoutPaths(s.log.lines) : s.log.lines) : [],
+    market: market && kind === "public" ? publicView(market) : market,
+    openPurchases,
+    walletReady: kind === "owner" ? ready : { test: ready.test, real: false },
   };
+}
+
+/** The snapshot for one visitor. The approval code in it pays for a purchase; it only ever goes to the session that owns the run. */
+export function snapshotFor(rt: Runtime, s: DemoSession | null, v: Visitor): Snapshot {
+  return snapshot(rt, s, v.kind);
 }

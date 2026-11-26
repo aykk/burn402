@@ -1,17 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { HttpTlSource, parseRootKeys, TransparencyLogDirectory, type DirectoryEntry } from "../lib/ans";
-import { VultrResource } from "../lib/burn";
 
 const ROOT = process.cwd();
 const ANS = resolve(process.env.ANS_REPO ?? "ans");
-const TI_BIN = join(ROOT, "agent-trust-discovery", "bin", "agent-trust-discovery");
 const STATE = join(ROOT, ".burn402");
 const PINNED = join(ROOT, "config", "ans", "tl-root-keys.txt");
 const RA = process.env.RA_URL ?? "http://localhost:18080";
 const TL = process.env.TL_URL ?? "http://localhost:18081";
-const TI = process.env.TRUST_INDEX_URL ?? "http://localhost:8090";
 const TL_KEY = process.env.TL_API_KEY ?? "tl-internal-key";
 const children: ChildProcess[] = [];
 
@@ -80,19 +77,6 @@ async function agents(): Promise<void> {
   execFileSync("npx", ["tsx", join("scripts", "register-agents.ts")], { cwd: ROOT, stdio: "inherit" });
 }
 
-async function trustIndex(): Promise<void> {
-  if (await healthy(`${TI}/health`)) {
-    log("Trust Index already running");
-    return;
-  }
-  if (!existsSync(TI_BIN)) throw new Error(`Trust Index binary missing; run: (cd agent-trust-discovery && make demo)`);
-  rmSync("/tmp/burn402-trust-index.db", { force: true });
-  const child = spawn(TI_BIN, ["-config", join("config", "trust-index", "runtime.yaml")], { cwd: ROOT, stdio: "ignore" });
-  children.push(child);
-  await waitFor(`${TI}/health`, "Trust Index");
-  log("Trust Index ready on :8090 (fresh database, behavior starts at 0)");
-}
-
 function next(): ChildProcess {
   const child = spawn("npx", ["next", "dev"], { cwd: ROOT, stdio: "inherit" });
   children.push(child);
@@ -109,21 +93,11 @@ function shutdown(stopAns: boolean): void {
   }
 }
 
-async function sweepServers(): Promise<void> {
-  const file = join(ROOT, ".env.local");
-  const key = process.env.VULTR_API_KEY ?? (existsSync(file) ? /^VULTR_API_KEY=(.+)$/m.exec(readFileSync(file, "utf8"))?.[1]?.trim() : undefined);
-  if (!key) return;
-  const destroyed = await new VultrResource({ apiKey: key }).sweep();
-  if (destroyed.length > 0) log(`destroyed ${destroyed.length} leftover burn402 server(s) on Vultr`);
-}
-
 async function main() {
   const stopAns = process.argv.includes("--stop-ans");
-  await sweepServers();
   await ansStack();
   await pinTlKeys();
   await agents();
-  await trustIndex();
   const stop = () => {
     shutdown(stopAns);
     process.exit(0);

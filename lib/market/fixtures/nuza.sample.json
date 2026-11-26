@@ -1,0 +1,6 @@
+{
+  "updated_at": "2026-11-25T04:49:13Z",
+  "gpus": [
+    { "model": "rtx4090", "region": "us-east", "vram_gb": 24, "spot_usd_per_hour": 0.21, "on_demand_usd_per_hour": 0.34, "available": 2 }
+  ]
+}

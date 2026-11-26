@@ -13,7 +13,7 @@ const ANS_REPO = resolve(process.env.ANS_REPO ?? "ans");
 const OUT = resolve(process.env.BURN402_STATE ?? ".burn402");
 const DOMAIN = process.env.BURN402_DOMAIN ?? "burn402.xyz";
 const VERSION = process.env.BURN402_AGENT_VERSION ?? "1.0.0";
-const AGENTS = (process.env.BURN402_AGENTS ?? "ops,broker,auditor,stresstester,helper").split(",");
+const AGENTS = (process.env.BURN402_AGENTS ?? "ops,broker").split(",");
 
 type Registered = {
   name: string;

@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
-import { getSession } from "@/lib/demo/session";
+import { getRuntime } from "@/lib/demo/session";
+import { isOwner } from "@/lib/market/session";
+import { clusterOf } from "@/lib/market/record";
+import { recordWords } from "@/app/components/record-words";
 import { fromCompact, verifyJws } from "@/lib/mandate";
 import { DEFAULT_BROKER, verifyAnchoredConversation, verifyAnchoredVerdict } from "@/lib/verify";
 
@@ -37,40 +40,6 @@ function verdictOutcome(verdict: string | null | undefined): Outcome {
   return { label: "no violation found", tone: "good" };
 }
 
-function transactionOutcome(outcome: string | null): Outcome {
-  if (outcome === "accepted") return { label: "allowed and paid", tone: "good" };
-  if (outcome === "refused") return { label: "refused by the broker", tone: "warn" };
-  if (outcome === "payment rejected") return { label: "payment rejected", tone: "bad" };
-  if (outcome === "failed") return { label: "could not be started", tone: "bad" };
-  return { label: outcome ?? "unknown", tone: "warn" };
-}
-
-export function plainRefusal(reason: string | null | undefined): string | null {
-  if (!reason) return null;
-  const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
-  if (rate) return `the server costs $${rate[1]} an hour and the budget allowed $${rate[2]}`;
-  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "the budget was signed by a key that does not belong to the agent named on it";
-  if (/BUDGET_EXCEEDED/.test(reason)) return "the budget had no money left in it";
-  if (/WINDOW_EXPIRED/.test(reason)) return "the budget had already expired";
-  if (/SCOPE_ESCALATION/.test(reason)) return "the budget does not cover renting servers";
-  if (/IDENTITY_UNANCHORED/.test(reason)) return "the agent is not registered in ANS";
-  if (/DEPTH_EXCEEDED/.test(reason)) return "the budget had been passed on more times than it allows";
-  if (/PLAN_UNKNOWN/.test(reason)) return "there is no such plan at the provider";
-  if (/PLAN_UNAVAILABLE/.test(reason)) return "that plan is not available in this region";
-  if (/Cannot add instance|out of stock|capacity/i.test(reason)) return "the provider had none of that plan left to give";
-  if (/PROVIDER_ERROR/.test(reason)) return `the provider refused to start it: ${reason.replace(/^.*HTTP \d+: /, "").slice(0, 120)}`;
-  return reason.replace(/^[A-Z_]+: /, "");
-}
-
-function plainTransaction(outcome: string | null, plan: string | null, usd: number | null | undefined): string {
-  const server = plan ? `a ${plan} server` : "a server";
-  if (outcome === "accepted") return `paid ${usd !== null && usd !== undefined ? `${usd.toFixed(6)} USDC ` : ""}for ${server}`;
-  if (outcome === "refused") return `asked for ${server} and was refused`;
-  if (outcome === "payment rejected") return `tried to pay for ${server} and the payment was rejected`;
-  if (outcome === "failed") return `asked for ${server} and it could not be started`;
-  return `${outcome ?? "asked"} ${server}`;
-}
-
 function conversationOutcome(ok: boolean, withheld: number): Outcome {
   if (!ok) return { label: "could not be checked", tone: "bad" };
   if (withheld > 0) return { label: "signatures verified, some held back", tone: "warn" };
@@ -99,12 +68,44 @@ type StoredRecord = {
   outcome: Outcome;
   verified: boolean;
   steps: Step[];
+  /** The payment's transaction signature, when the record says a payment was signed and the chain gave one. */
+  paymentTx?: string | null;
+  /** The Solana cluster of `paymentTx`, when the record says (market purchases); null for older records. */
+  paymentCluster?: "devnet" | "mainnet" | null;
 };
+
+/** One answer per network and agent is kept for a minute and shared by everyone asking: reading and re-checking every record is slow, and a public page must not let each visitor trigger it. */
+const CACHE_MS = 60_000;
+const MAX_CACHED = 24;
+type Cached = { at: number; answer: Promise<{ status: number; body: unknown }> };
+const cache: Map<string, Cached> = ((globalThis as unknown as { __burn402Records?: Map<string, Cached> }).__burn402Records ??= new Map());
+const FQDN_RE = /^[a-z0-9:/._-]{1,120}$/i;
+const TEST_FIXTURE = /^ans:\/\/v[\d.]+\.rogue-\d+\./;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const network = (url.searchParams.get("network") === "testnet" ? "testnet" : "production") as Network;
-  const fqdn = url.searchParams.get("fqdn");
+  const asked = url.searchParams.get("fqdn");
+  // only the owner may ask for one agent's records: each distinct name is a fresh search on Arweave
+  const fqdn = asked !== null && FQDN_RE.test(asked) && isOwner(request) ? asked : null;
+  const key = `${network}|${fqdn ?? ""}`;
+  const now = Date.now();
+  let hit = cache.get(key);
+  if (!hit || now - hit.at > CACHE_MS) {
+    for (const [k, c] of cache) if (now - c.at > CACHE_MS) cache.delete(k);
+    if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
+    hit = { at: now, answer: load(network, fqdn) };
+    cache.set(key, hit);
+    // an error is not kept: the next request tries again
+    void hit.answer.then((a) => {
+      if (a.status !== 200 && cache.get(key) === hit) cache.delete(key);
+    });
+  }
+  const { status, body } = await hit.answer;
+  return Response.json(body, { status });
+}
+
+async function load(network: Network, fqdn: string | null): Promise<{ status: number; body: unknown }> {
   const gateway = new TurboGateway({ network });
   const rootKeys = parseRootKeys(readFileSync(join(process.cwd(), "config", "ans", "tl-root-keys.txt"), "utf8"));
 
@@ -147,32 +148,41 @@ export async function GET(request: Request) {
         const steps: Step[] = [];
         let issuedAt = seconds(tagOf(item.tags, "Issued-At"));
         let subject = tagOf(item.tags, "Subject-FQDN");
-        let headline = plainTransaction(tagOf(item.tags, "Outcome"), tagOf(item.tags, "Plan"), null);
-        let outcome = transactionOutcome(tagOf(item.tags, "Outcome"));
+        // Until the body is read, the tags alone: outcome and plan.
+        const tagWords = recordWords({ outcome: tagOf(item.tags, "Outcome"), plan: tagOf(item.tags, "Plan"), usd: null, tx: null, reason: null });
+        let headline = tagWords.headline;
+        let outcome: Outcome = { label: tagWords.label, tone: tagWords.tone };
         let reason: string | null = null;
+        let paymentTx: string | null = null;
+        let paymentCluster: "devnet" | "mainnet" | null = null;
         let verified = false;
         try {
           const body = JSON.parse(new TextDecoder().decode(await gateway.fetchData(item.id))) as {
-            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null };
+            transaction?: { at?: number; subject?: string; plan?: string; outcome?: string; usd?: number | null; reason?: string | null; tx?: string | null; cluster?: string };
             jws?: string;
           };
           steps.push({ name: "arweave item", ok: true, detail: `uploaded by ${item.ownerKey}` });
           if (body.transaction) {
             issuedAt = body.transaction.at ? Math.floor(body.transaction.at) : issuedAt;
             subject = body.transaction.subject ?? subject;
-            headline = plainTransaction(body.transaction.outcome ?? null, body.transaction.plan ?? null, body.transaction.usd);
-            outcome = transactionOutcome(body.transaction.outcome ?? null);
-            reason = plainRefusal(body.transaction.reason);
+            const t = body.transaction;
+            // Plain words for every record, older ones included: exact amounts, no codes, no raw JSON.
+            const words = recordWords({ outcome: t.outcome ?? null, plan: t.plan ?? null, usd: t.usd, tx: t.tx, reason: t.reason });
+            headline = words.headline;
+            outcome = { label: words.label, tone: words.tone };
+            reason = words.reason;
+            paymentTx = typeof t.usd === "number" && typeof t.tx === "string" && t.tx ? t.tx : null;
+            paymentCluster = clusterOf(t.cluster);
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {
-            const session = await getSession();
-            const checkedJws = await verifyJws(fromCompact(body.jws), (iss) => session.rt.directory.resolveKeys(iss), TRANSACTION_TYP);
+            const rt = await getRuntime();
+            const checkedJws = await verifyJws(fromCompact(body.jws), (iss) => rt.directory.resolveKeys(iss), TRANSACTION_TYP);
             verified = true;
-            steps.push({ name: "broker signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
+            steps.push({ name: "signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
           }
         } catch (error) {
-          steps.push({ name: "broker signature", ok: false, detail: (error as Error).message });
+          steps.push({ name: "signature", ok: false, detail: (error as Error).message });
         }
         return {
           id: item.id,
@@ -188,6 +198,8 @@ export async function GET(request: Request) {
           outcome,
           verified,
           steps,
+          paymentTx,
+          paymentCluster,
         };
       }),
       ...conversations.map(async (item): Promise<StoredRecord> => {
@@ -213,8 +225,13 @@ export async function GET(request: Request) {
     ]);
 
     checked.sort((a, b) => (b.issuedAt ?? b.anchoredAt ?? 0) - (a.issuedAt ?? a.anchoredAt ?? 0));
-    return Response.json({ network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: checked });
+    // The Arweave live test (lib/anchor/live.test.ts) writes a throwaway "no violation" verdict for an agent
+    // named rogue-<time> on every run. Only those are left out, and only on testnet: a record is never hidden
+    // by name alone, so nothing that says an agent broke a rule, no purchase, and nothing on mainnet can be
+    // hidden by picking a name.
+    const shown = checked.filter((r) => !(network === "testnet" && r.kind === "verdict" && r.outcome.tone === "good" && TEST_FIXTURE.test(r.subject ?? "")));
+    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: shown } };
   } catch (error) {
-    return Response.json({ network, fqdn, error: (error as Error).message }, { status: 502 });
+    return { status: 502, body: { network, fqdn, error: (error as Error).message } };
   }
 }

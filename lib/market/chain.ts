@@ -1,0 +1,154 @@
+import { readTextCapped } from "./read";
+
+/**
+ * Read-only look at the chain: did a USDC transfer from the payer to the seller land? Plain
+ * JSON-RPC over fetch, no keys, no writes. "Looked and found nothing" is null; any error,
+ * unexpected shape, answer over 2 MB or the deadline passing is "unavailable" (could not look).
+ */
+
+/** One lookup, all of its calls together, never takes longer than this. */
+const DEADLINE_MS = 15_000;
+const SIGNATURE_LIMIT = 20;
+const MAX_ACCOUNTS = 2;
+const MAX_TRANSACTIONS = 10;
+/** Slack before the intent when the run's own signature is known (it alone identifies the transfer). */
+const SIGNED_SLACK_MS = 60_000;
+/** Slack before the intent when it is not: tight, so an earlier run's transfer is not taken for this one. */
+const UNSIGNED_SLACK_MS = 10_000;
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
+
+export type FindPaymentOpts = {
+  rpcUrl: string;
+  payer: string;
+  mint: string;
+  payTo: string;
+  atomic: string;
+  sinceMs: number;
+  /** The payer's own signature on this run's transaction (base58); when given, only that transaction matches. */
+  signature?: string;
+  /** Transaction ids to skip (other runs' transfers); used when the signature is not known. */
+  exclude?: string[];
+  fetch?: typeof fetch;
+  /** Overall limit for the whole lookup; tests shorten it. */
+  deadlineMs?: number;
+};
+
+async function rpc(f: typeof fetch, url: string, method: string, params: unknown[], signal: AbortSignal): Promise<unknown> {
+  if (signal.aborted) throw new Error("deadline passed");
+  const response = await f(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal,
+  });
+  if (!response.ok) throw new Error(`${method} answered ${response.status}`);
+  const body: unknown = JSON.parse(await readTextCapped(response));
+  if (!isObj(body) || "error" in body || !("result" in body)) throw new Error(`${method} returned an error`);
+  return body.result;
+}
+
+/** Token balance changes per account index for one mint, read from pre/post balances. */
+function deltas(meta: Obj, mint: string): Map<number, { owner: string; delta: bigint }> {
+  const out = new Map<number, { owner: string; pre: bigint; post: bigint }>();
+  const read = (list: unknown, key: "pre" | "post") => {
+    if (!Array.isArray(list)) throw new Error("balances missing");
+    for (const b of list) {
+      if (!isObj(b) || b.mint !== mint || typeof b.accountIndex !== "number" || typeof b.owner !== "string") continue;
+      const amount = isObj(b.uiTokenAmount) ? b.uiTokenAmount.amount : undefined;
+      if (typeof amount !== "string" || !/^\d+$/.test(amount)) continue;
+      const row = out.get(b.accountIndex) ?? { owner: b.owner, pre: BigInt(0), post: BigInt(0) };
+      row[key] = BigInt(amount);
+      out.set(b.accountIndex, row);
+    }
+  };
+  read(meta.preTokenBalances, "pre");
+  read(meta.postTokenBalances, "post");
+  return new Map([...out].map(([i, r]) => [i, { owner: r.owner, delta: r.post - r.pre }]));
+}
+
+export type FindPaymentResult = { tx: string } | null | "unavailable";
+
+/**
+ * The first successful transaction since `sinceMs` (minus some slack) in which the payer's account
+ * for `mint` went down by exactly `atomic` and an account owned by `payTo` went up by exactly
+ * `atomic`. With `signature`, the transaction must also carry that signature. Null when it looked
+ * and found none; "unavailable" when anything went wrong or the deadline passed; never throws.
+ */
+export async function findPayment(opts: FindPaymentOpts): Promise<FindPaymentResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"unavailable">((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve("unavailable");
+    }, opts.deadlineMs ?? DEADLINE_MS);
+  });
+  const search = lookup(opts, controller.signal).catch((): "unavailable" => "unavailable");
+  try {
+    return await Promise.race([search, deadline]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function lookup(opts: FindPaymentOpts, signal: AbortSignal): Promise<FindPaymentResult> {
+  const f = opts.fetch ?? ((input, init) => fetch(input, init));
+  const call = (method: string, params: unknown[]) => rpc(f, opts.rpcUrl, method, params, signal);
+  if (!/^\d{1,30}$/.test(opts.atomic)) return null;
+  const amount = BigInt(opts.atomic);
+  const signature = typeof opts.signature === "string" && opts.signature ? opts.signature : null;
+  const accounts = await call("getTokenAccountsByOwner", [opts.payer, { mint: opts.mint }, { encoding: "jsonParsed" }]);
+  if (!isObj(accounts) || !Array.isArray(accounts.value)) return "unavailable";
+  const keys = accounts.value
+    .map((a) => (isObj(a) && typeof a.pubkey === "string" ? a.pubkey : null))
+    .filter((k): k is string => k !== null)
+    .slice(0, MAX_ACCOUNTS);
+  const since = (opts.sinceMs - (signature ? SIGNED_SLACK_MS : UNSIGNED_SLACK_MS)) / 1000;
+  const seen = new Set<string>(signature ? [] : (opts.exclude ?? []));
+  let fetched = 0;
+  /** something that should have been looked at could not be read */
+  let incomplete = false;
+  for (const key of keys) {
+    const sigs = await call("getSignaturesForAddress", [key, { limit: SIGNATURE_LIMIT, commitment: "confirmed" }]);
+    if (!Array.isArray(sigs)) {
+      incomplete = true;
+      continue;
+    }
+    for (const s of sigs) {
+      if (!isObj(s) || typeof s.signature !== "string" || typeof s.blockTime !== "number" || s.blockTime < since) continue;
+      if (s.err !== null && s.err !== undefined) continue;
+      if (seen.has(s.signature)) continue;
+      seen.add(s.signature);
+      if (fetched >= MAX_TRANSACTIONS) return incomplete ? "unavailable" : null;
+      fetched++;
+      let tx: unknown;
+      try {
+        tx = await call("getTransaction", [s.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+      } catch {
+        if (signal.aborted) return "unavailable";
+        incomplete = true;
+        continue;
+      }
+      if (!isObj(tx) || !isObj(tx.meta) || tx.meta.err !== null) continue;
+      if (typeof tx.blockTime === "number" && tx.blockTime < since) continue;
+      if (signature) {
+        const signed = isObj(tx.transaction) && Array.isArray(tx.transaction.signatures) ? tx.transaction.signatures : [];
+        if (!signed.includes(signature)) continue;
+      }
+      let changes: ReturnType<typeof deltas>;
+      try {
+        changes = deltas(tx.meta, opts.mint);
+      } catch {
+        continue;
+      }
+      const rows = [...changes.values()];
+      const paid = rows.some((r) => r.owner === opts.payer && r.delta === -amount);
+      const received = rows.some((r) => r.owner === opts.payTo && r.delta === amount);
+      if (paid && received) return { tx: s.signature };
+    }
+  }
+  return incomplete ? "unavailable" : null;
+}

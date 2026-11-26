@@ -1,262 +1,80 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Nav } from "@/app/nav";
-import type { Snapshot } from "@/lib/demo/snapshot";
+import { ActionError, failureMessage } from "@/app/components/ActionError";
+import { AttemptLedger, type Attempt } from "@/app/components/AttemptLedger";
+import { usd2 } from "@/app/components/format";
+import { colonCase } from "@/app/components/market-copy";
+import { usdPlain } from "@/lib/market/money";
+import { BTN_PRIMARY } from "@/app/components/ui";
+import type { OverspendAttempt, OverspendResult } from "@/lib/market/overspend";
 
-function clock(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 19);
-}
+/** Mirrors OVERSPEND_LIMITS in lib/market/overspend.ts (a server module, so it is not imported here). */
+const LIMITS = { budgetUsd: 0.05, rateUsdHr: 0.05 };
+type LedgerRow = Attempt;
 
-function money(n: number | null): string {
-  if (n === null) return "-";
-  return n >= 1 ? `$${n.toFixed(2)}` : `$${parseFloat(n.toFixed(6))}`;
-}
+/** The ledger reads "refused: …" as Blocked and "not stopped: …" as Got through. */
+const toRow = (a: OverspendAttempt): LedgerRow => ({
+  what: a.what,
+  result: `${a.blocked ? "refused" : "not stopped"}: ${colonCase(a.paidUsd === null ? `${a.result.replace(/([^.!?])$/, "$1.")} Paid during this attempt: unknown.` : a.result)}`,
+  ok: a.blocked,
+  blocked: a.blocked,
+  mark: null,
+  quiet: false,
+  proves: a.proves,
+});
 
-function shortName(ans: string): string {
-  return ans.replace(/^ans:\/\/v[\d.]+\./, "");
-}
-
-function plainReason(reason: string): string {
-  if (/UNKNOWN_KEY|SIGNATURE_INVALID/.test(reason)) return "the budget was signed by a key that does not belong to the agent named on it";
-  const rate = /plan ([\d.]+)\/hr > mandate rate ([\d.]+)\/hr/.exec(reason);
-  if (rate) return `the server costs $${rate[1]} an hour and the budget allows $${rate[2]}`;
-  if (/BUDGET_EXCEEDED/.test(reason)) return "the budget has no money left in it";
-  if (/WINDOW_EXPIRED/.test(reason)) return "the budget expired before this was asked for";
-  if (/SCOPE_ESCALATION/.test(reason)) return "the budget does not cover renting servers";
-  if (/IDENTITY_UNANCHORED/.test(reason)) return "the agent is not registered in ANS";
-  return reason.replace(/^[A-Z_]+: /, "");
-}
-
-function toneOf(a: { ok: boolean; blocked: boolean | null }): string {
-  if (a.blocked === null) return a.ok ? "var(--ok)" : "var(--bad)";
-  return a.blocked ? "var(--bad)" : "var(--ok)";
-}
-
-const BUILT_IN: Record<string, string> = {
-  stresstester: "built in, limit tester",
-  helper: "built in, limit tester",
-  broker: "built in, holds the provider key",
-  auditor: "built in, signs the verdicts",
-  vultr: "built in, the Vultr desk",
-  ops: "built in, sample agent",
-};
-
-export default function AuditPage() {
-  const [snap, setSnap] = useState<Snapshot | null>(null);
+export default function OverspendPage() {
+  const [result, setResult] = useState<OverspendResult | null>(null);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string>("");
-  const logRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
+  const run = async () => {
+    setError(null);
+    setRunning(true);
     try {
-      const res = await fetch("/api/demo/state", { cache: "no-store" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      setSnap(body);
-      setError(null);
+      const res = await fetch("/api/market/overspend", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = (await res.json()) as OverspendResult & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `The server answered HTTP ${res.status}`);
+      setResult(body);
     } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    const first = setTimeout(load, 0);
-    const poll = setInterval(load, 1500);
-    return () => {
-      clearTimeout(first);
-      clearInterval(poll);
-    };
-  }, [load]);
-
-  useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [snap?.log.length]);
-
-  const runs = snap?.runs ?? [];
-  const target = runs.find((r) => r.id === picked) ?? runs[0] ?? null;
-  const stress = snap?.stress;
-  const running = snap?.busy ?? false;
-
-  const start = async () => {
-    if (!target) return;
-    try {
-      const res = await fetch("/api/demo/stress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: target.id }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
+      setError(failureMessage(e));
+    } finally {
+      setRunning(false);
     }
   };
 
   return (
-    <main className="mx-auto flex h-screen w-full max-w-[1280px] flex-col overflow-hidden px-10 py-6">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/audit" />
 
-      <p className="mt-4 max-w-[80ch] shrink-0">
-        Pick an agent that has run a job. A second agent is handed part of its budget and tries to spend more than that budget allows. Every attempt,
-        refused or not, is signed and written to Arweave.
-      </p>
+      <div className="pt-2">
+        <h1 className="text-[20px] leading-[26px] font-semibold">Overspend test</h1>
+        <p className="mt-3 max-w-[64ch] text-muted">
+          The agent is given a limit of {usd2(LIMITS.rateUsdHr)} an hour and {usd2(LIMITS.budgetUsd)} in total, then five ways to spend more are tried against the test seller: a plan over the
+          hourly limit, a rental over the budget, a seller that raises its price after quoting, a seller that asks for the wrong token, and a seller that takes the payment, then claims it was rejected, to get paid again.
+          It runs on Solana devnet with simulated machines. In the last attempt the dishonest seller really keeps one payment of about one cent of test USDC.
+        </p>
+      </div>
 
-      {error && <div className="mt-3 text-bad">{error}</div>}
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <button type="button" className={BTN_PRIMARY} disabled={running} onClick={run}>
+          {running ? "Running…" : "Run the test"}
+        </button>
+        <ActionError what="The overspend test didn't run" message={error} onDismiss={() => setError(null)} />
+      </div>
 
-      {runs.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-rule bg-surface p-5 text-muted">
-          No agent has run a job yet. <Link href="/">Run one on the front page</Link> and it will appear here.
-        </div>
-      ) : (
-        <section className="mt-6 grid min-h-0 flex-1 gap-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <div className="min-h-0 space-y-9 overflow-y-auto pb-6 pr-4">
-            <div className="space-y-3">
-              <div className="text-muted">Agent to test</div>
-              <div className="flex flex-wrap items-center gap-3">
-                <select
-                  className="min-w-0 flex-1 border border-rule px-2.5 py-1.5"
-                  value={target?.id ?? ""}
-                  disabled={running}
-                  onChange={(e) => setPicked(e.target.value)}
-                >
-                  {runs.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {shortName(r.agent.ansName)} — {r.request.slice(0, 48)}
-                    </option>
-                  ))}
-                </select>
-                <button className="border border-charcoal bg-charcoal px-3.5 py-1.5 text-background hover:opacity-85 disabled:opacity-40" disabled={running} onClick={start}>
-                  {stress?.status === "running" ? "Running…" : "Limit test"}
-                </button>
-              </div>
-              {target && (
-                <div className="text-muted">
-                  {target.agent.ansName} · {money(target.budgetUsd)} in total · {money(target.rateUsdHr)} an hour at most · expires{" "}
-                  {target.deadlineMinutes} minutes after it started
-                </div>
-              )}
-            </div>
-
-            {stress && stress.attempts.length > 0 && (
-              <div className="space-y-3">
-                <h2 className="font-bold">
-                  Limit test for: <span className="break-all font-normal">{stress.job ? stress.job.agent : "this agent"}</span>
-                </h2>
-                {stress.attempts
-                  .filter((a) => !a.quiet)
-                  .map((a, i) => (
-                    <div key={i} className="border-l-2 pl-3" style={{ borderColor: toneOf(a) }}>
-                      <div>
-                        {typeof a.mark === "number" && <span className="text-muted">[{a.mark}] </span>}
-                        {a.what}
-                      </div>
-                      <div style={{ color: toneOf(a) }}>{a.result}</div>
-                      <div className="text-muted">{a.proves}</div>
-                    </div>
-                  ))}
-                {stress.verdictUrl && (
-                  <a href={stress.verdictUrl} target="_blank" rel="noreferrer">
-                    the verdict against it, permanently on Arweave
-                  </a>
-                )}
-              </div>
-            )}
-            {stress?.error && <div className="text-bad">{stress.error}</div>}
-
-            <div>
-              <h2 className="font-bold">Every request to rent a server</h2>
-              <div className="mb-2 text-muted">Allowed or refused, each one signed by the broker and written to Arweave.</div>
-              {snap && snap.transactions.length > 0 ? (
-                <div className="space-y-2">
-                  {[...snap.transactions].reverse().map((t, i) => (
-                    <div key={i} className="border-l-2 pl-3" style={{ borderColor: t.outcome === "accepted" ? "var(--ok)" : "var(--bad)" }}>
-                      <div>
-                        {typeof t.mark === "number" && <span className="text-muted">[{t.mark}] </span>}
-                        <span className={t.outcome === "accepted" ? "text-ok" : "text-bad"}>{t.outcome === "accepted" ? "allowed" : t.outcome}</span> ·{" "}
-                        {shortName(t.subject)} · {t.plan}
-                        {t.usd !== null && t.outcome === "accepted" ? ` · ${t.usd.toFixed(6)} USDC` : ""}
-                        <span className="text-muted"> · {clock(t.at * 1000)}</span>
-                      </div>
-                      {t.reason && <div className="text-muted">{plainReason(t.reason)}</div>}
-                      <div className="flex gap-3">
-                        {t.solscan && (
-                          <a href={t.solscan} target="_blank" rel="noreferrer">
-                            the payment on Solscan
-                          </a>
-                        )}
-                        {t.arweaveUrl ? (
-                          <a href={t.arweaveUrl} target="_blank" rel="noreferrer">
-                            the record on Arweave
-                          </a>
-                        ) : (
-                          <span className="text-muted">{t.storage === "failed" ? "not stored" : "storing…"}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-muted">Nothing yet.</div>
-              )}
-            </div>
-          </div>
-
-          <aside className="min-h-0 space-y-8 overflow-y-auto pb-6 pr-2">
-            <div>
-              <h2 className="font-bold">Registered agents</h2>
-              <div className="mb-2 text-muted">Each name resolves to keys sealed in the transparency log. A signature that does not match is refused.</div>
-              <div className="space-y-0.5">
-                {(snap?.agents ?? []).map((name) => {
-                  const role = BUILT_IN[/^ans:\/\/v[\d.]+\.([^.]+)\./.exec(name)?.[1] ?? ""];
-                  return (
-                    <div key={name} className="break-all">
-                      {name}
-                      {role && <span className="text-muted"> · {role}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <h2 className="font-bold">Wallets</h2>
-              <div className="mb-2 text-muted">Solana devnet, test USDC.</div>
-              {snap?.wallets.map((w) => (
-                <div key={w.address} className="flex justify-between gap-3">
-                  <a href={w.explorer} target="_blank" rel="noreferrer">
-                    {w.role === "you (receive)" ? "the broker's wallet" : "the agents' wallet"}
-                  </a>
-                  <span>{w.usdc === null ? "…" : `${w.usdc.toFixed(6)} USDC`}</span>
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <h2 className="font-bold">Log</h2>
-              <div ref={logRef} className="mt-2 max-h-[280px] overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-[12px]">
-                {snap?.log.map((l) => (
-                  <div
-                    key={l.seq}
-                    className={`${l.kind === "error" || l.kind === "refused" || l.kind === "breach" ? "text-bad" : l.kind === "step" ? "mt-2 font-bold" : ""} whitespace-pre-wrap break-all`}
-                  >
-                    <span className="text-muted">{clock(l.at)} </span>
-                    {l.code} {l.text}
-                    {l.link && (
-                      <>
-                        {"  "}
-                        <a href={l.link.href} target="_blank" rel="noreferrer">
-                          {l.link.label}
-                        </a>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
+      {result && (
+        <section className="mt-6 max-w-[80ch] space-y-4 border-t border-rule pt-6">
+          {/* The test's own sentences carry exact amounts ("$0.010382"); the ledger shows them as they are. */}
+          <AttemptLedger attempts={result.attempts.map(toRow)} verdict={result.verdict} exact />
+          <p className="flex items-center gap-x-2 text-muted">
+            <span aria-hidden className="inline-block size-2.5 shrink-0 bg-amber" />
+            <span>
+              Paid during the test: <span className="font-semibold text-foreground tabular-nums">{result.spentUsd === null ? "unknown" : `${usdPlain(result.spentUsd)} USDC`}</span> on Solana devnet.
+            </span>
+          </p>
         </section>
       )}
     </main>

@@ -1,12 +1,11 @@
-import { getSession } from "@/lib/demo/session";
-import { snapshot } from "@/lib/demo/snapshot";
+import { snapshotFor } from "@/lib/demo/snapshot";
+import { visit } from "@/lib/demo/visit";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  try {
-    return Response.json(snapshot(await getSession()));
-  } catch (error) {
-    return Response.json({ error: (error as Error).message }, { status: 503 });
-  }
+/** The page's state, for the visitor asking. Reading it never creates a session. */
+export async function GET(request: Request) {
+  const who = await visit(request, { create: false });
+  if (who instanceof Response) return who;
+  return Response.json(snapshotFor(who.rt, who.session, who.v), { headers: { "Cache-Control": "no-store" } });
 }
