@@ -5,6 +5,7 @@ import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId } from "@/lib/market/types";
 import { duration, elapsedText, usd2, usd4 } from "./format";
 import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
+import { Flame } from "./Flame";
 import { allowanceWords, budgetShare, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 /** 40 segments from 640px up, 24 below so each segment stays a readable width. */
@@ -57,7 +58,7 @@ function Segments({ n, className }: { n: number; className: string }) {
 function WalletGauge({ v, segments, className }: { v: MeterView; segments: number; className: string }) {
   const ink = Math.round(budgetShare(v.remainingUsd, v.budgetUsd) * segments);
   return (
-    <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`h-[14px] gap-[3px] ${className}`}>
+    <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`gauge-in h-[14px] gap-[3px] ${className}`}>
       <Segments n={ink} className="bg-foreground" />
       <Segments n={segments - ink} className="bg-segment" />
     </div>
@@ -75,6 +76,10 @@ function JobGaugeBar({ j, v, segments, className }: { j: JobGauge; v: MeterView;
     j.state === "shut"
       ? "motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
       : "motion-safe:duration-1000 motion-safe:ease-linear";
+  const fill = Math.min(1, Math.max(0, j.fill));
+  // The burn: while the machine runs, a small flame rides the edge where the prepaid time is being used
+  // up. It moves on the same clock as the amber and goes out when the machine is destroyed.
+  const burning = j.state === "draining" && fill > 0;
   return (
     <div role="img" aria-label={gaugeLabel(j, v)} className={`relative h-[14px] ${className}`}>
       <div className="flex h-full gap-[3px]">
@@ -82,10 +87,19 @@ function JobGaugeBar({ j, v, segments, className }: { j: JobGauge; v: MeterView;
       </div>
       <div
         className={`absolute inset-0 flex gap-[3px] motion-safe:transition-[clip-path] ${timing}`}
-        style={{ clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, j.fill))) * 100}% 0 0)` }}
+        style={{ clipPath: `inset(0 ${(1 - fill) * 100}% 0 0)` }}
       >
         <Segments n={segments} className="bg-amber" />
       </div>
+      {(j.state === "draining" || j.state === "shut") && (
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute bottom-[9px] -ml-2 flex motion-safe:transition-[left,opacity] ${timing} ${burning ? "opacity-100" : "opacity-0"}`}
+          style={{ left: `${fill * 100}%` }}
+        >
+          <Flame size={16} lit />
+        </span>
+      )}
     </div>
   );
 }
@@ -197,7 +211,7 @@ export function BudgetMeter(props: {
     const amount = usd4(v.remainingUsd);
     const payment = props.job?.payment ?? null;
     return (
-      <section aria-label="Budget meter" className="rounded-[6px] bg-surface px-5 py-5 sm:px-7 sm:py-6">
+      <section aria-label="Budget meter" className="rounded-[8px] border border-rule/70 bg-surface px-5 py-5 shadow-(--lift) sm:px-7 sm:py-6">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
           <p className="text-[13.5px] leading-5 font-medium text-foreground">Budget left for {props.agentName?.trim() || "your agent"}</p>
           {/* A run that ended with money out and no machine: the payment, with its transaction when there is one. */}
@@ -248,7 +262,7 @@ export function BudgetMeter(props: {
   const paidText = v.paidExact ?? usd4(jobUsd);
 
   return (
-    <section aria-label="Budget meter" className="rounded-[6px] bg-surface px-5 py-5 sm:px-7 sm:py-6">
+    <section aria-label="Budget meter" className="rounded-[8px] border border-rule/70 bg-surface px-5 py-5 shadow-(--lift) sm:px-7 sm:py-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
           {!shut && <Swatch />}
