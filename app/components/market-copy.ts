@@ -3,7 +3,7 @@ import type { PriceComparison } from "@/lib/market/prices/compare";
 import { SOURCE_URLS, type MarketPrice, type PriceSource } from "../../lib/market/prices/types";
 import type { MarketRunView, OfferRow } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
-import { REGIONS, clock, duration, elapsedText, usd4 } from "./format";
+import { REGIONS, clock, duration, usd4 } from "./format";
 
 /** "The last problem: The seller" reads "The last problem: the seller": no capital after a colon mid-sentence. */
 export const colonCase = (t: string) => t.replace(/: (The|A|An|No|Nothing|It|This) /g, (_, w: string) => `: ${w.toLowerCase()} `);
@@ -91,7 +91,7 @@ export function paymentLine(p: PaymentFacts, market: MarketId): string {
 export function prepaidLine(p: PaymentFacts, hours: number, ranSeconds: number | null): string {
   const amount = usdExact(p.atomic);
   const paid = p.status === "confirmed" ? `Paid ${amount} for ${hoursText(hours)}.` : `Sent ${amount} for ${hoursText(hours)}, not confirmed yet.`;
-  const ran = ranSeconds !== null ? ` Destroyed after ${elapsedText(ranSeconds)}.` : "";
+  const ran = ranSeconds !== null ? ` Destroyed after ${timeLeft(ranSeconds)}.` : "";
   return `${paid}${ran} Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.`;
 }
 

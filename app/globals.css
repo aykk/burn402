@@ -161,11 +161,10 @@
     color: var(--foreground);
   }
 
-  :where(body) {
-    font-variant-numeric: tabular-nums;
-  }
-
-  table {
+  /* Figures: proportional in sentences, where a tabular "1" leaves a gap; tabular wherever numbers line up
+     in columns or tick (tables, fields, and anything marked tabular-nums, which the meter and timers are). */
+  table,
+  input {
     font-variant-numeric: tabular-nums;
   }
 }
