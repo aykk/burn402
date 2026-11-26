@@ -5,7 +5,7 @@ import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId } from "@/lib/market/types";
 import { duration, usd2, usd4 } from "./format";
 import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
-import { allowanceWords, budgetShare, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
+import { allowanceWords, budgetShare, jobGauge, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 
 const CONDENSED = { fontStretch: "68%", fontVariationSettings: '"wdth" 68' } as const;
@@ -67,7 +67,9 @@ function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   const fill = Math.min(1, Math.max(0, j.fill));
   return (
-    <div role="img" aria-label={gaugeLabel(j, v)} className={`${GAUGE} ${className}`}>
+    // Once the machine is gone the drain plays out, then the empty tick track folds away (gauge-spent), so a
+    // finished run shows one bar, the budget, instead of an empty one that reads as a second progress bar.
+    <div role="img" aria-label={gaugeLabel(j, v)} className={`${GAUGE} ${className} ${j.state === "shut" ? "gauge-spent" : ""}`}>
       <span className="ticks absolute inset-0 text-segment" />
       <span
         className={`ticks absolute inset-0 text-amber motion-safe:transition-[clip-path] ${timing}`}
@@ -92,14 +94,14 @@ function gaugeLabel(j: JobGauge, v: MeterView): string {
  * left (a clip-path wipe, like a receipt printing); reloading on a paid job shows it still. Reduced motion
  * gets a short fade instead.
  */
-function PaymentLine({ payment, solscan, market, fresh }: { payment: NonNullable<MarketRunView["payment"]>; solscan: string | null; market: MarketId; fresh: boolean }) {
+function PaymentLine({ payment, solscan, market, fresh, amount = true }: { payment: NonNullable<MarketRunView["payment"]>; solscan: string | null; market: MarketId; fresh: boolean; amount?: boolean }) {
   return (
     <p className={`text-[12px] leading-4 text-muted tabular-nums ${fresh ? "settle-in" : ""}`}>
-      {paymentLine(payment, market)}
+      {paymentLine(payment, market, { amount })}
       {solscan && (
         <>
           {" "}
-          <a href={solscan} target="_blank" rel="noreferrer">
+          <a href={solscan} target="_blank" rel="noreferrer" className="whitespace-nowrap">
             See it on Solscan
           </a>
         </>
@@ -113,7 +115,7 @@ function ReadoutBlock({ r }: { r: Readout }) {
     <div className="mt-3 sm:mt-0 sm:text-right">
       <p className="text-[12px] leading-4 text-muted">{r.label}</p>
       <p
-        className={`text-[22px] leading-[28px] tabular-nums ${r.quiet ? "font-normal text-muted" : "font-semibold text-foreground"}`}
+        className={`text-[20px] leading-[26px] tabular-nums ${r.quiet ? "font-normal text-muted" : "font-semibold text-foreground"}`}
         style={r.quiet ? undefined : CONDENSED}
       >
         {r.value}
@@ -186,7 +188,7 @@ export function BudgetMeter(props: {
     return (
       <section aria-label="Budget meter" className="meter-dark rounded-[12px] px-5 py-5 sm:px-8 sm:py-7">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-          <p className="text-[13.5px] leading-5 font-medium text-foreground">Budget left for {props.agentName?.trim() || "your agent"}</p>
+          <p className="text-[14px] leading-5 font-medium text-foreground">Budget left for {props.agentName?.trim() || "your agent"}</p>
           {/* A run that ended with money out and no machine: the payment, with its transaction when there is one. */}
           {payment && props.job && <PaymentLine payment={payment} solscan={solscanUrl(payment.tx, props.job.market)} market={props.job.market} fresh={false} />}
         </div>
@@ -230,17 +232,16 @@ export function BudgetMeter(props: {
   // The big figure: time left while the machine runs, otherwise the exact quote or the exact amount paid,
   // never what is left of the prepaid time once the machine is gone.
   const h = meterHeadline(v, j, spanHours);
-  const [lead, digits] = leadingZeros(h.amount ?? "");
   const paidText = v.paidExact ?? usd4(jobUsd);
 
   return (
     <section aria-label="Budget meter" className="meter-dark rounded-[12px] px-5 py-5 sm:px-8 sm:py-7">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-        <p className="flex items-center gap-2 text-[13.5px] leading-5 font-medium text-foreground">
+        <p className="flex items-center gap-2 text-[14px] leading-5 font-medium text-foreground">
           {!shut && <Swatch />}
           {h.label}
         </p>
-        {payment && v.paidUsd !== null && v.paidUsd > 0 && props.job && <PaymentLine payment={payment} solscan={solscan} market={props.job.market} fresh={freshPayment} />}
+        {payment && v.paidUsd !== null && v.paidUsd > 0 && props.job && <PaymentLine payment={payment} solscan={solscan} market={props.job.market} fresh={freshPayment} amount={h.time !== null} />}
       </div>
       <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline-last sm:justify-between sm:gap-x-6">
         <p className="flex flex-wrap items-baseline gap-x-3">
@@ -250,11 +251,8 @@ export function BudgetMeter(props: {
             </span>
           ) : (
             <span className="text-[56px] leading-none font-semibold sm:text-[76px] tracking-[-0.01em] tabular-nums" style={CONDENSED}>
-              <span className="sr-only">{h.amount}</span>
-              <span aria-hidden>
-                <span className="text-muted">{lead}</span>
-                <span className="text-foreground">{digits}</span>
-              </span>
+              {/* The whole amount in one color: a dimmed "$0.0" made the bright digits read as the number. */}
+              <span className="text-foreground">{h.amount}</span>
             </span>
           )}
           {h.suffix && <span className="text-[20px] leading-[26px] text-muted tabular-nums">{h.suffix}</span>}

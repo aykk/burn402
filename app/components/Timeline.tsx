@@ -9,7 +9,7 @@ import { Fold } from "./Fold";
 import { PHASE_TEXT, REGIONS, clock, collapseLog, duration, usd2, usd4 } from "./format";
 import { DEAL, failedWhere, stageIndex } from "./stages";
 
-const SUB = "text-[13.5px] leading-5 font-semibold text-foreground";
+const SUB = "text-[14px] leading-5 font-semibold text-foreground";
 /** Backend errors are lowercase fragments ("the box did not finish…"); shown as a sentence. */
 const sentenceOf = (t: string) => {
   const s = t.charAt(0).toUpperCase() + t.slice(1);
@@ -171,7 +171,7 @@ export function Timeline({ job, result, receiptAside = false }: { job: TrainingR
         ) : null}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full sm:min-w-[680px] border-collapse text-[13.5px] leading-5">
+        <table className="w-full sm:min-w-[680px] border-collapse text-[14px] leading-5">
           <thead>
             <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
               <th className="py-2 pr-4 pl-2.5 font-medium">Plan</th>

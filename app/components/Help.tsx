@@ -88,7 +88,7 @@ export function Help({
           setFocus(true);
         }}
         onBlur={() => setFocus(false)}
-        className={`cursor-help text-left underline decoration-dotted decoration-rule-strong decoration-1 underline-offset-4 hover:decoration-foreground focus-visible:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${className}`}
+        className={`cursor-help text-left underline decoration-dotted decoration-transparent decoration-1 underline-offset-4 hover:decoration-foreground focus-visible:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${className}`}
       >
         {children}
       </button>
@@ -98,7 +98,7 @@ export function Help({
         role="tooltip"
         className={`absolute left-0 z-30 w-max max-w-[min(280px,80vw)] ${above ? "bottom-full pb-1.5" : "top-full pt-1.5"} ${open ? "block" : "hidden"}`}
       >
-        <span className="block rounded-[3px] border border-rule-strong bg-surface px-3 py-2.5 text-[13.5px] leading-5 font-normal text-foreground">
+        <span className="block rounded-[3px] border border-rule-strong bg-surface px-3 py-2.5 text-[14px] leading-5 font-normal text-foreground">
           {text}
         </span>
       </span>

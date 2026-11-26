@@ -14,6 +14,7 @@ import { MarketPrices } from "@/app/components/MarketPrices";
 import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
 import { MARKET_NAME, hoursText, panelBody } from "@/app/components/market-copy";
 import { OpenPurchases } from "@/app/components/OpenPurchases";
+import { BTN } from "@/app/components/ui";
 import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/components/ActionError";
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
 
@@ -161,6 +162,24 @@ export default function Page() {
     setWasPinned(pinned);
     if (!pinned) setLingering(true);
   }
+  // The meter's height, for anything that must sit below it while it is pinned (the form column, scroll targets).
+  useEffect(() => {
+    const el = meterRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const set = () => document.documentElement.style.setProperty("--meter-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // On a phone the form is below a finished run: this takes you back to it.
+  const rentAnother = () => {
+    const col = document.getElementById("need");
+    col?.scrollIntoView({ block: "start" });
+    col?.querySelector<HTMLElement>('h2[tabindex="-1"]')?.focus({ preventScroll: true });
+  };
+
   useEffect(() => {
     if (!lingering) return;
     const id = setTimeout(() => setLingering(false), 3000);
@@ -196,9 +215,9 @@ export default function Page() {
         >
           Log
         </button>
-        {/* Reset is destructive, so it sits 40px from Log instead of 24. */}
+        {/* Reset is destructive: set apart from the rest by a rule, quiet until pointed at. */}
         <button
-          className="ml-4 text-muted underline decoration-1 underline-offset-[3px] hover:text-foreground"
+          className="border-l border-rule pl-6 text-muted hover:text-foreground hover:underline hover:decoration-1 hover:underline-offset-[3px]"
           title="Forget this session: cancels a run waiting for approval, destroys a test-market machine, clears the log"
           onClick={async () => {
             setResetError(null);
@@ -218,10 +237,8 @@ export default function Page() {
       {/* A cold visitor learns what this is in two short lines; the meter under it stays the biggest thing on the page.
           The promise first, in two beats (what you do, what the agent does), then how, in one plain sentence. */}
       <div className="shrink-0 pt-3">
-        <h1 className="text-[26px] leading-[32px] font-semibold tracking-[-0.015em]">
-          Set a budget. <span className="text-muted">Your agent rents the compute.</span>
-        </h1>
-        <p className="mt-1.5 max-w-[76ch] text-[15px] leading-[22px] text-muted">
+        <h1 className="text-[28px] leading-[34px] font-semibold tracking-[-0.015em]">Set a budget. Your agent rents the compute.</h1>
+        <p className="mt-1.5 max-w-[72ch] text-[16px] leading-[24px] text-muted">
           It finds the cheapest machine that fits, pays with x402, and destroys it when the time is up.
         </p>
       </div>
@@ -240,6 +257,14 @@ export default function Page() {
           nowMs={nowMs}
         />
       </div>
+
+      {run && !running && (
+        <div className="mt-3 shrink-0 lg:hidden">
+          <button type="button" className={BTN} onClick={rentAnother}>
+            Start another rental
+          </button>
+        </div>
+      )}
 
       {snap && snap.openPurchases.length > 0 && (
         <div className="mt-6 shrink-0">
@@ -266,7 +291,7 @@ export default function Page() {
           (NeedForm switches at 24rem), and the run column keeps room for the plan table. Below lg the columns
           stack, with the run first while there is one. */}
       <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-10">
-        <div className={`lg:pr-4 lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
+        <div id="need" className={`form-col lg:pr-4 lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
           <NeedForm
             snap={snap}
             run={run}

@@ -41,7 +41,7 @@
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
-    font-size: 13.5px;
+    font-size: 14px;
     line-height: 20px;
     -webkit-font-smoothing: antialiased;
   }
@@ -322,7 +322,7 @@
   }
 
   html:has(.meter-pinned) {
-    scroll-padding-top: 18rem;
+    scroll-padding-top: calc(var(--meter-h, 16rem) + 1.5rem);
   }
 }
 
@@ -351,4 +351,43 @@
 /* A fine tick scale: 3px ticks on a 7px pitch, in the element's text color. */
 .ticks {
   background-image: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px);
+}
+
+/* On a desktop tall enough to hold it, the form column stays in view while the results scroll, below
+   the meter when the meter is pinned. Shorter screens scroll it normally, so no part of it is ever out
+   of reach. */
+@media (min-width: 1024px) and (min-height: 820px) {
+  .form-col {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+  }
+
+  html:has(.meter-pinned) .form-col {
+    top: calc(var(--meter-h, 16rem) + 1.5rem);
+  }
+}
+
+/* A finished run: the empty prepaid-time track folds away once the drain has played. */
+@keyframes gauge-spent {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    height: 0;
+    margin-top: 0;
+  }
+}
+
+.gauge-spent {
+  overflow: hidden;
+  animation: gauge-spent 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gauge-spent {
+    display: none;
+  }
 }

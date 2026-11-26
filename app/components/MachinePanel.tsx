@@ -11,7 +11,7 @@ export type Send = (path: string, body?: unknown) => Promise<{ error: string | n
 import { Swatch } from "./BudgetMeter";
 import { clock } from "./format";
 import { sentence, solscanUrl, timeLeft } from "./market-copy";
-import { BTN, MONO, TEXT_BTN } from "./ui";
+import { BTN, MONO, MONO_ID, TEXT_BTN } from "./ui";
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
   return (
@@ -128,14 +128,14 @@ export function MachinePanel({
 
   return (
     <section aria-labelledby="machine-heading" className="space-y-3 border-l-2 pl-3" style={{ borderColor: gone ? "var(--rule)" : "var(--foreground)" }}>
-      <h3 id="machine-heading" ref={headingRef} tabIndex={-1} className="text-[13.5px] leading-5 font-semibold text-foreground focus:outline-none">
+      <h3 id="machine-heading" ref={headingRef} tabIndex={-1} className="text-[14px] leading-5 font-semibold text-foreground focus:outline-none">
         {!m ? "Your payment" : gone ? "The machine you rented" : "Your machine"}
       </h3>
 
       <dl className="space-y-1.5">
         {m && (
           <Row k="Plan">
-            {m.plan} in {m.region} <span className={`text-muted ${MONO}`}>{m.id}</span>
+            <span className={MONO_ID}>{m.plan}</span> in <span className={MONO_ID}>{m.region}</span> <span className={`text-muted ${MONO}`}>{m.id}</span>
           </Row>
         )}
         {!gone && m && !m.ip && (
@@ -197,7 +197,7 @@ export function MachinePanel({
               <span className="font-semibold tabular-nums">{usdExact(p.atomic)} USDC</span>
               {!confirmed && <span className="text-foreground">not confirmed yet</span>}
               {solscan ? (
-                <a href={solscan} target="_blank" rel="noreferrer" className="text-[12px] leading-4">
+                <a href={solscan} target="_blank" rel="noreferrer" className="text-[12px] leading-4 whitespace-nowrap">
                   Payment on Solscan
                 </a>
               ) : (

@@ -5,7 +5,7 @@ import type { PriceComparison } from "@/lib/market/prices/compare";
 import { Fold } from "./Fold";
 import { usd4 } from "./format";
 import { buyableMachine, buyableWord, cheapestMarks, priceRows, priceSourceLines, pricesAllFailed, pricesLead, safeLink } from "./market-copy";
-import { TEXT_BTN } from "./ui";
+import { MONO_ID, TEXT_BTN } from "./ui";
 
 /** Cell padding, as in the offers table: a little tighter while the table is narrow. */
 const PAD = "py-2 pr-3 @min-[30rem]:pr-4";
@@ -88,7 +88,7 @@ export function MarketPrices({
             ref={headingRef}
             id={headingId}
             tabIndex={focusOnShow ? -1 : undefined}
-            className={`${H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[13.5px] leading-5 font-semibold text-foreground"} focus:outline-none`}
+            className={`${H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[14px] leading-5 font-semibold text-foreground"} focus:outline-none`}
           >
             Market prices
           </H>
@@ -132,7 +132,7 @@ export function MarketPrices({
           {showTable && (
             // relative: the visually hidden caption is positioned against this wrapper, so it cannot widen the page.
             <div className="@container relative overflow-x-auto">
-              <table className="w-full border-collapse text-[13.5px] leading-5">
+              <table className="w-full border-collapse text-[14px] leading-5">
                 <caption className="sr-only">The cheapest machine that fits at each provider, beside the plan your agent can buy</caption>
                 <thead>
                   <tr className="border-b border-rule-strong text-left text-[12px] leading-4 text-muted">
@@ -162,13 +162,13 @@ export function MarketPrices({
                         Through {b.seller}
                         {/* Narrow tables: the plan and its size under the seller instead of a column that would scroll out of view. */}
                         <span className="block text-[12px] leading-4 font-normal text-muted @min-[37rem]:hidden">
-                          <span className="whitespace-nowrap">{b.plan}</span>
+                          <span className={`whitespace-nowrap ${MONO_ID}`}>{b.plan}</span>
                           {buyableMachine(b) && <span className="block">{buyableMachine(b)}</span>}
                         </span>
                       </th>
                       <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>
                         {/* Plan ids never break mid-word. */}
-                        <span className="whitespace-nowrap">{b.plan}</span>
+                        <span className={`whitespace-nowrap ${MONO_ID}`}>{b.plan}</span>
                         {buyableMachine(b) && <span className="block text-[12px] leading-4 text-muted">{buyableMachine(b)}</span>}
                       </td>
                       <td className={`${PAD} text-right`}>
