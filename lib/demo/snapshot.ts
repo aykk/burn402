@@ -26,11 +26,22 @@ export type Snapshot = {
   walletReady: { test: boolean; real: boolean };
 };
 
-/** A public visitor's machine never shows where its key sits on the server: the path names the owner's folders. */
+/** An absolute path on this computer, as it might appear inside an error message. */
+const SERVER_PATH = /(?:\/(?:Users|home|private|var|tmp|opt|Volumes)\/[^\s'"`,;)]*)/g;
+
+/** Every string in `value` with server paths replaced; a public visitor never learns the owner's folders. */
+export function withoutPaths<T>(value: T): T {
+  if (typeof value === "string") return value.replace(SERVER_PATH, "a file on the server") as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => withoutPaths(v)) as unknown as T;
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutPaths(v)])) as T;
+  return value;
+}
+
+/** A public visitor's machine never shows where its key sits on the server, and no error text carries a server path. */
 function publicView(market: MarketRunView): MarketRunView {
   const m = market.machine;
-  if (!m || m.ssh === null) return market;
-  return { ...market, machine: { ...m, ssh: m.ip ? `ssh root@${m.ip}` : null } };
+  const view = m && m.ssh !== null ? { ...market, machine: { ...m, ssh: m.ip ? `ssh root@${m.ip}` : null } } : market;
+  return withoutPaths(view);
 }
 
 /**
@@ -58,7 +69,7 @@ export function snapshot(rt: Runtime, s: DemoSession | null, kind: "owner" | "pu
     visitor: kind,
     network: rt.network,
     models: kind === "owner" ? modelsView() : null,
-    log: s ? s.log.lines : [],
+    log: s ? (kind === "public" ? withoutPaths(s.log.lines) : s.log.lines) : [],
     market: market && kind === "public" ? publicView(market) : market,
     openPurchases,
     walletReady: kind === "owner" ? ready : { test: ready.test, real: false },

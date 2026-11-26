@@ -1,6 +1,6 @@
 import { publicLimit } from "@/lib/demo/limits";
 import { visit } from "@/lib/demo/visit";
-import { PUBLIC_TEST_ONLY } from "@/lib/market/access";
+import { PUBLIC_MAX_BUDGET_USD, PUBLIC_TEST_ONLY } from "@/lib/market/access";
 import { OVERSPEND_BUSY, overspendRunning } from "@/lib/market/overspend-lock";
 import { checkRequest, parseRunInput } from "@/lib/market/session";
 
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
   if (seen.v.kind === "public") {
     // the real market spends the owner's wallet: never for a public visitor
     if (input.value.market !== "test") return Response.json({ error: PUBLIC_TEST_ONLY }, { status: 403 });
+    if (input.value.limits.budgetUsd > PUBLIC_MAX_BUDGET_USD) return Response.json({ error: `The public demo allows a budget of up to $${PUBLIC_MAX_BUDGET_USD.toFixed(2)}.` }, { status: 400 });
     // a visitor whose run is still going gets it back and is not counted again
     if (!seen.session?.marketBusy) {
       const limited = publicLimit("run", seen.v);

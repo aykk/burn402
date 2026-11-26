@@ -11,7 +11,8 @@ import { localHosts, localOrigins } from "./local";
 
 type Env = Record<string, string | undefined>;
 
-export const SESSION_COOKIE = "b402_sid";
+/** The __Host- prefix makes browsers accept it only from this exact host, over https, for the whole site: a sibling subdomain cannot plant one. */
+export const SESSION_COOKIE = "__Host-b402_sid";
 const SID_RE = /^[a-f0-9]{32}$/;
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 const LOOPBACK_RE = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;
@@ -98,6 +99,8 @@ const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 const OWNER_ONLY = ["/api/testseller", "/api/demo/model", "/api/market/parse"];
 
 export const NOT_PUBLIC = "This is not available on the public demo.";
+/** The most a public visitor may set as a budget: they all spend one devnet wallet. */
+export const PUBLIC_MAX_BUDGET_USD = 1;
 export const PUBLIC_TEST_ONLY = "The public demo runs on the test market only: test money and simulated machines.";
 
 /**

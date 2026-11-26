@@ -24,7 +24,7 @@ describe("visitorOf", () => {
     expect(visitorOf(h({ host: "localhost:3000", forwardedFor: "203.0.113.9, 127.0.0.1" }), env)).toBeNull();
   });
   it("a listed public host is a public visitor, with its address and session", () => {
-    expect(visitorOf(h({ host: "Demo.Example.com", cfIp: "203.0.113.9", cookie: `a=1; b402_sid=${SID}` }), env)).toEqual({ kind: "public", host: "demo.example.com", ip: "203.0.113.9", sid: SID });
+    expect(visitorOf(h({ host: "Demo.Example.com", cfIp: "203.0.113.9", cookie: `a=1; __Host-b402_sid=${SID}` }), env)).toEqual({ kind: "public", host: "demo.example.com", ip: "203.0.113.9", sid: SID });
     expect(visitorOf(h({ host: "demo.example.com" }), env)).toEqual({ kind: "public", host: "demo.example.com", ip: null, sid: null });
   });
   it("any other host, or no public hosts configured, is nobody", () => {
@@ -41,8 +41,8 @@ describe("session ids", () => {
     expect(newSessionId()).not.toBe(a);
   });
   it("are read from the cookie only when well formed", () => {
-    expect(sessionIdFrom(`b402_sid=${SID}`)).toBe(SID);
-    expect(sessionIdFrom("b402_sid=../../etc/passwd")).toBeNull();
+    expect(sessionIdFrom(`__Host-b402_sid=${SID}`)).toBe(SID);
+    expect(sessionIdFrom("__Host-b402_sid=../../etc/passwd")).toBeNull();
     expect(sessionIdFrom("other=1")).toBeNull();
     expect(sessionIdFrom(null)).toBeNull();
   });
