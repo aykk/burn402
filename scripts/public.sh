@@ -7,12 +7,20 @@
 # session. The real market, the model key and the test seller's own API stay owner-only: they
 # answer on http://127.0.0.1:3000 from this computer and nowhere else.
 # The site is up while this script runs. The address is new every time (a quick tunnel has no fixed name).
-# Needs: cloudflared (brew install cloudflared), the ANS services running, and .env.local set up.
+# Needs: cloudflared (brew install cloudflared) and .env.local set up. Starts the ANS services if they are not running.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 command -v cloudflared >/dev/null || { echo "cloudflared is not installed: brew install cloudflared"; exit 1; }
-curl -s -o /dev/null --max-time 3 http://127.0.0.1:18081/ || { echo "the ANS transparency log is not answering on :18081: start it with ans/scripts/demo/start.sh"; exit 1; }
+# The identity services (ANS) must be running. After a restart of the computer they are not: start them,
+# keeping their data so the agents registered earlier are still known.
+if ! curl -s -o /dev/null --max-time 3 http://127.0.0.1:18081/; then
+  [ -x ans/scripts/demo/start.sh ] || { echo "the ANS services are not running and ans/scripts/demo/start.sh is missing (see the README)"; exit 1; }
+  echo "starting the identity services…"
+  (cd ans && scripts/demo/start.sh --keep >/dev/null)
+  for _ in $(seq 1 60); do curl -s -o /dev/null --max-time 2 http://127.0.0.1:18081/v2/admin/ready && break; sleep 1; done
+  curl -s -o /dev/null --max-time 3 http://127.0.0.1:18081/ || { echo "the identity services did not start; run ans/scripts/demo/start.sh --keep and look at its output"; exit 1; }
+fi
 if lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then echo "something is already listening on port 3000: stop it first (npm run dev?)"; exit 1; fi
 
 mkdir -p .burn402
