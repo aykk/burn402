@@ -66,7 +66,9 @@ npm run public                     # builds, opens a Cloudflare quick tunnel, pr
 
 Anyone with the address gets the whole flow on the **test market only** (test money, simulated machines), each in a private session with its own run, log and purchases. Starts are rate limited per visitor, per address and overall, because every visitor spends the same devnet wallet.
 
-The real market and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address. The site is up while the command runs, and a quick tunnel gets a new address each time. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
+The real market and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address.
+
+The tunnel is started once and kept running, so running `npm run public` again (to pick up a change) keeps the same address. `npm run public:stop` takes the app and the tunnel down; the next start gets a new address. Cloudflare limits how often a free tunnel can be created, so the launcher waits and retries when it is refused. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
 
 ## Layout
 

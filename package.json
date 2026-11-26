@@ -13,7 +13,8 @@
     "market:sweep": "tsx scripts/market-sweep.ts",
     "burn402": "tsx cli/burn402.ts",
     "demo": "tsx scripts/demo.ts",
-    "public": "bash scripts/public.sh"
+    "public": "bash scripts/public.sh",
+    "public:stop": "bash scripts/public-stop.sh"
   },
   "dependencies": {
     "@ardrive/turbo-upload": "^0.3.0",
