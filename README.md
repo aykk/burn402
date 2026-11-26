@@ -55,7 +55,18 @@ npm run dev                        # http://127.0.0.1:3000
 
 `npm test` runs the unit suite. `npm run test:live` checks ANS, Arweave and the real seller with free calls only (no payment). `npm run market:sweep -- --market test|real` lists, and on the test market destroys, every machine your wallet owns.
 
-The app only answers on `127.0.0.1:3000` and `localhost:3000`.
+By default the app only answers on `127.0.0.1:3000` and `localhost:3000`.
+
+## A public demo
+
+```bash
+brew install cloudflared
+npm run public                     # builds, opens a Cloudflare quick tunnel, prints the public https address
+```
+
+Anyone with the address gets the whole flow on the **test market only** (test money, simulated machines), each in a private session with its own run, log and purchases. Starts are rate limited per visitor, per address and overall, because every visitor spends the same devnet wallet.
+
+The real market, the model key and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address. The site is up while the command runs, and a quick tunnel gets a new address each time. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
 
 ## Layout
 

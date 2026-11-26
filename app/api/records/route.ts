@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
-import { getSession } from "@/lib/demo/session";
+import { getRuntime } from "@/lib/demo/session";
 import { clusterOf } from "@/lib/market/record";
 import { recordWords } from "@/app/components/record-words";
 import { fromCompact, verifyJws } from "@/lib/mandate";
@@ -73,10 +73,36 @@ type StoredRecord = {
   paymentCluster?: "devnet" | "mainnet" | null;
 };
 
+/** One answer per network and agent is kept for a minute and shared by everyone asking: reading and re-checking every record is slow, and a public page must not let each visitor trigger it. */
+const CACHE_MS = 60_000;
+const MAX_CACHED = 24;
+type Cached = { at: number; answer: Promise<{ status: number; body: unknown }> };
+const cache: Map<string, Cached> = ((globalThis as unknown as { __burn402Records?: Map<string, Cached> }).__burn402Records ??= new Map());
+const FQDN_RE = /^[a-z0-9:/._-]{1,120}$/i;
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const network = (url.searchParams.get("network") === "testnet" ? "testnet" : "production") as Network;
-  const fqdn = url.searchParams.get("fqdn");
+  const asked = url.searchParams.get("fqdn");
+  const fqdn = asked !== null && FQDN_RE.test(asked) ? asked : null;
+  const key = `${network}|${fqdn ?? ""}`;
+  const now = Date.now();
+  let hit = cache.get(key);
+  if (!hit || now - hit.at > CACHE_MS) {
+    for (const [k, c] of cache) if (now - c.at > CACHE_MS) cache.delete(k);
+    if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
+    hit = { at: now, answer: load(network, fqdn) };
+    cache.set(key, hit);
+    // an error is not kept: the next request tries again
+    void hit.answer.then((a) => {
+      if (a.status !== 200 && cache.get(key) === hit) cache.delete(key);
+    });
+  }
+  const { status, body } = await hit.answer;
+  return Response.json(body, { status });
+}
+
+async function load(network: Network, fqdn: string | null): Promise<{ status: number; body: unknown }> {
   const gateway = new TurboGateway({ network });
   const rootKeys = parseRootKeys(readFileSync(join(process.cwd(), "config", "ans", "tl-root-keys.txt"), "utf8"));
 
@@ -147,8 +173,8 @@ export async function GET(request: Request) {
           }
           steps.push({ name: "transaction record", ok: Boolean(body.jws), detail: body.jws ? "signed record attached" : "no signature attached" });
           if (body.jws) {
-            const session = await getSession();
-            const checkedJws = await verifyJws(fromCompact(body.jws), (iss) => session.rt.directory.resolveKeys(iss), TRANSACTION_TYP);
+            const rt = await getRuntime();
+            const checkedJws = await verifyJws(fromCompact(body.jws), (iss) => rt.directory.resolveKeys(iss), TRANSACTION_TYP);
             verified = true;
             steps.push({ name: "signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
           }
@@ -196,8 +222,8 @@ export async function GET(request: Request) {
     ]);
 
     checked.sort((a, b) => (b.issuedAt ?? b.anchoredAt ?? 0) - (a.issuedAt ?? a.anchoredAt ?? 0));
-    return Response.json({ network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: checked });
+    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: checked } };
   } catch (error) {
-    return Response.json({ network, fqdn, error: (error as Error).message }, { status: 502 });
+    return { status: 502, body: { network, fqdn, error: (error as Error).message } };
   }
 }

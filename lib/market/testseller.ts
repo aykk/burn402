@@ -2,6 +2,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { X402Processor, type PaymentProcessor } from "../x402/processor";
 import { verifyAuth } from "./auth";
 import plansFeed from "./fixtures/plans.sample.json";
+import { defaultJournal } from "./journal";
 
 /**
  * A local stand-in for compute.x402layer.cc. Same paths, same 402 header, same X-Auth-* checks;
@@ -311,14 +312,34 @@ type Holder = { seller: TestSeller | null };
 const holder = ((globalThis as unknown as { __burn402TestSeller?: Holder }).__burn402TestSeller ??= { seller: null });
 
 /** The app's test seller, paid at SOLANA_RECEIVER_ADDRESS on devnet. Null when that is unset. */
+/**
+ * The test seller's machines live in this process's memory. When a new one starts, every test-market
+ * purchase the journal still lists as open belongs to a seller that is gone, machine and all, so it is
+ * closed here instead of sitting on the open purchases list for ever.
+ */
+function releaseStalePurchases(): void {
+  try {
+    const journal = defaultJournal();
+    for (const o of journal.open()) {
+      if (o.market !== "test") continue;
+      journal.append({ at: Date.now(), run: o.run, market: o.market, seller: o.seller, event: "released", plan: o.plan, region: o.region, usd: o.usd, tx: o.tx, instance: o.instance, detail: "the test seller restarted; its simulated machine is gone" });
+    }
+  } catch {
+    // the journal is checked again by the open purchases list; a failure here must not stop the seller
+  }
+}
+
 export function getTestSeller(): TestSeller | null {
-  // a stand-in for local testing only: a production build has no test seller
-  if (process.env.NODE_ENV === "production") return null;
+  // a stand-in for testing: a production build has no test seller unless it is switched on (the public demo runs on it)
+  if (process.env.NODE_ENV === "production" && process.env.BURN402_TEST_SELLER !== "1") return null;
   const payTo = process.env.SOLANA_RECEIVER_ADDRESS;
   if (!payTo) return null;
-  holder.seller ??= new TestSeller({
-    processor: new X402Processor({ payTo }),
-    resourceUrl: "http://127.0.0.1:3000/api/testseller/compute/provision",
-  });
+  if (!holder.seller) {
+    holder.seller = new TestSeller({
+      processor: new X402Processor({ payTo }),
+      resourceUrl: "http://127.0.0.1:3000/api/testseller/compute/provision",
+    });
+    releaseStalePurchases();
+  }
   return holder.seller;
 }

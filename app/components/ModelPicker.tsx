@@ -16,7 +16,7 @@ export function ModelPicker({
   open,
   onOpenChange: setOpen,
 }: {
-  models: Snapshot["models"];
+  models: NonNullable<Snapshot["models"]>;
   disabled: boolean;
   onSave: (provider: string, key?: string) => Promise<string | null>;
   /** Owned by the page so a blocked Start run can open the picker too. */

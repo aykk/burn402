@@ -1,18 +1,24 @@
+import type { Visitor } from "../market/access";
 import type { OpenPurchase } from "../market/journal";
 import { visibleOpenPurchases } from "../market/recover";
 import type { MarketRunView } from "../market/run";
-import { isLocalHost, marketJournal, walletReady } from "../market/session";
+import { marketJournal, walletReady } from "../market/session";
 import type { LogLine } from "./log";
 import { modelsView, type ModelsView } from "./models";
+import type { Runtime } from "./runtime";
 import type { DemoSession } from "./script";
+import { allSessions } from "./session";
 
 export type Snapshot = {
   /** seconds */
   now: number;
   /** the same instant in ms, for comparing with MarketRunView times (all ms) */
   nowMs: number;
+  /** "owner": this computer, everything allowed. "public": a visitor on the public demo, test market only. */
+  visitor: "owner" | "public";
   network: "testnet" | "production";
-  models: ModelsView;
+  /** The model picker's state; null for public visitors, who have no model. */
+  models: ModelsView | null;
   log: LogLine[];
   market: MarketRunView | null;
   /** journal purchases that were paid and not released; the current run is left out only while it is still going */
@@ -20,35 +26,46 @@ export type Snapshot = {
   walletReady: { test: boolean; real: boolean };
 };
 
-export function snapshot(s: DemoSession): Snapshot {
-  const rt = s.rt;
-  const market = s.market?.view() ?? null;
+/** A public visitor's machine never shows where its key sits on the server: the path names the owner's folders. */
+function publicView(market: MarketRunView): MarketRunView {
+  const m = market.machine;
+  if (!m || m.ssh === null) return market;
+  return { ...market, machine: { ...m, ssh: m.ip ? `ssh root@${m.ip}` : null } };
+}
+
+/**
+ * What one visitor sees. `s` is null for a public visitor who has not started anything yet: an idle
+ * page, with no session kept for them. A public visitor only ever sees their own run, log and purchases.
+ */
+export function snapshot(rt: Runtime, s: DemoSession | null, kind: "owner" | "public"): Snapshot {
+  const market = s?.market?.view() ?? null;
   let openPurchases: OpenPurchase[] = [];
   try {
-    openPurchases = visibleOpenPurchases(marketJournal(rt.config.root).open(), market);
+    if (kind === "owner") {
+      // everything in the journal, except purchases a live public session is still looking after
+      const theirs = new Set(allSessions().filter((o) => o.kind === "public").flatMap((o) => [...o.runIds]));
+      openPurchases = visibleOpenPurchases(marketJournal(rt.config.root).open(), market).filter((o) => !theirs.has(o.run));
+    }
+    else if (s && s.runIds.size > 0) openPurchases = visibleOpenPurchases(marketJournal(rt.config.root).open(), market).filter((o) => s.runIds.has(o.run));
   } catch {
     // an unreadable journal must not break the page
   }
   const nowMs = Date.now();
+  const ready = walletReady();
   return {
     now: nowMs / 1000,
     nowMs,
+    visitor: kind,
     network: rt.network,
-    models: modelsView(),
-    log: rt.log.lines,
-    market,
+    models: kind === "owner" ? modelsView() : null,
+    log: s ? s.log.lines : [],
+    market: market && kind === "public" ? publicView(market) : market,
     openPurchases,
-    walletReady: walletReady(),
+    walletReady: kind === "owner" ? ready : { test: ready.test, real: false },
   };
 }
 
-/**
- * The snapshot for one HTTP request. The approval code pays for a purchase, so it is only
- * handed to requests addressed to 127.0.0.1:3000 or localhost:3000; a DNS-rebinding page
- * reaches the app under its own host name and gets `market.approval: null`.
- */
-export function snapshotFor(s: DemoSession, request: Request): Snapshot {
-  const state = snapshot(s);
-  if (!isLocalHost(request) && state.market) state.market = { ...state.market, approval: null };
-  return state;
+/** The snapshot for one visitor. The approval code in it pays for a purchase; it only ever goes to the session that owns the run. */
+export function snapshotFor(rt: Runtime, s: DemoSession | null, v: Visitor): Snapshot {
+  return snapshot(rt, s, v.kind);
 }

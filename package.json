@@ -12,7 +12,8 @@
     "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_MARKET=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/market/seller.live.test.ts",
     "market:sweep": "tsx scripts/market-sweep.ts",
     "burn402": "tsx cli/burn402.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "public": "bash scripts/public.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",

@@ -1,6 +1,7 @@
 import { lastText, runLlm } from "@/lib/demo/llm";
 import { currentModel, type ModelChoice } from "@/lib/demo/models";
-import { checkRequest, needFromModelReply } from "@/lib/market/session";
+import { NOT_PUBLIC } from "@/lib/market/access";
+import { checkRequest, isOwner, needFromModelReply } from "@/lib/market/session";
 
 const SYSTEM = [
   "You turn a short description of a compute need into form fields. Reply with one JSON object and nothing else.",
@@ -14,6 +15,8 @@ const SYSTEM = [
 export async function POST(request: Request) {
   const refused = checkRequest(request);
   if (refused) return refused;
+  // the model key is the owner's: a public visitor never spends it
+  if (!isOwner(request)) return Response.json({ error: NOT_PUBLIC }, { status: 403 });
   const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   if (!text) return Response.json({ error: "describe what you need first" }, { status: 400 });

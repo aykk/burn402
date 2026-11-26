@@ -202,7 +202,9 @@ export function NeedForm(props: {
     onDraftChange({ ...lastValid.current, valid: valid !== null });
   }, [budget, rate, onDraftChange]);
 
-  const hasKey = Boolean(snap?.models.providers.find((p) => p.id === snap.models.selected)?.key);
+  // A public visitor has no model and the test market only.
+  const publicDemo = snap?.visitor === "public";
+  const hasKey = Boolean(snap?.models?.providers.find((p) => p.id === snap.models?.selected)?.key);
 
   if (collapsed) {
     const n: Need = run?.need ?? { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: parseRegions(regions), allowSpot };
@@ -324,43 +326,55 @@ export function NeedForm(props: {
         What you need
       </h2>
 
-      <div className="space-y-1.5">
-        <Label help="describe" htmlFor="describe-input">
-          Describe what you need
-        </Label>
-        <textarea
-          id="describe-input"
-          aria-describedby="help-describe"
-          className={`${TEXTAREA} block w-full resize-none`}
-          rows={2}
-          placeholder="A small Linux box in New Jersey for two hours"
-          value={describe}
-          disabled={disabled || filling || !hasKey}
-          onChange={(e) => setDescribe(e.target.value)}
-        />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <button type="button" className={BTN} disabled={disabled || filling || !hasKey || !describe.trim()} aria-describedby={!hasKey ? "describe-reason" : undefined} onClick={() => void fill()}>
-            {filling ? "Filling in…" : "Fill in the form"}
-          </button>
-          {!hasKey && (
-            <span id="describe-reason" className="text-foreground">
-              <button type="button" className={TEXT_BTN} onClick={onAddKey}>
-                Add a model key
-              </button>{" "}
-              to use this.
-            </span>
-          )}
-          {hasKey && fillNote && <span className="min-w-0 text-muted">{fillNote}</span>}
+      {!publicDemo && (
+        <div className="space-y-1.5">
+          <Label help="describe" htmlFor="describe-input">
+            Describe what you need
+          </Label>
+          <textarea
+            id="describe-input"
+            aria-describedby="help-describe"
+            className={`${TEXTAREA} block w-full resize-none`}
+            rows={2}
+            placeholder="A small Linux box in New Jersey for two hours"
+            value={describe}
+            disabled={disabled || filling || !hasKey}
+            onChange={(e) => setDescribe(e.target.value)}
+          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <button type="button" className={BTN} disabled={disabled || filling || !hasKey || !describe.trim()} aria-describedby={!hasKey ? "describe-reason" : undefined} onClick={() => void fill()}>
+              {filling ? "Filling in…" : "Fill in the form"}
+            </button>
+            {!hasKey && (
+              <span id="describe-reason" className="text-foreground">
+                <button type="button" className={TEXT_BTN} onClick={onAddKey}>
+                  Add a model key
+                </button>{" "}
+                to use this.
+              </span>
+            )}
+            {hasKey && fillNote && <span className="min-w-0 text-muted">{fillNote}</span>}
+          </div>
+          <ActionError what="The form wasn't filled in" message={fillError} onDismiss={() => setFillError(null)} />
         </div>
-        <ActionError what="The form wasn't filled in" message={fillError} onDismiss={() => setFillError(null)} />
-      </div>
+      )}
 
       <div className="grid grid-cols-1 gap-x-6 gap-y-5 @min-[30rem]:grid-cols-[auto_auto] @min-[30rem]:justify-start">
         <div className="space-y-1.5">
           <Label help="market" forId="market-choice">
             Market
           </Label>
-          <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} />
+{/* The public demo has one market; the real one spends the owner's wallet and is not offered there. */}
+          {publicDemo ? (
+            <p id="market-choice" className="flex h-9 items-center font-medium text-foreground">
+              Test (devnet)
+            </p>
+          ) : (
+            <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} />
+          )}
+          {publicDemo && (
+            <p className="max-w-[34ch] text-muted">Public demo: test money and simulated machines. Nothing here costs real money.</p>
+          )}
           {/* Under the Market choice it belongs to. */}
           {market === "real" && (
             <p id="real-line" className="max-w-[28ch] text-foreground">
