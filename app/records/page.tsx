@@ -39,8 +39,10 @@ const OUTCOMES = [
   { value: "all", label: "Everything" },
   { value: "good", label: "Allowed" },
   { value: "warn", label: "Refused" },
-  { value: "bad", label: "Broken rules" },
-  { value: "negotiation", label: "Negotiations" },
+  // Failed: a purchase that went wrong (payment rejected, the seller kept the money, it could not start) and,
+  // in older records, a verdict that the agent broke its budget. The app no longer negotiates, so older
+  // negotiation records show under Everything only.
+  { value: "bad", label: "Failed" },
 ] as const;
 
 // Mainnet is permanent, so its button carries a red dot (and a red outline on hover and focus).
@@ -123,7 +125,7 @@ function when(seconds: number | null): string | null {
 export default function RecordsPage() {
   // null until we know which network to open on: the one in the URL, else the one the demo writes to.
   const [network, setNetwork] = useState<"testnet" | "production" | null>(null);
-  const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad" | "negotiation">("all");
+  const [outcome, setOutcome] = useState<"all" | "good" | "warn" | "bad">("all");
   const [agent, setAgent] = useState("");
   const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
@@ -199,7 +201,7 @@ export default function RecordsPage() {
   const agents = [...new Set(records.map((r) => r.subject ?? "").filter(Boolean))].sort();
   const shown = records.filter(
     (r) =>
-      (outcome === "all" || (outcome === "negotiation" ? r.kind === "conversation" : r.outcome.tone === outcome && r.kind !== "conversation")) &&
+      (outcome === "all" || (r.outcome.tone === outcome && r.kind !== "conversation")) &&
       (agent === "" || r.subject === agent) &&
       (needle === "" ||
         `${r.headline} ${r.outcome.label} ${r.reason ?? ""} ${r.subject ?? ""} ${r.kind} ${r.id} ${when(r.issuedAt) ?? ""}`.toLowerCase().includes(needle.toLowerCase())),
@@ -235,7 +237,7 @@ export default function RecordsPage() {
           )}
         </p>
         <p className="mt-3 max-w-[64ch] text-muted">
-          Every handshake, transaction and failure is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
+          Every payment, refusal and failure your agent makes is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
           Reload the page to read them again.
         </p>
       </div>
