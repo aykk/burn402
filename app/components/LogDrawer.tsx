@@ -72,7 +72,7 @@ export function LogDrawer({
       aria-modal="true"
       aria-labelledby="log-title"
       inert={!open}
-      className={`fixed right-0 top-0 z-10 flex h-full w-full max-w-[620px] flex-col border-l border-rule-strong bg-surface transition-transform duration-200 ${open ? "translate-x-0" : "translate-x-full"}`}
+      className={`fixed right-0 top-0 z-30 flex h-full w-full max-w-[620px] flex-col border-l border-rule-strong bg-surface transition-transform duration-200 ${open ? "translate-x-0" : "translate-x-full"}`}
     >
       <div className="flex items-center border-b border-rule p-3">
         <h2 id="log-title" className="text-[16px] leading-[22px] font-semibold">
