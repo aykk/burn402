@@ -311,3 +311,18 @@
     animation: none;
   }
 }
+
+/* While a machine is paid for and running, the meter stays at the top of the screen. Only where there is
+   room for it: on a phone the meter is most of the screen, so it scrolls away as usual. Anything the page
+   scrolls to (a heading that takes focus) stops below the pinned meter, not under it. */
+@media (min-width: 640px) and (min-height: 640px) {
+  .meter-pinned {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+
+  html:has(.meter-pinned) {
+    scroll-padding-top: 16rem;
+  }
+}

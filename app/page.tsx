@@ -18,6 +18,8 @@ import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/compo
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
 
 const ENDED = new Set<MarketRunView["phase"]>(["released", "failed", "refused"]);
+/** Money has moved and a machine is coming, running or going: the meter is what to watch. */
+const PINNED = new Set<MarketRunView["phase"]>(["paying", "provisioning", "ready", "releasing"]);
 
 export default function Page() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -151,6 +153,19 @@ export default function Page() {
   };
 
   const running = run !== null && !ENDED.has(run.phase);
+  const pinned = run !== null && PINNED.has(run.phase);
+  // When the run ends the meter stays pinned a moment longer, so the drain and the flame going out are seen.
+  const [wasPinned, setWasPinned] = useState(false);
+  const [lingering, setLingering] = useState(false);
+  if (pinned !== wasPinned) {
+    setWasPinned(pinned);
+    if (!pinned) setLingering(true);
+  }
+  useEffect(() => {
+    if (!lingering) return;
+    const id = setTimeout(() => setLingering(false), 3000);
+    return () => clearTimeout(id);
+  }, [lingering]);
 
   // While a run is live (and the server answers), tick once a second so the meter and the time left move between polls.
   useEffect(() => {
@@ -208,7 +223,9 @@ export default function Page() {
       </div>
 
       {/* Focus lands here after the last open purchase is dismissed, where the run's money is told. */}
-      <div ref={meterRef} tabIndex={-1} className="mt-4 shrink-0 focus:outline-none">
+      {/* From the payment until the machine is gone the meter stays in view (pinned in globals.css, on screens
+          big enough to spare the room); the page-colored strip above it hides what scrolls underneath. */}
+      <div ref={meterRef} tabIndex={-1} className={`mt-1 shrink-0 bg-background pt-3 focus:outline-none ${pinned || lingering ? "meter-pinned" : ""}`}>
         <BudgetMeter
           agentName={snap?.company?.name ?? null}
           formBudgetUsd={draft.budgetUsd}
