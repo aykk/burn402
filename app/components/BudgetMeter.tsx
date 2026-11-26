@@ -40,16 +40,16 @@ export function Swatch() {
   return <span aria-hidden className="inline-block size-2 shrink-0 rounded-[1px] bg-amber" />;
 }
 
-/** The gauge's height: a fine tick scale, like a dial on an instrument. */
-const GAUGE = "relative h-5 sm:h-6";
+/** The gauge: one solid line, the same kind as the budget line under it, a little thicker because it leads. */
+const GAUGE = "relative h-1.5 overflow-hidden rounded-[1px]";
 
-/** The allowance: light ticks for what is left of the budget being typed, dark ticks for what is gone. */
+/** The allowance: a light line for what is left of the budget being typed, a dark track for what is gone. */
 function WalletGauge({ v, className }: { v: MeterView; className: string }) {
   const left = budgetShare(v.remainingUsd, v.budgetUsd);
   return (
     <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`gauge-in ${GAUGE} ${className}`}>
-      <span className="ticks absolute inset-0 text-segment" />
-      <span className="ticks absolute inset-y-0 left-0 text-foreground/80" style={{ width: `${left * 100}%` }} />
+      <span className="absolute inset-0 bg-segment" />
+      <span className="absolute inset-y-0 left-0 bg-foreground" style={{ width: `${left * 100}%` }} />
     </div>
   );
 }
@@ -58,7 +58,7 @@ function WalletGauge({ v, className }: { v: MeterView; className: string }) {
  * The job: a full amber gauge is the paid amount (or the quote). The amber layer is clipped from the
  * right as the server burns it, one linear second per tick so the drain is continuous between polls;
  * when the run ends the remainder collapses to $0 in one quick ease-out, the shutdown. Clipping keeps
- * the last partial tick honest and animates without layout. Reduced motion steps instead.
+ * the edge honest and animates without layout. Reduced motion steps instead.
  */
 function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className: string }) {
   const timing =
@@ -67,12 +67,12 @@ function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   const fill = Math.min(1, Math.max(0, j.fill));
   return (
-    // Once the machine is gone the drain plays out, then the empty tick track folds away (gauge-spent), so a
+    // Once the machine is gone the drain plays out, then the empty track folds away (gauge-spent), so a
     // finished run shows one bar, the budget, instead of an empty one that reads as a second progress bar.
     <div role="img" aria-label={gaugeLabel(j, v)} className={`${GAUGE} ${className} ${j.state === "shut" ? "gauge-spent" : ""}`}>
-      <span className="ticks absolute inset-0 text-segment" />
+      <span className="absolute inset-0 bg-segment" />
       <span
-        className={`ticks absolute inset-0 text-amber motion-safe:transition-[clip-path] ${timing}`}
+        className={`absolute inset-0 bg-amber motion-safe:transition-[clip-path] ${timing}`}
         style={{ clipPath: `inset(0 ${(1 - fill) * 100}% 0 0)` }}
       />
     </div>
