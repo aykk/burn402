@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
-import type { TrainingRunView } from "@/lib/demo/train";
 import { marketAnnouncement, marketMark } from "./announce";
-import { failedWhere } from "./stages";
-
-const job = (over: Partial<TrainingRunView>): TrainingRunView =>
-  ({ id: "j1", phase: "negotiating", plan: null, paidUsd: null, actualSeconds: null, error: null, ...over }) as TrainingRunView;
 
 const run = (over: Partial<MarketRunView>): MarketRunView =>
   ({ id: "mkt_1", market: "test", phase: "scanning", rows: [], leftOut: [], approval: null, payment: null, machine: null, error: null, refusal: null, spent: "nothing", ...over }) as MarketRunView;
@@ -67,27 +62,5 @@ describe("marketAnnouncement", () => {
     expect(marketAnnouncement(marketMark(run({})), run({ phase: "failed", error: "No price list could be read" }))).toBe(
       "Run failed. No price list could be read.",
     );
-  });
-});
-
-describe("failedWhere", () => {
-  const paid = { phase: "failed" as const, plan: "vc2", paidUsd: 0.01 };
-  const status = (over: Partial<NonNullable<TrainingRunView["status"]>>) =>
-    ({ phase: "starting", progress: 0, configs_done: 0, ...over }) as NonNullable<TrainingRunView["status"]>;
-  it("names the stage before the server was rented", () => {
-    expect(failedWhere(job({ phase: "failed" }))).toBe("during deal");
-    expect(failedWhere(job({ phase: "failed", plan: "vc2" }))).toBe("during payment");
-  });
-  it("says booting when the box never answered", () => {
-    expect(failedWhere(job({ ...paid, status: null, liveAt: null }))).toBe("while the server was booting");
-  });
-  it("says before training when the box answered but never trained", () => {
-    expect(failedWhere(job({ ...paid, status: status({ phase: "downloading" }), liveAt: 100 }))).toBe("before training started");
-  });
-  it("trusts an error that says training never started", () => {
-    expect(failedWhere(job({ ...paid, status: status({ phase: "training" }), liveAt: 100, error: "stopped before training started" }))).toBe("before training started");
-  });
-  it("says training once the box reported it", () => {
-    expect(failedWhere(job({ ...paid, status: status({ phase: "training", progress: 0.4 }), liveAt: 100 }))).toBe("during training");
   });
 });

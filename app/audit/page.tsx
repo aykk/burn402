@@ -3,17 +3,16 @@
 import { useState } from "react";
 import { Nav } from "@/app/nav";
 import { ActionError, failureMessage } from "@/app/components/ActionError";
-import { AttemptLedger } from "@/app/components/AttemptLedger";
+import { AttemptLedger, type Attempt } from "@/app/components/AttemptLedger";
 import { usd2 } from "@/app/components/format";
 import { colonCase } from "@/app/components/market-copy";
 import { usdPlain } from "@/lib/market/money";
 import { BTN_PRIMARY } from "@/app/components/ui";
 import type { OverspendAttempt, OverspendResult } from "@/lib/market/overspend";
-import type { Snapshot } from "@/lib/demo/snapshot";
 
 /** Mirrors OVERSPEND_LIMITS in lib/market/overspend.ts (a server module, so it is not imported here). */
 const LIMITS = { budgetUsd: 0.05, rateUsdHr: 0.05 };
-type LedgerRow = Snapshot["stress"]["attempts"][number];
+type LedgerRow = Attempt;
 
 /** The ledger reads "refused: …" as Blocked and "not stopped: …" as Got through. */
 const toRow = (a: OverspendAttempt): LedgerRow => ({
@@ -69,7 +68,7 @@ export default function OverspendPage() {
       {result && (
         <section className="mt-6 max-w-[80ch] space-y-4 border-t border-rule pt-6">
           {/* The test's own sentences carry exact amounts ("$0.010382"); the ledger shows them as they are. */}
-          <AttemptLedger attempts={result.attempts.map(toRow)} status="done" verdict={result.verdict} exact />
+          <AttemptLedger attempts={result.attempts.map(toRow)} verdict={result.verdict} exact />
           <p className="flex items-center gap-x-2 text-muted">
             <span aria-hidden className="inline-block size-2.5 shrink-0 bg-amber" />
             <span>

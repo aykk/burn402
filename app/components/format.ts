@@ -1,17 +1,5 @@
-import type { TrainingRunView } from "@/lib/demo/train";
-import type { DatasetSource } from "@/lib/train";
 
 export const REGIONS: Record<string, string> = { ewr: "New Jersey", ord: "Chicago", atl: "Atlanta", lax: "Los Angeles", sjc: "Silicon Valley" };
-
-export const PHASE_TEXT: Record<TrainingRunView["phase"], string> = {
-  negotiating: "Your agent is talking to the broker",
-  paying: "Paying for the server over x402",
-  booting: "The server is booting",
-  training: "Training on the rented server",
-  publishing: "Collecting the model",
-  done: "Done",
-  failed: "Stopped",
-};
 
 export function clock(ms: number): string {
   return new Date(ms).toISOString().slice(11, 19);
@@ -24,35 +12,11 @@ export function duration(seconds: number | null): string {
   return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
 
-export function size(dataset: DatasetSource): string {
-  if (dataset.rows > 0) return `about ${dataset.rows.toLocaleString()} rows`;
-  return `${Math.round(dataset.bytes / 1024).toLocaleString()} KB`;
-}
-
-export function kb(bytes: number | null): string {
-  return bytes === null ? "-" : bytes > 900000 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
-}
-
 /** Displayed amounts never go below zero or show NaN. */
 const safe = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
 
 /** "1234567.25" becomes "1,234,567.25": thousands separators on the whole dollars only. */
 const grouped = (fixed: string) => fixed.replace(/^\d+/, (whole) => whole.replace(/\B(?=(\d{3})+(?!\d))/g, ","));
-
-/** How long something took, as people say it: "51 s", "2 min 5 s", "1 h 5 min". */
-export function elapsedText(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "-";
-  const total = Math.round(seconds);
-  if (total < 60) return `${total} s`;
-  if (total < 3600) {
-    const m = Math.floor(total / 60);
-    const s = total % 60;
-    return s > 0 ? `${m} min ${s} s` : `${m} min`;
-  }
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  return m > 0 ? `${h} h ${m} min` : `${h} h`;
-}
 
 /**
  * The site's two money formats. Budgets and limits read in cents ("$0.50", "$1.25"), keeping extra
@@ -75,21 +39,4 @@ export function usd4(n: number): string {
  */
 export function moneyText(text: string): string {
   return text.replace(/\$(\d+(?:\.\d+)?)/g, (_, n: string) => ((n.split(".")[1]?.length ?? 0) <= 2 ? usd2(Number(n)) : usd4(Number(n))));
-}
-
-export function collapseLog(log: { at: number; text: string }[]): { at: number; text: string }[] {
-  const out: { at: number; text: string }[] = [];
-  for (const line of log) {
-    const step = /^(.*?)\s(\d+)\s+of\s+(\d+)$/.exec(line.text);
-    const last = out[out.length - 1];
-    if (step && last) {
-      const prior = /^(.*?)\s(\d+)\s+of\s+(\d+)$/.exec(last.text);
-      if (prior && prior[1] === step[1]) {
-        out[out.length - 1] = { at: line.at, text: `${step[1]} ${step[2]}/${step[3]}` };
-        continue;
-      }
-    }
-    out.push(step ? { at: line.at, text: `${step[1]} ${step[2]}/${step[3]}` } : line);
-  }
-  return out;
 }
