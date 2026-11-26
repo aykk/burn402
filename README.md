@@ -68,7 +68,7 @@ Anyone with the address gets the whole flow on the **test market only** (test mo
 
 The real market and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address.
 
-The tunnel is started once and kept running, so running `npm run public` again (to pick up a change) keeps the same address. `npm run public:stop` takes the app and the tunnel down; the next start gets a new address. Cloudflare limits how often a free tunnel can be created, so the launcher waits and retries when it is refused. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
+The tunnel is started once and reused, so running `npm run public` again (to pick up a change) keeps the same address. A watchdog closes the tunnel three minutes after the app is gone, so the address never reaches anything else that starts on port 3000; the launcher also refuses to start while another program holds that port. `npm run public:stop` takes the app and the tunnel down at once; the next start gets a new address. Cloudflare limits how often a free tunnel can be created, so the launcher waits and retries when it is refused. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
 
 ## Layout
 
