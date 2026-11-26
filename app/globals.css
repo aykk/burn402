@@ -322,6 +322,33 @@
   }
 
   html:has(.meter-pinned) {
-    scroll-padding-top: 16rem;
+    scroll-padding-top: 18rem;
   }
+}
+
+/* The meter is the one dark thing on the page: an instrument panel. Inside it the page's ink, muted
+   text, rules and tick track are redefined for a dark ground, so every part of it (links, focus rings,
+   the allowance line) follows without its own colors. Amber keeps its value: it is the money. */
+.meter-dark {
+  --foreground: #F4F6F8;
+  --muted: #A9B2BC;
+  --rule: #3A4656;
+  --rule-strong: #5B6778;
+  --segment: #354153;
+  --bad: #FF9A9A;
+  background: #1B2430;
+  color: var(--foreground);
+  box-shadow:
+    0 1px 2px rgb(27 36 48 / 0.2),
+    0 18px 40px -20px rgb(27 36 48 / 0.55);
+}
+
+.meter-dark ::selection {
+  background: #3A4656;
+  color: #F4F6F8;
+}
+
+/* A fine tick scale: 3px ticks on a 7px pitch, in the element's text color. */
+.ticks {
+  background-image: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px);
 }
