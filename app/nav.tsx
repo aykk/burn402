@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { Flame } from "@/app/components/Flame";
 
 const PAGES = [
   { href: "/", label: "Rent" },
@@ -9,9 +10,12 @@ const PAGES = [
 
 export function Nav({
   current,
+  burning = false,
   children,
 }: {
   current: "/" | "/audit" | "/records";
+  /** True while an agent is at work: the wordmark's flame burns faster. */
+  burning?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -21,12 +25,10 @@ export function Nav({
       <div className="flex items-baseline gap-x-8">
         <Link
           href="/"
-          className="text-[18px] leading-none font-semibold tracking-[-0.01em] whitespace-nowrap text-foreground no-underline"
+          className="text-[19px] leading-none font-semibold tracking-[-0.01em] whitespace-nowrap text-foreground no-underline"
         >
-          {/* The fire is the one emoji allowed in the UI (owner override). It is decorative. */}
-          <span aria-hidden className="mr-[3px] text-[16px]">
-            🔥
-          </span>
+          {/* The fire is drawn so it can flicker; it sits on the wordmark's baseline. It is decorative. */}
+          <Flame size={20} lit={burning} className="mr-[3px] -translate-y-px align-[-3px]" />
           burn
           <span className="font-extrabold" style={{ fontStretch: "68%" }}>
             402

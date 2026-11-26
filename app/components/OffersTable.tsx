@@ -89,7 +89,7 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 const s = status(r);
                 const out = r.state === "left out";
                 return (
-                  <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule ${out ? "text-muted" : ""}`}>
+                  <tr key={`${r.seller}:${r.id}:${r.state}:${i}`} aria-current={chosen ? "true" : undefined} className={`border-b border-rule transition-colors hover:bg-surface/70 ${out ? "text-muted" : ""}`}>
                     {/* Plan ids never break mid-word: the table scrolls sideways instead, and the full id is in the title. */}
                     <td className={`border-l-2 ${PAD} pl-2 ${chosen ? "border-foreground font-semibold" : "border-transparent"}`} title={r.region ? `${r.id} in ${r.region}` : r.id}>
                       <span className="whitespace-nowrap">{r.id}</span>
