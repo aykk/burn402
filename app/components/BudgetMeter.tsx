@@ -5,7 +5,6 @@ import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId } from "@/lib/market/types";
 import { duration, usd2, usd4 } from "./format";
 import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
-import { Flame } from "./Flame";
 import { allowanceWords, budgetShare, jobGauge, leadingZeros, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 /** 40 segments from 640px up, 24 below so each segment stays a readable width. */
@@ -77,9 +76,6 @@ function JobGaugeBar({ j, v, segments, className }: { j: JobGauge; v: MeterView;
       ? "motion-safe:duration-700 motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   const fill = Math.min(1, Math.max(0, j.fill));
-  // The burn: while the machine runs, a small flame rides the edge where the prepaid time is being used
-  // up. It moves on the same clock as the amber and goes out when the machine is destroyed.
-  const burning = j.state === "draining" && fill > 0;
   return (
     <div role="img" aria-label={gaugeLabel(j, v)} className={`relative h-[14px] ${className}`}>
       <div className="flex h-full gap-[3px]">
@@ -91,15 +87,6 @@ function JobGaugeBar({ j, v, segments, className }: { j: JobGauge; v: MeterView;
       >
         <Segments n={segments} className="bg-amber" />
       </div>
-      {(j.state === "draining" || j.state === "shut") && (
-        <span
-          aria-hidden
-          className={`pointer-events-none absolute bottom-[9px] -ml-2 flex motion-safe:transition-[left,opacity] ${timing} ${burning ? "opacity-100" : "opacity-0"}`}
-          style={{ left: `${fill * 100}%` }}
-        >
-          <Flame size={16} lit />
-        </span>
-      )}
     </div>
   );
 }
