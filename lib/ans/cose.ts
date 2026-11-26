@@ -85,8 +85,12 @@ export function sigStructure(protectedBytes: Uint8Array, payload: Uint8Array): B
 export function parseRootKeys(text: string): RootKeys {
   const keys: RootKeys = new Map();
   for (const line of text.split("\n").map((l) => l.trim())) {
-    const parts = line.split("+");
-    if (parts.length !== 3) continue;
+    // name+keyhash+base64key: the base64 key itself may contain "+", so only
+    // the first two separators delimit fields
+    const first = line.indexOf("+");
+    const second = first < 0 ? -1 : line.indexOf("+", first + 1);
+    if (second < 0) continue;
+    const parts = [line.slice(0, first), line.slice(first + 1, second), line.slice(second + 1)];
     const raw = Buffer.from(parts[2], "base64");
     if (raw.length < 2 || raw[0] !== 0x02) continue;
     try {

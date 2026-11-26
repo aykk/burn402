@@ -1,5 +1,5 @@
 listen:
-  addr: ":8090"
+  addr: "127.0.0.1:8090"
 
 db:
   path: "/tmp/burn402-trust-index.db"

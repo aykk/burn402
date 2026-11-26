@@ -4,7 +4,7 @@ import { join } from "node:path";
 export const PROVIDERS = {
   anthropic: { name: "Claude", company: "Anthropic", model: "claude-sonnet-5", modelName: "Claude Sonnet", env: "ANTHROPIC_API_KEY", baseUrl: null },
   openai: { name: "OpenAI", company: "OpenAI", model: "gpt-5", modelName: "GPT-5", env: "OPENAI_API_KEY", baseUrl: "https://api.openai.com/v1" },
-  gemini: { name: "Gemini", company: "Google", model: "gemini-2.5-flash", modelName: "Gemini 2.5 Flash", env: "GEMINI_API_KEY", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
+  gemini: { name: "Gemini", company: "Google", model: "gemini-3.8-flash", modelName: "Gemini 3.8 Flash", env: "GEMINI_API_KEY", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
   deepseek: { name: "DeepSeek", company: "DeepSeek", model: "deepseek-chat", modelName: "DeepSeek V3", env: "DEEPSEEK_API_KEY", baseUrl: "https://api.deepseek.com/v1" },
 } as const;
 
