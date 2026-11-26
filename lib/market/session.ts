@@ -185,28 +185,6 @@ export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { 
   };
 }
 
-/**
- * Reads the model's reply to "describe what you need". Only fields that pass the same checks
- * as the form are kept; the model never picks a plan or touches payment.
- */
-export function needFromModelReply(text: string): { need: Partial<Need>; note: string } {
-  const match = /\{[\s\S]*\}/.exec(text);
-  let raw: unknown = null;
-  try {
-    raw = match ? JSON.parse(match[0]) : null;
-  } catch {
-    raw = null;
-  }
-  if (!isObj(raw)) return { need: {}, note: "the model's answer could not be read; fill the form by hand" };
-  const need: Partial<Need> = {};
-  for (const key of NEED_KEYS) {
-    if (raw[key] === undefined || needFieldError(key, raw[key])) continue;
-    (need as Record<string, unknown>)[key] = key === "regions" ? [...(raw[key] as string[])] : raw[key];
-  }
-  const note = typeof raw.note === "string" ? raw.note.slice(0, 300) : "";
-  return { need, note: note || (Object.keys(need).length ? "filled from your description; check the fields" : "nothing in the description matched the form") };
-}
-
 export type PricesInput = { market: MarketId; need: Need; limits?: Limits };
 
 /** Body of POST /api/market/prices: a market, a need and optional limits, checked with the run's own rules. */

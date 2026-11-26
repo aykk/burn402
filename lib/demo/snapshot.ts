@@ -4,7 +4,6 @@ import { visibleOpenPurchases } from "../market/recover";
 import type { MarketRunView } from "../market/run";
 import { marketJournal, walletReady } from "../market/session";
 import type { LogLine } from "./log";
-import { modelsView, type ModelsView } from "./models";
 import type { Runtime } from "./runtime";
 import type { DemoSession } from "./script";
 import { allSessions } from "./session";
@@ -17,8 +16,6 @@ export type Snapshot = {
   /** "owner": this computer, everything allowed. "public": a visitor on the public demo, test market only. */
   visitor: "owner" | "public";
   network: "testnet" | "production";
-  /** The model picker's state; null for public visitors, who have no model. */
-  models: ModelsView | null;
   log: LogLine[];
   market: MarketRunView | null;
   /** journal purchases that were paid and not released; the current run is left out only while it is still going */
@@ -68,7 +65,6 @@ export function snapshot(rt: Runtime, s: DemoSession | null, kind: "owner" | "pu
     nowMs,
     visitor: kind,
     network: rt.network,
-    models: kind === "owner" ? modelsView() : null,
     log: s ? (kind === "public" ? withoutPaths(s.log.lines) : s.log.lines) : [],
     market: market && kind === "public" ? publicView(market) : market,
     openPurchases,

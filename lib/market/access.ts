@@ -95,8 +95,8 @@ export function visitorOf(h: AccessHeaders, env: Env = process.env): Visitor | n
 
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** What only the owner may reach: the test seller's own API, the model key and anything that spends a model key. */
-const OWNER_ONLY = ["/api/testseller", "/api/demo/model", "/api/market/parse"];
+/** What only the owner may reach: the test seller's own API (this app calls it from this computer; visitors never do). */
+const OWNER_ONLY = ["/api/testseller"];
 
 export const NOT_PUBLIC = "This is not available on the public demo.";
 /** The most a public visitor may set as a budget: they all spend one devnet wallet. */

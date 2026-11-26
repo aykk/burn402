@@ -20,7 +20,7 @@ const session = (kind: "owner" | "public") =>
 describe("snapshot", () => {
   it("a public visitor with nothing started gets an idle page and nobody else's lines", () => {
     const s = snapshot(rt, null, "public");
-    expect(s).toMatchObject({ visitor: "public", market: null, log: [], openPurchases: [], models: null });
+    expect(s).toMatchObject({ visitor: "public", market: null, log: [], openPurchases: [] });
     expect(s.walletReady.real).toBe(false);
   });
   it("a public visitor never sees where the key sits on the server", () => {
@@ -28,13 +28,11 @@ describe("snapshot", () => {
     expect(s.market?.machine?.ssh).toBe("ssh root@203.0.113.5");
     expect(JSON.stringify(s)).not.toContain("/Users/owner");
     expect(s.log.map((l) => l.text)).toEqual(["public line"]);
-    expect(s.models).toBeNull();
   });
-  it("the owner sees the full command and the model picker", () => {
+  it("the owner sees the full command", () => {
     const s = snapshot(rt, session("owner"), "owner");
     expect(s.visitor).toBe("owner");
     expect(s.market?.machine?.ssh).toBe(machine.ssh);
-    expect(s.models).not.toBeNull();
   });
   it("no text a public visitor sees carries a path on the server", () => {
     expect(withoutPaths({ error: "ENOENT: no such file, open '/Users/owner/app/.burn402/purchases.jsonl'", n: 3, list: ["mkdtemp /private/tmp/x failed", "fine"] })).toEqual({

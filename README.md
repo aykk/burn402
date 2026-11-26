@@ -46,7 +46,7 @@ burn402 uses the ANS registration authority and transparency log from [agentname
 git clone https://github.com/agentnameservice/ans.git
 ans/scripts/demo/start.sh          # registration authority on :18080, transparency log on :18081
 npm install
-cp env.example .env.local          # your agent's Solana wallet, the test seller's address, an optional model key
+cp env.example .env.local          # your agent's Solana wallet and the test seller's address
 npm run register-agents            # mints your agent's and the record signer's ANS identities
 npm run dev                        # http://127.0.0.1:3000
 ```
@@ -66,7 +66,7 @@ npm run public                     # builds, opens a Cloudflare quick tunnel, pr
 
 Anyone with the address gets the whole flow on the **test market only** (test money, simulated machines), each in a private session with its own run, log and purchases. Starts are rate limited per visitor, per address and overall, because every visitor spends the same devnet wallet.
 
-The real market, the model key and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address. The site is up while the command runs, and a quick tunnel gets a new address each time. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
+The real market and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address. The site is up while the command runs, and a quick tunnel gets a new address each time. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
 
 ## Layout
 
@@ -79,5 +79,5 @@ The real market, the model key and the test seller's own API stay owner-only: th
 | `lib/anchor` | Arweave records |
 | `lib/verify`, `lib/auditor` | Independent re-verification of records, used by `/records` and the CLI |
 | `lib/x402` | The x402 payment processor the test seller settles with |
-| `lib/demo` | The app's session, runtime, log and model picker |
+| `lib/demo` | The app's sessions, runtime, log and rate limits |
 | `app/` | The Rent, Records and Overspend test pages and their API routes |
