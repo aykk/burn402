@@ -80,6 +80,7 @@ const MAX_CACHED = 24;
 type Cached = { at: number; answer: Promise<{ status: number; body: unknown }> };
 const cache: Map<string, Cached> = ((globalThis as unknown as { __burn402Records?: Map<string, Cached> }).__burn402Records ??= new Map());
 const FQDN_RE = /^[a-z0-9:/._-]{1,120}$/i;
+const TEST_FIXTURE = /^ans:\/\/v[\d.]+\.rogue-\d+\./;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -224,7 +225,10 @@ async function load(network: Network, fqdn: string | null): Promise<{ status: nu
     ]);
 
     checked.sort((a, b) => (b.issuedAt ?? b.anchoredAt ?? 0) - (a.issuedAt ?? a.anchoredAt ?? 0));
-    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: checked } };
+    // the Arweave live test (lib/anchor/live.test.ts) writes a throwaway verdict for an agent named rogue-<time>
+    // on every run; those are test fixtures, not anything an agent did, so the list leaves them out
+    const shown = checked.filter((r) => !TEST_FIXTURE.test(r.subject ?? ""));
+    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: shown } };
   } catch (error) {
     return { status: 502, body: { network, fqdn, error: (error as Error).message } };
   }
