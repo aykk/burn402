@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { importJWK, type JWK } from "jose";
+import { generateKeyPair, importJWK, type JWK } from "jose";
 import { describe, expect, it } from "vitest";
 import { MandateRegistry, signMandate, type Mandate, type SigningKey } from "../mandate";
 import { didKeyToJwk, HttpTlSource, parseRootKeys, TransparencyLogDirectory } from "./index";
@@ -33,7 +33,8 @@ describe.runIf(live)("live ANS transparency log", () => {
 
     const human = await signer("human");
     const ops = await signer("ops");
-    const rogue = await signer("rogue");
+    // any key that is not ops: generated here, so the test needs no extra key file
+    const rogue = await generateKeyPair("EdDSA");
     const broker = (await signer("broker")).id;
     const now = Math.floor(Date.now() / 1000);
 
