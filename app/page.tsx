@@ -215,11 +215,15 @@ export default function Page() {
         </button>
       </Nav>
 
-      {/* A cold visitor learns what this is in one line; the meter under it stays the biggest thing on the page. */}
-      {/* On wide screens the explanation trails the heading on its baseline; it wraps under it when narrower. */}
-      <div className="flex shrink-0 flex-wrap items-baseline gap-x-4 gap-y-1 pt-2">
-        <h1 className="text-[20px] leading-[26px] font-semibold">Give an agent a budget and it rents the compute for you.</h1>
-        <p className="text-muted">It compares live prices, pays with x402, and destroys the machine when the time is up.</p>
+      {/* A cold visitor learns what this is in two short lines; the meter under it stays the biggest thing on the page.
+          The promise first, in two beats (what you do, what the agent does), then how, in one plain sentence. */}
+      <div className="shrink-0 pt-3">
+        <h1 className="text-[26px] leading-[32px] font-semibold tracking-[-0.015em]">
+          Set a budget. <span className="text-muted">Your agent rents the compute.</span>
+        </h1>
+        <p className="mt-1.5 max-w-[76ch] text-[15px] leading-[22px] text-muted">
+          It finds the cheapest machine that fits, pays with x402, and destroys it when the time is up.
+        </p>
       </div>
 
       {/* Focus lands here after the last open purchase is dismissed, where the run's money is told. */}
