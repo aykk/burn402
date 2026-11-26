@@ -39,7 +39,7 @@ describe.skipIf(!live)("x402layer live (free calls only)", () => {
     expect(quote.accepts.asset).toBe(NETWORKS.real.usdc);
     expect(quote.amountUsd).toBeGreaterThanOrEqual(0.005);
     expect(quote.amountUsd).toBeLessThanOrEqual(0.05);
-  }, 30_000);
+  }, 90_000);
 
   it("accepts a signed instance list from a fresh wallet", async () => {
     const client = new SellerClient(SELLERS.real, { signer: await signerFromSecret(throwawayKeys().secret) });

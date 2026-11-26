@@ -159,8 +159,9 @@ export class SellerClient {
     return parsePlansFeed(parseJson(text), this.config.id);
   }
 
-  private postProvision(body: string, headers: Record<string, string> = {}, paid = false): Promise<Response> {
-    const signal = AbortSignal.timeout(paid ? this.timeouts.paid : this.timeouts.read);
+  /** Paid or not, the seller's order endpoint gets the longer limit: its free quote alone has taken close to 30 s. */
+  private postProvision(body: string, headers: Record<string, string> = {}): Promise<Response> {
+    const signal = AbortSignal.timeout(this.timeouts.paid);
     return this.fetch(this.url("/compute/provision"), { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body, signal });
   }
 
@@ -262,7 +263,7 @@ export class SellerClient {
       let response: Response;
       let text: string;
       try {
-        response = await this.postProvision(quote.body, headers, true);
+        response = await this.postProvision(quote.body, headers);
         text = await readTextCapped(response);
       } catch (e) {
         // an answer too large to read is like an unreadable one: the payment may have gone through

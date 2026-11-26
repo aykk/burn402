@@ -218,7 +218,7 @@ describe("timeouts", () => {
     expect(fn).toHaveBeenCalledTimes(4);
   });
 
-  it("every request carries a signal, defaults 30 s read and 60 s paid", async () => {
+  it("every request carries a signal: 30 s for reads, 60 s for the order endpoint (quote and paid) and destroy", async () => {
     const spy = vi.spyOn(AbortSignal, "timeout");
     const signer = await testSigner();
     const { fetch, calls } = fakeFetch([json(200, { plans: [] }), required402(), required402(), json(201, { order }), json(200, []), json(200, {})]);
@@ -232,7 +232,7 @@ describe("timeouts", () => {
     await client.destroy("ord-1");
     expect(calls).toHaveLength(6);
     expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
-    expect(spy.mock.calls.map((c) => c[0])).toEqual([30000, 30000, 30000, 60000, 30000, 60000]);
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([30000, 60000, 60000, 60000, 30000, 60000]);
     spy.mockRestore();
   });
 });
