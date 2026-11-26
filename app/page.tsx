@@ -281,8 +281,8 @@ export default function Page() {
       {error && (
         <div role="status" className="mt-4 shrink-0 text-bad">
           {error.unreachable
-            ? `Can't reach the demo server (${error.message}). Start it with: npm run dev`
-            : `The demo server couldn't report its state (${error.message}). Check the terminal running npm run dev.`}
+            ? "Can't reach the site right now. It will reconnect by itself; if it doesn't, reload the page."
+            : `The site couldn't report its state (${error.message}). Try reloading the page.`}
         </div>
       )}
 

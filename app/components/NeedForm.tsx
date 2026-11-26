@@ -38,7 +38,7 @@ const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 const MARKET_OPTIONS = [
   { value: "test" as const, label: "Test (devnet)" },
-  { value: "real" as const, label: "Real (mainnet)", danger: true },
+  { value: "real" as const, label: "Real (mainnet)", danger: true, spends: true },
 ];
 
 const KIND_OPTIONS = [
@@ -366,14 +366,12 @@ export function NeedForm(props: {
           </Label>
 {/* The public demo has one market; the real one spends the owner's wallet and is not offered there. */}
           {publicDemo ? (
-            <p id="market-choice" className="flex h-9 items-center font-medium text-foreground">
-              Test (devnet)
+            <p id="market-choice" className="text-foreground">
+              <span className="font-medium">Test (devnet)</span>
+              <span className="text-muted">: test money and simulated machines. Nothing here costs real money.</span>
             </p>
           ) : (
             <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} />
-          )}
-          {publicDemo && (
-            <p className="max-w-[34ch] text-muted">Public demo: test money and simulated machines. Nothing here costs real money.</p>
           )}
           {/* Under the Market choice it belongs to. */}
           {market === "real" && (

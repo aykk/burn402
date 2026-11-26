@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
@@ -74,13 +74,42 @@ type StoredRecord = {
   paymentCluster?: "devnet" | "mainnet" | null;
 };
 
-/** One answer per network and agent is kept for a minute and shared by everyone asking: reading and re-checking every record is slow, and a public page must not let each visitor trigger it. */
-const CACHE_MS = 60_000;
+/**
+ * Reading and re-checking every record is slow, and Arweave's gateway is sometimes slower or down. So one
+ * answer per network (and agent) is kept and shared by everyone asking: it is served at once while it is
+ * under a minute old, and after that it is still served at once while a fresh read runs behind it. A
+ * failed read never replaces a good answer; only the very first read makes anyone wait.
+ */
+const FRESH_MS = 60_000;
+const KEEP_MS = 6 * 60 * 60_000;
 const MAX_CACHED = 24;
-type Cached = { at: number; answer: Promise<{ status: number; body: unknown }> };
+type Answer = { status: number; body: unknown };
+type Cached = { good: { at: number; answer: Answer } | null; reading: Promise<Answer> | null; asked: number };
 const cache: Map<string, Cached> = ((globalThis as unknown as { __burn402Records?: Map<string, Cached> }).__burn402Records ??= new Map());
 const FQDN_RE = /^[a-z0-9:/._-]{1,120}$/i;
 const TEST_FIXTURE = /^ans:\/\/v[\d.]+\.rogue-\d+\./;
+
+/** The last good whole-list answer per network is also kept on disk, so a restart during a gateway outage still has a list to show. */
+const diskFile = (network: Network) => join(process.cwd(), ".burn402", `records-${network}.json`);
+
+function fromDisk(network: Network): { at: number; answer: Answer } | null {
+  try {
+    const saved = JSON.parse(readFileSync(diskFile(network), "utf8")) as { at?: unknown; body?: unknown };
+    if (typeof saved.at !== "number" || typeof saved.body !== "object" || saved.body === null) return null;
+    return { at: saved.at, answer: { status: 200, body: saved.body } };
+  } catch {
+    return null;
+  }
+}
+
+function toDisk(network: Network, at: number, body: unknown): void {
+  try {
+    mkdirSync(join(process.cwd(), ".burn402"), { recursive: true });
+    writeFileSync(diskFile(network), JSON.stringify({ at, body }));
+  } catch {
+    // the list is still served from memory
+  }
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -90,18 +119,31 @@ export async function GET(request: Request) {
   const fqdn = asked !== null && FQDN_RE.test(asked) && isOwner(request) ? asked : null;
   const key = `${network}|${fqdn ?? ""}`;
   const now = Date.now();
-  let hit = cache.get(key);
-  if (!hit || now - hit.at > CACHE_MS) {
-    for (const [k, c] of cache) if (now - c.at > CACHE_MS) cache.delete(k);
+  let entry = cache.get(key);
+  if (!entry) {
+    for (const [k, c] of cache) if (now - c.asked > KEEP_MS) cache.delete(k);
     if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
-    hit = { at: now, answer: load(network, fqdn) };
-    cache.set(key, hit);
-    // an error is not kept: the next request tries again
-    void hit.answer.then((a) => {
-      if (a.status !== 200 && cache.get(key) === hit) cache.delete(key);
-    });
+    entry = { good: fqdn === null ? fromDisk(network) : null, reading: null, asked: now };
+    cache.set(key, entry);
   }
-  const { status, body } = await hit.answer;
+  entry.asked = now;
+  const held = entry;
+  const good = held.good && now - held.good.at < KEEP_MS ? held.good : null;
+  if (good && now - good.at < FRESH_MS) return Response.json(good.answer.body);
+  held.reading ??= load(network, fqdn)
+    .then((answer) => {
+      if (answer.status === 200) {
+        held.good = { at: Date.now(), answer };
+        if (fqdn === null) toDisk(network, held.good.at, answer.body);
+      }
+      return answer;
+    })
+    .finally(() => {
+      held.reading = null;
+    });
+  // an older good answer is shown now; the read above replaces it for the next visitor
+  if (good) return Response.json(good.answer.body);
+  const { status, body } = await held.reading;
   return Response.json(body, { status });
 }
 
@@ -230,7 +272,7 @@ async function load(network: Network, fqdn: string | null): Promise<{ status: nu
     // by name alone, so nothing that says an agent broke a rule, no purchase, and nothing on mainnet can be
     // hidden by picking a name.
     const shown = checked.filter((r) => !(network === "testnet" && r.kind === "verdict" && r.outcome.tone === "good" && TEST_FIXTURE.test(r.subject ?? "")));
-    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, records: shown } };
+    return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, readAt: Date.now(), records: shown } };
   } catch (error) {
     return { status: 502, body: { network, fqdn, error: (error as Error).message } };
   }
