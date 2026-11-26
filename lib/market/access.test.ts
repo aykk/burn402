@@ -58,7 +58,6 @@ describe("accessVerdict", () => {
   });
   it("owner-only paths are open to the owner", () => {
     expect(accessVerdict("POST", "/api/testseller/compute/provision", h({ host: "127.0.0.1:3000" }), env)).toBeNull();
-    expect(accessVerdict("POST", "/api/demo/model", h({ host: "127.0.0.1:3000", origin: "http://localhost:3000" }), env)).toBeNull();
   });
   it("public: reads pass; writes need this site's own https origin", () => {
     expect(accessVerdict("GET", "/api/demo/state", h(pub), env)).toBeNull();
@@ -67,8 +66,8 @@ describe("accessVerdict", () => {
     expect(accessVerdict("POST", "/api/market/run", h({ ...pub, origin: "http://demo.example.com" }), env)).toMatch(/other websites/);
     expect(accessVerdict("POST", "/api/market/run", h({ ...pub, origin: "https://another.example.org" }), env)).toMatch(/other websites/);
   });
-  it("public: the test seller, the model key and the model call are refused, reads included", () => {
-    for (const path of ["/api/testseller/compute/plans", "/api/testseller", "/api/demo/model", "/api/market/parse"]) {
+  it("public: the test seller's own API is refused, reads included", () => {
+    for (const path of ["/api/testseller/compute/plans", "/api/testseller"]) {
       expect(accessVerdict("GET", path, h(pub), env)).toMatch(/not available/);
       expect(accessVerdict("POST", path, h({ ...pub, origin: "https://demo.example.com" }), env)).toMatch(/not available/);
     }

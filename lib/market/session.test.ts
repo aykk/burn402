@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, findPaymentFor, isOwner, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, findPaymentFor, isOwner, parseRunInput, secretFor, walletReady } from "./session";
 
 const good = {
   market: "test",
@@ -92,17 +92,6 @@ describe("wallets from env", () => {
   it("walletReady says whether a key is configured", () => {
     expect(walletReady({})).toEqual({ test: false, real: false });
     expect(walletReady({ AGENT_SOLANA_SECRET_KEY: "a", SOLANA_RECEIVER_ADDRESS: "r" })).toEqual({ test: true, real: true });
-  });
-});
-
-describe("needFromModelReply", () => {
-  it("keeps only valid fields", () => {
-    const r = needFromModelReply('Sure: {"kind":"gpu","vcpus":4,"ramGb":-1,"vramGb":24,"hours":2,"regions":["us-east"],"note":"one GPU for two hours"}');
-    expect(r.need).toEqual({ kind: "gpu", vcpus: 4, vramGb: 24, hours: 2, regions: ["us-east"] });
-    expect(r.note).toBe("one GPU for two hours");
-  });
-  it("survives a reply with no JSON", () => {
-    expect(needFromModelReply("I cannot help").need).toEqual({});
   });
 });
 

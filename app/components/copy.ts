@@ -1,7 +1,5 @@
 // The rent page's help labels. Long explanations live here so they can be reworded in one place.
 export const RENT_HELP = {
-  describe:
-    "Say in plain words what machine you need and for how long. A model fills in the fields below; it never picks the plan or touches payment. Check the fields before you start.",
   market:
     "Test pays real devnet USDC to a test seller that runs simulated machines, so nothing costs real money. Real pays USDC on Solana mainnet to x402layer for a real machine, and always waits for you before paying.",
   kind: "CPU for general work. GPU when you need graphics memory, for example to run or train a model.",

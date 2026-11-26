@@ -4,14 +4,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Snapshot } from "@/lib/demo/snapshot";
 import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId, Need } from "@/lib/market/types";
-import { ActionError, failureMessage } from "./ActionError";
+import { ActionError } from "./ActionError";
 import { RENT_HELP } from "./copy";
 import { usd2 } from "./format";
 import { Help } from "./Help";
-import { MARKET_NAME, hoursText, sentence } from "./market-copy";
+import { MARKET_NAME, hoursText } from "./market-copy";
 import { draftLimits } from "./meter-model";
 import { Segmented } from "./Segmented";
-import { BTN, INPUT, TEXT_BTN, TEXTAREA } from "./ui";
+import { BTN, INPUT } from "./ui";
 
 /** The last valid budget and limit; `valid` is false while a field holds a value the form would refuse. */
 export type NeedDraft = { budgetUsd: number; rateUsdHr: number; valid: boolean };
@@ -144,9 +144,8 @@ export function NeedForm(props: {
   /** Bumped when the comparison is closed: focus goes to Compare prices once it is enabled, else to the heading. */
   compareClosed?: number;
   /** Opens the model picker in the header, where the key is added. */
-  onAddKey: () => void;
 }) {
-  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, onAddKey, compareClosed = 0 } = props;
+  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, compareClosed = 0 } = props;
   const [market, setMarket] = useState<MarketId>("test");
   const [kind, setKind] = useState<"cpu" | "gpu">("cpu");
   const [vcpus, setVcpus] = useState(1);
@@ -158,10 +157,6 @@ export function NeedForm(props: {
   const [rate, setRate] = useState(0.05);
   const [allowSpot, setAllowSpot] = useState(false);
   const [ask, setAsk] = useState(true);
-  const [describe, setDescribe] = useState("");
-  const [filling, setFilling] = useState(false);
-  const [fillNote, setFillNote] = useState<string | null>(null);
-  const [fillError, setFillError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
@@ -185,9 +180,6 @@ export function NeedForm(props: {
   useEffect(() => {
     if (lastReset.current === resetSignal) return;
     lastReset.current = resetSignal;
-    setDescribe("");
-    setFillNote(null);
-    setFillError(null);
     setStartError(null);
     setCompareError(null);
   }, [resetSignal]);
@@ -202,9 +194,8 @@ export function NeedForm(props: {
     onDraftChange({ ...lastValid.current, valid: valid !== null });
   }, [budget, rate, onDraftChange]);
 
-  // A public visitor has no model and the test market only.
+  // A public visitor gets the test market only.
   const publicDemo = snap?.visitor === "public";
-  const hasKey = Boolean(snap?.models?.providers.find((p) => p.id === snap.models?.selected)?.key);
 
   if (collapsed) {
     const n: Need = run?.need ?? { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: parseRegions(regions), allowSpot };
@@ -289,35 +280,6 @@ export function NeedForm(props: {
     setComparing(false);
   };
 
-  const fill = async () => {
-    if (!describe.trim()) return;
-    setFillError(null);
-    setFillNote(null);
-    setFilling(true);
-    try {
-      const res = await fetch("/api/market/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: describe }),
-      });
-      const body = (await res.json()) as { need?: Partial<Need>; note?: string; error?: string };
-      if (!res.ok) throw new Error(body.error ?? `The server answered HTTP ${res.status}`);
-      const n = body.need ?? {};
-      if (n.kind) setKind(n.kind);
-      if (n.vcpus !== undefined) setVcpus(n.vcpus);
-      if (n.ramGb !== undefined) setRamGb(n.ramGb);
-      if (n.vramGb !== undefined && n.vramGb > 0) setVramGb(n.vramGb);
-      if (n.hours !== undefined) setHours(n.hours);
-      if (n.regions) setRegions(n.regions.join(", "));
-      if (n.allowSpot !== undefined) setAllowSpot(n.allowSpot);
-      setFillNote(body.note ? sentence(body.note) : null);
-    } catch (e) {
-      setFillError(failureMessage(e));
-    } finally {
-      setFilling(false);
-    }
-  };
-
   const disabled = running;
 
   return (
@@ -325,39 +287,6 @@ export function NeedForm(props: {
       <h2 ref={formHeading} tabIndex={-1} className="text-[16px] leading-[22px] font-semibold text-foreground focus:outline-none">
         What you need
       </h2>
-
-      {!publicDemo && (
-        <div className="space-y-1.5">
-          <Label help="describe" htmlFor="describe-input">
-            Describe what you need
-          </Label>
-          <textarea
-            id="describe-input"
-            aria-describedby="help-describe"
-            className={`${TEXTAREA} block w-full resize-none`}
-            rows={2}
-            placeholder="A small Linux box in New Jersey for two hours"
-            value={describe}
-            disabled={disabled || filling || !hasKey}
-            onChange={(e) => setDescribe(e.target.value)}
-          />
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <button type="button" className={BTN} disabled={disabled || filling || !hasKey || !describe.trim()} aria-describedby={!hasKey ? "describe-reason" : undefined} onClick={() => void fill()}>
-              {filling ? "Filling in…" : "Fill in the form"}
-            </button>
-            {!hasKey && (
-              <span id="describe-reason" className="text-foreground">
-                <button type="button" className={TEXT_BTN} onClick={onAddKey}>
-                  Add a model key
-                </button>{" "}
-                to use this.
-              </span>
-            )}
-            {hasKey && fillNote && <span className="min-w-0 text-muted">{fillNote}</span>}
-          </div>
-          <ActionError what="The form wasn't filled in" message={fillError} onDismiss={() => setFillError(null)} />
-        </div>
-      )}
 
       <div className="grid grid-cols-1 gap-x-6 gap-y-5 @min-[30rem]:grid-cols-[auto_auto] @min-[30rem]:justify-start">
         <div className="space-y-1.5">

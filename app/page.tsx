@@ -9,7 +9,6 @@ import { BudgetMeter } from "@/app/components/BudgetMeter";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import type { Send } from "@/app/components/MachinePanel";
 import { MarketPanel } from "@/app/components/MarketPanel";
-import { ModelPicker } from "@/app/components/ModelPicker";
 import { MarketPrices } from "@/app/components/MarketPrices";
 import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
 import { MARKET_NAME, hoursText, panelBody } from "@/app/components/market-copy";
@@ -30,7 +29,6 @@ export default function Page() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const logButton = useRef<HTMLButtonElement>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<NeedDraft>({ budgetUsd: 1, rateUsdHr: 0.05, valid: true });
   // Bumped when a run starts, so focus moves from the form (which collapses) to the run's heading.
   const [startSignal, setStartSignal] = useState(0);
@@ -197,15 +195,6 @@ export default function Page() {
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/" burning={running}>
-        {snap?.models && (
-          <ModelPicker
-            models={snap.models}
-            disabled={running}
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
-            onSave={(provider, key) => post("/api/demo/model", { provider, key })}
-          />
-        )}
         <button
           ref={logButton}
           className="underline decoration-1 underline-offset-[3px] hover:decoration-2"
@@ -309,7 +298,6 @@ export default function Page() {
             }}
             onCompare={comparePrices}
             compareClosed={compareClosed}
-            onAddKey={() => setPickerOpen(true)}
           />
         </div>
 

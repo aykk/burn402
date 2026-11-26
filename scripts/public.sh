@@ -4,7 +4,7 @@
 #   npm run public
 #
 # Public visitors get the test market only (test money, simulated machines), each in a private
-# session. The real market, the model key and the test seller's own API stay owner-only: they
+# session. The real market and the test seller's own API stay owner-only: they
 # answer on http://127.0.0.1:3000 from this computer and nowhere else.
 # The site is up while this script runs. The address is new every time (a quick tunnel has no fixed name).
 # Needs: cloudflared (brew install cloudflared) and .env.local set up. Starts the ANS services if they are not running.
@@ -28,7 +28,9 @@ LOG=.burn402/tunnel.log
 : > "$LOG"
 
 echo "building…"
-npm run -s build >/dev/null
+# leftovers of a dev run can name routes that no longer exist and fail the build's type check
+rm -rf .next/dev
+npm run -s build >/dev/null || { echo "the build failed; run npm run build to see why"; exit 1; }
 
 echo "opening the tunnel…"
 cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 >"$LOG" 2>&1 &
@@ -46,7 +48,7 @@ done
 
 echo
 echo "  public site:  https://$HOST"
-echo "  your own:     http://127.0.0.1:3000   (real market, model key)"
+echo "  your own:     http://127.0.0.1:3000   (real market included)"
 echo
 echo "$HOST" > .burn402/public-host
 
