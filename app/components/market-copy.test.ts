@@ -10,7 +10,7 @@ const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, re
 function run(over: Partial<MarketRunView>): MarketRunView {
   return {
     id: "mkt_1", market: "test", marketLabel: "Test seller", phase: "scanning", need, limits: { budgetUsd: 1, rateUsdHr: 0.05 },
-    askBeforePaying: true, wallet: null, agent: { name: "your agent", ansName: "ans://x" }, sources: [], rows: [], leftOut: [], approval: null,
+    askBeforePaying: true, wallet: null, walletApproved: false, agent: { name: "your agent", ansName: "ans://x" }, sources: [], rows: [], leftOut: [], approval: null,
     payment: null, machine: null, attempts: [], startedAt: 0, paidAt: null, readyAt: null, releasedAt: null, error: null, refusal: null,
     spent: "nothing", fallbacks: [], choice: null, overspendTest: false, prices: null,
     ...over,

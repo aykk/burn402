@@ -252,8 +252,8 @@ An independent reviewer read the connected-wallet code, the access rules, every 
 | --- | --- | --- |
 | F1 | Owner status rested on the Host plus the first `X-Forwarded-For` hop: a proxy that rewrites the Host, or a visitor sending `X-Forwarded-For: 127.0.0.1`, could look like the owner behind a front end other than the Cloudflare launcher. | Tightened: any non-local hop, or a `Forwarded`, `Via` or `X-Real-IP` header, means forwarded. A proxy that rewrites the Host and adds nothing still cannot be told from the owner; the README forbids it. **Open before real money is offered publicly:** a separate public process without the mainnet key, or an owner secret. |
 | F2 | The approval checker relayed a signed transaction with any extra instructions or signers beside the approval. | Fixed: one signer; only the token program (once), memo, compute budget and Lighthouse; at most 8 instructions. |
-| F3 | One key signs for public devnet visitors and for the real market. | **Open (owner's call):** set `MAINNET_SOLANA_SECRET_KEY` to a separate wallet. |
-| F4 | An approval can be left on chain (a send that timed out but landed, a cancel mid-send, a refused payment); the page cannot revoke it. | Wording is now honest about a send that may still land. **Open:** a Revoke button. Exposure is at most one quote, and nothing can spend it without a new signature for a new run. |
+| F3 | One key signs for public devnet visitors and for the real market. | Done on the owner's machine: `MAINNET_SOLANA_SECRET_KEY` is now a separate wallet, so the key the public demo signs with on devnet is not the real market's. |
+| F4 | An approval can be left on chain (a send that timed out but landed, a cancel mid-send, a refused payment); the page cannot revoke it. | Fixed: wording is honest about a send that may still land, and a wallet-funded run that ends unpaid after an approval was sent offers **Check and revoke** (an SPL Revoke the wallet signs, checked like the approval, proven on devnet with `npm run wallet:test -- 0 revoke`). |
 | F5 | Error bodies to public visitors were not filtered for server paths. | Fixed in every route. |
 | F6 | The reset and records routes relied on the proxy alone for the cross-site check. | Fixed: each applies the rule itself. |
 | F7 | Any well-formed session id was accepted. | Fixed: the cookie carries the server's HMAC on the id. |
@@ -262,4 +262,10 @@ An independent reviewer read the connected-wallet code, the access rules, every 
 
 Also added: a content security policy (`default-src 'self'`, same-origin connections only), `Cross-Origin-Resource-Policy`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`; owner writes the browser marks `Sec-Fetch-Site: cross-site` or `same-site` are refused; the page reconnects to the wallet without a click after the wallet locks or switches account.
 
-**Still required before connected wallets open to public visitors:** F1's robust fix, F3, F4's revoke, limits per wallet and per address on the two routes that call the Solana node, a way for a visitor to reach the machine they paid for (their own SSH key), and a rule for a visitor's money when the seller keeps a payment.
+**Still required before connected wallets open to public visitors:** F1's robust fix, limits per wallet and per address on the two routes that call the Solana node, a way for a visitor to reach the machine they paid for (their own SSH key), and a rule for a visitor's money when the seller keeps a payment.
+
+## Addendum 2026-11-27: which quote the agent takes
+
+The lowest firm quote wins, compared on the exact amount. The real seller quotes in whole cents for small machines, so the three cheapest 1 vCPU plans all came back at exactly $0.0100, and the agent kept the first in the chooser's order: the plan with the lowest provider list price, which is the weakest of the three. Now a tie goes to the better machine (`betterMachine` in `lib/market/choose.ts`): more vCPUs, then more memory, then more GPU memory, then on-demand over interruptible, then the higher provider list price, then the plan name. The chooser ranks equal estimates the same way, a fallback after a failed purchase uses the same order, and the run's view carries a `choice` sentence the page shows when the lowest quote was shared.
+
+Not changed: the agent still asks for at most three firm quotes (each takes the real seller 3 to 18 seconds). A fourth plan that would also have quoted the same cent is not asked.

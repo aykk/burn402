@@ -50,6 +50,8 @@ export type MarketRunView = {
   askBeforePaying: boolean;
   /** the connected wallet this run is paid from, or null when the agent's own wallet pays */
   wallet: string | null;
+  /** true once that wallet's approval was sent to the chain for this run (it may then be left unused if the run does not pay) */
+  walletApproved: boolean;
   agent: { name: string; ansName: string };
   sources: { name: string; ok: boolean; count: number; note: string | null }[];
   rows: OfferRow[];
@@ -384,6 +386,7 @@ export class MarketRun {
   private fallbackCount = 0;
   private fallbackNotes: string[] = [];
   private choiceNote: string | null = null;
+  private walletApproved = false;
   /** plan key -> the regions that failed for it, with the code */
   private readonly failures = new Map<string, { region: string; code: string }[]>();
   private ranked: Candidate[] = [];
@@ -419,6 +422,11 @@ export class MarketRun {
   start(): Promise<void> {
     this.starting ??= this.stopped ? Promise.resolve() : this.guarded(() => this.scan());
     return this.starting;
+  }
+
+  /** Called when the connected wallet's signed approval is handed to the network, whether or not the send is confirmed. */
+  noteWalletApproval(): void {
+    this.walletApproved = true;
   }
 
   /** The approval this code would pay, without paying it; null when the run is not waiting or the code is wrong. */
@@ -472,6 +480,7 @@ export class MarketRun {
       limits: this.d.limits,
       askBeforePaying: this.d.askBeforePaying,
       wallet: this.d.payer?.funds ?? null,
+      walletApproved: this.walletApproved,
       agent: this.d.agent,
       sources: this.sources,
       rows: this.rows,
