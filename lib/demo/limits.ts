@@ -30,6 +30,8 @@ function room(key: string, max: number, windowMs: number, now: number, store: Hi
 export const PUBLIC_LIMITS = {
   run: { session: 10, ip: 20, everyone: 150 },
   overspend: { session: 3, ip: 5, everyone: 20 },
+  // preparing, sending or revoking a wallet approval: each one asks the Solana node
+  wallet: { session: 30, ip: 60, everyone: 600 },
 } as const;
 
 export const TOO_MANY = "You have used the demo a lot in the last hour. Try again later.";

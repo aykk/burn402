@@ -123,6 +123,13 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
       </div>
       <div className="space-y-2">
         {real && <p className="font-medium text-foreground">This spends real money and cannot be undone.</p>}
+        {/* Paid from the visitor's own wallet: the money never passes through this site, so it cannot give any back. */}
+        {real && own && (
+          <p className="max-w-[64ch] text-foreground">
+            The payment goes straight from your wallet to the seller. If the seller takes it and no machine comes up, this site cannot refund it; it shows you the payment so
+            you can take it up with the seller.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button className={real ? PAY_REAL : PAY_TEST} disabled={busy !== null || !walletReady || !ownReady} aria-describedby={reason ? "pay-reason" : undefined} onClick={() => void pay()}>
             {busy === "wallet" ? "Check your wallet…" : busy === "pay" ? "Paying…" : own ? "Approve in wallet and rent" : "Pay and rent"}

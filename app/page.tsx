@@ -299,7 +299,9 @@ export default function Page() {
         <div role="status" className="mt-4 shrink-0 text-bad">
           {error.unreachable
             ? "Can't reach the site right now. It will reconnect by itself; if it doesn't, reload the page."
-            : `The site couldn't report its state (${error.message}). Try reloading the page.`}
+            : /owner key/.test(error.message)
+              ? "This browser doesn't hold this computer's owner key yet. Open the link the launcher printed in its Terminal window (it starts with http://127.0.0.1:3000/api/owner), and the page will work."
+              : `The site couldn't report its state (${error.message}). Try reloading the page.`}
         </div>
       )}
 

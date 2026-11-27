@@ -128,7 +128,26 @@ export function checkRequest(request: Request): Response | null {
   return null;
 }
 
-export type RunInput = { market: MarketId; need: Need; limits: Limits; askBeforePaying: boolean; /** the connected wallet to pay from, or null for the agent's own */ wallet: string | null };
+export type RunInput = {
+  market: MarketId;
+  need: Need;
+  limits: Limits;
+  askBeforePaying: boolean;
+  /** the connected wallet to pay from, or null for the agent's own */
+  wallet: string | null;
+  /** the renter's own SSH public key, or null to have one made on this computer */
+  sshPublicKey: string | null;
+};
+
+/** One line of an OpenSSH public key: a key type this app knows, the key, and an optional short comment. */
+const SSH_PUBLIC_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]{60,1100}={0,2}( [\x20-\x7e]{0,80})?$/;
+
+/** The key as it will be handed to the seller (trimmed), or null when it is not a public key line. A private key never passes. */
+export function sshPublicKeyOf(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const line = v.trim();
+  return line.length <= 1300 && SSH_PUBLIC_KEY_RE.test(line) ? line : null;
+}
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -178,7 +197,7 @@ export function parseLimits(budgetUsd: unknown, rateUsdHr: unknown): { ok: true;
 
 export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
   if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
-  const { market, budgetUsd, rateUsdHr, askBeforePaying, wallet } = body;
+  const { market, budgetUsd, rateUsdHr, askBeforePaying, wallet, sshPublicKey } = body;
   if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
   const need = parseNeed(body.need);
   if (!need.ok) return need;
@@ -186,6 +205,9 @@ export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { 
   if (!limits.ok) return limits;
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
   if (wallet !== undefined && wallet !== null && !isWalletAddress(wallet)) return { ok: false, error: "that is not a Solana wallet address" };
+  const hasKey = sshPublicKey !== undefined && sshPublicKey !== null && sshPublicKey !== "";
+  const key = hasKey ? sshPublicKeyOf(sshPublicKey) : null;
+  if (hasKey && key === null) return { ok: false, error: "that is not an SSH public key; paste the one line from your .pub file (it starts with ssh-ed25519 or ssh-rsa)" };
   return {
     ok: true,
     value: {
@@ -195,6 +217,7 @@ export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { 
       // a connected wallet approves each payment itself
       askBeforePaying: wallet ? true : askBeforePaying,
       wallet: typeof wallet === "string" ? wallet : null,
+      sshPublicKey: key,
     },
   };
 }

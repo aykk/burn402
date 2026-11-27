@@ -47,6 +47,8 @@ type Setup = {
   activeAfterSec?: number;
   findPayment?: MarketRunDeps["findPayment"];
   payer?: ReturnType<typeof fakePayer>;
+  sshPublicKey?: string;
+  adopt?: boolean;
 };
 
 function setup(o: Setup = {}) {
@@ -84,6 +86,8 @@ function setup(o: Setup = {}) {
     askBeforePaying: o.ask ?? false,
     agent: { name: "Buyer", ansName: "buyer.agents.test" },
     keyDir: path.join(dir, "keys"),
+    sshPublicKey: o.sshPublicKey,
+    adopt: o.adopt,
     now,
     sleep,
     newCode: () => `code-${++codes}`,
@@ -303,6 +307,26 @@ describe("MarketRun approval", () => {
     expect(run.awaiting(code)).toBeNull();
   });
 
+  it("with the renter's own SSH key no key is made here, the seller gets theirs, and the login line names no key file", async () => {
+    const theirs = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq0m0b1x0u2r3n4t5e6s7t8k9e0y1a2b3c4d5e6f7g8h9 visitor";
+    const seen: string[] = [];
+    const { run, dir } = setup({
+      sshPublicKey: theirs,
+      wrap: (f) =>
+        (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (typeof init?.body === "string" && init.body.includes("ssh_public_key")) seen.push(JSON.parse(init.body).ssh_public_key);
+          return f(input, init);
+        }) as typeof fetch,
+    });
+    void run.start();
+    await waitPhase(run, "ready");
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set([theirs]));
+    expect(run.view().machine?.ssh).toBe(`ssh root@${run.view().machine?.ip}`);
+    // nothing was written to the key folder
+    expect(fs.existsSync(path.join(dir, "keys"))).toBe(false);
+  });
+
   it("a run paid by the agent's own wallet names no connected wallet", async () => {
     const { run } = setup();
     void run.start();
@@ -511,6 +535,18 @@ describe("MarketRun never pays twice", () => {
     expect(payer.calls).toBe(1);
     expect(v.machine?.id).toBe([...seller.machines.keys()][0]);
     expect(events()).toEqual(["intent", "unknown", "paid", "active"]);
+  });
+
+  it("409 settlement_pending with adoption off (a public visitor): the machine on the shared wallet's list is never taken", async () => {
+    const { run, payer, events, seller } = setup({ faults: { settlementPending409: true }, adopt: false });
+    await run.start();
+    const v = run.view();
+    // the machine exists at the seller, but by plan and region alone it could be another visitor's
+    expect(seller.machines.size).toBe(1);
+    expect(v.machine).toBeNull();
+    expect(v.phase).toBe("failed");
+    expect(payer.calls).toBe(1);
+    expect(events()).toEqual(["intent", "unknown"]);
   });
 
   it("unknown and no machine appears: failed, one payer call, journal ends unknown", async () => {

@@ -32,7 +32,7 @@ It never pays twice: a purchase journal is written before signing, a failed paid
 
 ## Paying from your own wallet
 
-On the owner's page, **Pay from** can be switched from the agent's wallet to **My wallet**: a Solana wallet in the browser (Phantom, Solflare, Backpack, MetaMask). The site never holds its key or its money.
+**Pay from** can be switched to **My wallet**: a Solana wallet in the browser (Phantom, Solflare, Backpack, MetaMask). The site never holds its key or its money. The owner can do this on either market. A public visitor can on the test market, and on the real market only when the owner opened it (see *A public demo*); a visitor's real machine is set up with the visitor's own SSH public key, so only they can log in.
 
 1. **Connect.** The wallet shares its address. Nothing is signed.
 2. **Approve.** At each payment the wallet is asked to sign one transaction: let the agent move exactly the quoted amount of USDC out of your account (an SPL token approval), with a note tying it to this run. The wallet pays that transaction's network fee, well under a cent of SOL.
@@ -78,7 +78,9 @@ brew install cloudflared
 npm run public                     # builds, opens a Cloudflare quick tunnel, prints the public https address
 ```
 
-Anyone with the address gets the whole flow on the **test market only** (test money, simulated machines), each in a private session with its own run, log and purchases. Starts are rate limited per visitor, per address and overall, because every visitor spends the same devnet wallet.
+Anyone with the address gets the whole flow on the **test market** (test money, simulated machines), each in a private session with its own run, log and purchases, paying from the demo's shared devnet wallet or from their own wallet on devnet. Starts are rate limited per visitor, per address and overall.
+
+`npm run public -- --real` also lets visitors rent **real machines**, paid from their own wallets on mainnet and never from yours (budget up to $1, their own SSH key required). It is off unless you ask for it: the machines are rented under this app's agent identity, and a visitor gets full control of theirs. The site cannot refund a payment the seller keeps, and says so before the visitor approves.
 
 The real market and the test seller's own API stay owner-only: they answer on `http://127.0.0.1:3000` from this computer and are refused on the public address.
 
@@ -86,7 +88,7 @@ The tunnel is started once and reused, so running `npm run public` again (to pic
 
 ### How the public site is kept apart
 
-- **Owner or public.** A request is the owner's only when it is addressed to the local name and shows no sign of having been forwarded: no Cloudflare header, no `Forwarded`, `Via` or `X-Real-IP`, and no address in `X-Forwarded-For` that is not this computer. **Never put a reverse proxy that rewrites the Host header to the local name in front of this app** (nginx's default `proxy_pass` does): its visitors would look like the owner. The Cloudflare launcher does not do this.
+- **Owner or public.** A request is the owner's only when it is addressed to the local name, shows no sign of having been forwarded (no Cloudflare header, no `Forwarded`, `Via` or `X-Real-IP`, no address in `X-Forwarded-For` that is not this computer), **and carries the owner key**. The launcher makes a new key on every start (`BURN402_OWNER_TOKEN`), keeps it in `.burn402/owner-token`, and opens your browser on a link that stores it as a cookie; the scripts read the file. So a reverse proxy that makes every visitor look local still does not make them the owner. With plain `npm run dev` nothing is public and no key is needed.
 - **Sessions.** A public visitor's session cookie carries the server's signature, so an id a visitor made up is not a session. The launcher makes a fresh signing key (`BURN402_SESSION_SECRET`) on every start; set one yourself if you run it another way.
 - **Other websites.** Writes must come from the app's own page: a foreign Origin, or a request the browser marks as cross-site, is refused, by the proxy and again by each route.
 - **What a page may load.** A content security policy lets pages load from and talk to this site only, and nothing may frame it.

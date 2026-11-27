@@ -11,7 +11,7 @@ import { Help } from "./Help";
 import { MARKET_NAME, hoursText, shortAddress } from "./market-copy";
 import { draftLimits } from "./meter-model";
 import { Segmented } from "./Segmented";
-import { BTN, INPUT } from "./ui";
+import { BTN, INPUT, TEXTAREA } from "./ui";
 import { useWallet } from "./wallet";
 import { WalletConnect } from "./WalletConnect";
 
@@ -26,6 +26,8 @@ export type RunBody = {
   askBeforePaying: boolean;
   /** the connected wallet to pay from; null for the wallet the app runs with */
   wallet: string | null;
+  /** the renter's own SSH public key; null to have the app make one on its computer */
+  sshPublicKey: string | null;
 };
 
 /** What "Compare prices" sends: the same market and need a run would use. */
@@ -55,6 +57,14 @@ const PAY_FROM_OWNER = [
   { value: "agent" as const, label: "Agent wallet" },
   { value: "wallet" as const, label: "My wallet" },
 ];
+/** For a public visitor the first choice is the shared devnet wallet the demo runs with. */
+const PAY_FROM_PUBLIC = [
+  { value: "agent" as const, label: "Demo wallet" },
+  { value: "wallet" as const, label: "My wallet" },
+];
+
+/** One line of an OpenSSH public key, as the server checks it. */
+const SSH_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]{60,1100}={0,2}( [\x20-\x7e]{0,80})?$/;
 const KIND_OPTIONS = [
   { value: "cpu" as const, label: "CPU" },
   { value: "gpu" as const, label: "GPU" },
@@ -175,6 +185,8 @@ export function NeedForm(props: {
   const [ask, setAsk] = useState(true);
   // Whose money pays: the wallet the app runs with, or the visitor's own wallet in this browser.
   const [payFrom, setPayFrom] = useState<"agent" | "wallet">("agent");
+  // The renter's own SSH public key: how they log in to a machine paid from their own wallet.
+  const [sshKey, setSshKey] = useState("");
   const wallet = useWallet();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -275,9 +287,15 @@ export function NeedForm(props: {
                   : null;
 
   const blocked = running || starting || invalid !== null;
-  const ownWallet = payFrom === "wallet" && !publicDemo;
+  // The real market, when the owner has opened it to the public, is paid from the visitor's own wallet only.
+  const publicReal = publicDemo && market === "real";
+  const ownWallet = payFrom === "wallet" || publicReal;
   // Paying from your own wallet needs it connected; comparing prices does not.
   const needsWallet = ownWallet && !wallet.connected;
+  const key = sshKey.trim();
+  const keyBad = key !== "" && !SSH_KEY_RE.test(key);
+  // A visitor's real machine is set up with their key and nobody else's: without one they could not log in.
+  const needsKey = publicReal && key === "";
   const asks = market === "real" || ownWallet || ask;
   const need: Need = { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: regionList, allowSpot };
 
@@ -288,6 +306,10 @@ export function NeedForm(props: {
     "A run is in progress"
   ) : needsWallet ? (
     "Connect a wallet to pay from it."
+  ) : keyBad ? (
+    "That is not an SSH public key. Paste the one line from your .pub file."
+  ) : needsKey ? (
+    "Add your SSH public key: it is how you log in to the machine."
   ) : market === "real" && snap && !snap.walletReady.real ? (
     "Fund a mainnet wallet to pay on the real market."
   ) : market === "test" && snap && !snap.walletReady.test ? (
@@ -304,6 +326,7 @@ export function NeedForm(props: {
       rateUsdHr: rate,
       askBeforePaying: asks,
       wallet: ownWallet ? (wallet.connected?.address ?? null) : null,
+      sshPublicKey: ownWallet && key !== "" ? key : null,
     });
     setStartError(failed);
     setStarting(false);
@@ -328,8 +351,8 @@ export function NeedForm(props: {
         <Label help="market" forId="market-choice">
           Market
         </Label>
-        {/* The public demo has one market; the real one spends the owner's wallet and is not offered there. */}
-        {publicDemo ? (
+        {/* The public demo has one market unless the owner opened the real one, which a visitor pays for from their own wallet. */}
+        {publicDemo && !snap?.publicReal ? (
           <p id="market-choice" className="text-foreground">
             <span className="font-medium">Test (devnet)</span>
             <span className="text-muted">: test money and simulated machines. Nothing here costs real money.</span>
@@ -388,26 +411,52 @@ export function NeedForm(props: {
       <div className={`${ROWS} border-t border-rule pt-4`}>
         <NumberField id="budget-input" label="Budget" help="budget" value={budget} onChange={(n) => setBudget(n)} min={0.01} max={20} step={0.25} dollar disabled={disabled} />
         <NumberField id="rate-input" label="Hourly limit" help="rate" value={rate} onChange={setRate} min={0.001} max={Number.isFinite(budget) ? budget : 20} step={0.01} dollar unit={{ shown: "/h", spoken: "an hour" }} disabled={disabled} />
-        {/* Whose money pays. Your own wallet approves each payment itself, so that choice always asks first.
-            The public demo pays from its shared devnet wallet only. */}
-        {!publicDemo && (
-          <div className="col-span-2 space-y-2 pt-1">
-            <Label help="payFrom" forId="pay-from-choice">
-              Pay from
-            </Label>
-            <Segmented
-              id="pay-from-choice"
-              describedBy={ownWallet ? "help-payFrom pay-from-wallet" : "help-payFrom"}
-              label="Pay from"
-              options={PAY_FROM_OWNER}
-              value={payFrom}
-              onChange={setPayFrom}
-              disabled={disabled}
-              fill
-            />
-            {ownWallet && <WalletConnect id="pay-from-wallet" disabled={disabled} />}
-          </div>
-        )}
+        {/* Whose money pays. Your own wallet approves each payment itself, so that choice always asks first. */}
+        <div className="col-span-2 space-y-2 pt-1">
+          <Label help="payFrom" forId="pay-from-choice">
+            Pay from
+          </Label>
+          <Segmented
+            id="pay-from-choice"
+            describedBy={ownWallet ? "help-payFrom pay-from-wallet" : "help-payFrom"}
+            label="Pay from"
+            options={publicDemo ? PAY_FROM_PUBLIC : PAY_FROM_OWNER}
+            value={ownWallet ? "wallet" : "agent"}
+            onChange={setPayFrom}
+            disabled={disabled || publicReal}
+            fill
+          />
+          {publicReal && <p className="text-foreground">On the real market you pay from your own wallet.</p>}
+          {ownWallet && <WalletConnect id="pay-from-wallet" disabled={disabled} />}
+          {ownWallet && (
+            <div className="space-y-1.5 pt-1">
+              <Label help="sshKey" htmlFor="ssh-key-input">
+                Your SSH public key
+              </Label>
+              <textarea
+                id="ssh-key-input"
+                aria-describedby="help-sshKey ssh-key-note"
+                aria-invalid={keyBad || undefined}
+                rows={3}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                className={`${TEXTAREA} w-full resize-y font-mono text-[12px] leading-4 break-all`}
+                placeholder="ssh-ed25519 AAAA…"
+                value={sshKey}
+                disabled={disabled}
+                onChange={(e) => setSshKey(e.target.value)}
+              />
+              <p id="ssh-key-note" className="text-[12px] leading-4 text-muted">
+                {publicDemo
+                  ? market === "real"
+                    ? "Needed: the machine is set up with this key, so only you can log in."
+                    : "Optional here: test machines are simulated and cannot be logged in to."
+                  : "Optional. Leave it empty and the app makes a key on this computer."}
+              </p>
+            </div>
+          )}
+        </div>
         <span className="col-span-2 flex items-center gap-2 pt-0.5">
           <label className={CHECK_TARGET}>
             <input
@@ -429,7 +478,7 @@ export function NeedForm(props: {
       <div className="space-y-2 pt-1">
         {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right under them. */}
         <span className="flex flex-col gap-2">
-          <button className={`${START} w-full justify-center`} disabled={blocked || needsWallet} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
+          <button className={`${START} w-full justify-center`} disabled={blocked || needsWallet || keyBad || needsKey} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
             {starting ? "Starting…" : "Find and rent"}
           </button>
           {/* Reads prices only: starts no run and spends nothing. */}

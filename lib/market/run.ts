@@ -122,6 +122,16 @@ export type MarketRunDeps = {
   askBeforePaying: boolean;
   agent: { name: string; ansName: string };
   keyDir: string;
+  /**
+   * The renter's own SSH public key. When given, no key is made on this computer: the machine is set up
+   * with theirs, and only they can log in.
+   */
+  sshPublicKey?: string;
+  /**
+   * False: after an unclear payment outcome the run never takes a machine from the wallet's list by plan and
+   * region. Many visitors share one agent wallet, and that match could land on someone else's machine.
+   */
+  adopt?: boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   /** One connection attempt to port 22; the run retries. */
@@ -379,7 +389,7 @@ export class MarketRun {
 
   private starting: Promise<void> | null = null;
   private ended = false;
-  private key: { publicKey: string; privatePath: string } | null = null;
+  private key: { publicKey: string; privatePath: string | null } | null = null;
   private quotes: Quote[] = [];
   private readonly used = new Set<Quote>();
   private readonly tried = new Set<string>();
@@ -610,7 +620,7 @@ export class MarketRun {
     if (this.stopped) return;
     this.setPhase("quoting");
     try {
-      this.key = newSshKey(this.d.keyDir, `run-${this.d.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+      this.key = this.d.sshPublicKey ? { publicKey: this.d.sshPublicKey, privatePath: null } : newSshKey(this.d.keyDir, `run-${this.d.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
     } catch (e) {
       return this.fail(`Could not create an SSH key: ${msg(e)}`);
     }
@@ -840,7 +850,7 @@ export class MarketRun {
     const paidUsd = this.payment?.usd ?? q.amountUsd;
     this.safeAppend(this.entry("unknown", q, { usd: paidUsd, detail: outcome.detail }));
     this.attempt(q.candidate.offer.id, q.region, outcome.detail, false, "UNKNOWN");
-    const found = await this.findMachine(q, intentAt, before);
+    const found = this.d.adopt === false ? null : await this.findMachine(q, intentAt, before);
     if (!found) return this.afterSignature(q, "unclear", outcome.detail, true);
     this.paidAt = this.now();
     await this.lookUpTx(q);
@@ -1160,7 +1170,8 @@ export class MarketRun {
       status: inst.status,
       expiresAt: inst.expiresAt === null ? null : inst.expiresAt * 1000,
       destroyAt: this.machine?.destroyAt ?? null,
-      ssh: ip && this.key ? `ssh -i ${shellPath(this.key.privatePath)} root@${ip}` : null,
+      // with the renter's own key there is no key file here to point at: they log in with theirs
+      ssh: ip && this.key ? (this.key.privatePath ? `ssh -i ${shellPath(this.key.privatePath)} root@${ip}` : `ssh root@${ip}`) : null,
       port22: this.machine?.port22 ?? "not checked",
       plan: inst.plan || q.candidate.offer.id,
       region: inst.region || q.region,
