@@ -1188,6 +1188,7 @@ export class MarketRun {
       plan: q.candidate.offer.id,
       region: q.region,
       usd: q.amountUsd,
+      ...(this.d.payer ? { agent: this.d.payer.address } : {}),
       ...extra,
     };
   }

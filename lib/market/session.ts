@@ -21,10 +21,18 @@ const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 type Env = Record<string, string | undefined>;
 
-/** The secret that pays on a market: the test market uses the agent wallet; the real one prefers its own. */
-export function secretFor(market: MarketId, env: Env = process.env): string | null {
-  const key = market === "real" ? env.MAINNET_SOLANA_SECRET_KEY || env.AGENT_SOLANA_SECRET_KEY : env.AGENT_SOLANA_SECRET_KEY;
-  return key ? key : null;
+/** Whose rental it is: the owner's, or a public visitor's. */
+export type Audience = "owner" | "public";
+
+/**
+ * The agent key for a market: the test market uses the agent wallet; the real one prefers its own.
+ * Public visitors' REAL rentals get an agent identity of their own when PUBLIC_MAINNET_SOLANA_SECRET_KEY
+ * is set, so their machines are never on the same wallet's list as the owner's.
+ */
+export function secretFor(market: MarketId, env: Env = process.env, audience: Audience = "owner"): string | null {
+  if (market !== "real") return env.AGENT_SOLANA_SECRET_KEY || null;
+  if (audience === "public" && env.PUBLIC_MAINNET_SOLANA_SECRET_KEY) return env.PUBLIC_MAINNET_SOLANA_SECRET_KEY;
+  return env.MAINNET_SOLANA_SECRET_KEY || env.AGENT_SOLANA_SECRET_KEY || null;
 }
 
 /** "A key is configured", not "it has funds". The test market also needs the test seller's receiver. */
@@ -55,8 +63,8 @@ function spaced(payer: Payer): Payer {
   };
 }
 
-export async function payerFor(market: MarketId): Promise<Payer | null> {
-  const secret = secretFor(market);
+export async function payerFor(market: MarketId, audience: Audience = "owner"): Promise<Payer | null> {
+  const secret = secretFor(market, process.env, audience);
   if (!secret) return null;
   let p = payers.get(secret);
   if (!p) {
@@ -73,10 +81,21 @@ export async function payerFor(market: MarketId): Promise<Payer | null> {
  * A payer for one run that spends a connected wallet's USDC under that wallet's approval. The agent's
  * key for the market signs; null when none is set. Not cached: it belongs to one visitor's run.
  */
-export async function delegatePayerFor(market: MarketId, wallet: string): Promise<Payer | null> {
-  const secret = secretFor(market);
+export async function delegatePayerFor(market: MarketId, wallet: string, audience: Audience = "owner"): Promise<Payer | null> {
+  const secret = secretFor(market, process.env, audience);
   if (!secret) return null;
   return makeDelegatePayer(secret, { market, owner: wallet });
+}
+
+/**
+ * The agent wallet that owns a purchase's machine, to manage it later: the one whose address the journal
+ * recorded with the purchase, else the owner's. A machine answers only to the wallet that paid for it.
+ */
+export async function payerOwning(market: MarketId, agent: string | null | undefined): Promise<Payer | null> {
+  const owner = await payerFor(market, "owner");
+  if (!agent || owner?.address === agent) return owner;
+  const visitor = await payerFor(market, "public");
+  return visitor?.address === agent ? visitor : owner;
 }
 
 export function sellerFor(market: MarketId, payer: Payer | null): SellerClient {
