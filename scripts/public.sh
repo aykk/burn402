@@ -59,6 +59,20 @@ tunnel_alive() {
   [ -s "$PIDFILE" ] && [ -s "$HOSTFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && ps -o command= -p "$(cat "$PIDFILE")" | grep -q cloudflared
 }
 
+# A free tunnel that lost its connection for long enough is forgotten by Cloudflare: the program keeps
+# running and retrying, but the address is gone for good ("Tunnel not found" in its log, on every retry).
+tunnel_forgotten() {
+  tail -n 6 "$LOG" 2>/dev/null | grep -q "Tunnel not found"
+}
+
+if tunnel_alive && tunnel_forgotten; then
+  echo "Cloudflare dropped the old tunnel (its address no longer works): opening a new one, with a new address"
+  kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  [ -s "$WATCHFILE" ] && kill "$(cat "$WATCHFILE")" 2>/dev/null || true
+  rm -f "$WATCHFILE"
+  sleep 1
+fi
+
 if tunnel_alive; then
   HOST=$(cat "$HOSTFILE")
   echo "the tunnel is already up: keeping the same address"
