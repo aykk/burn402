@@ -78,7 +78,9 @@ describe("networkName", () => {
   it("names the networks plainly", () => {
     expect(networkName("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1")).toBe("Solana devnet");
     expect(networkName("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")).toBe("Solana mainnet");
-    expect(networkName("eip155:8453")).toBe("another network (eip155:8453)");
+    expect(networkName("eip155:8453")).toBe("Base");
+    expect(networkName("eip155:84532")).toBe("Base Sepolia (test network)");
+    expect(networkName("eip155:1")).toBe("another network (eip155:1)");
   });
 });
 

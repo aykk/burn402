@@ -11,5 +11,5 @@ export const RENT_HELP = {
   ask: "Your agent shows you the exact payment and waits for you to approve it. Real money always asks.",
   sshKey: "A public SSH key: one line starting with ssh-ed25519 or ssh-rsa (the contents of a .pub file). The machine is set up with it, so only you can log in. Never paste a private key.",
   payFrom:
-    "Agent wallet is the wallet this app runs with. My wallet is your own Solana wallet in this browser: for each payment it asks you to approve the exact amount. The site never holds your key or your money.",
+    "Agent wallet is the wallet this app runs with. My wallet is your own wallet in this browser, paying in USDC on Solana (Phantom, Solflare and others) or on Base (MetaMask, Coinbase Wallet and other Ethereum wallets). It asks you to approve each payment for the exact amount. The site never holds your key or your money.",
 } as const;

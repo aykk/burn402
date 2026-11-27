@@ -9,18 +9,20 @@ import { checkRequest } from "@/lib/market/session";
 export async function POST(request: Request) {
   const refused = checkRequest(request);
   if (refused) return refused;
-  const body = (await request.json().catch(() => null)) as { run?: unknown; code?: unknown; signedTransaction?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { run?: unknown; code?: unknown; signedTransaction?: unknown; signature?: unknown } | null;
   if (typeof body?.run !== "string" || typeof body.code !== "string") return Response.json({ error: "send the run id and the approval code" }, { status: 400 });
   const who = await visit(request, { create: false });
   if (who instanceof Response) return who;
   if (!who.session) return Response.json({ error: "that run is not the current run" }, { status: 400 });
   // sending a wallet's approval asks the Solana node: a public visitor gets a fair number an hour
-  if (typeof body.signedTransaction === "string") {
+  if (typeof body.signedTransaction === "string" || typeof body.signature === "string") {
     const limited = publicLimit("wallet", who.v);
     if (limited) return Response.json({ error: limited }, { status: 429 });
   }
   try {
-    const result = await who.session.approveMarket(body.run, body.code, typeof body.signedTransaction === "string" ? body.signedTransaction : undefined);
+    // what the wallet signed: a Solana wallet's approval transaction, or an Ethereum wallet's signature of the payment
+    const signed = typeof body.signedTransaction === "string" ? body.signedTransaction : typeof body.signature === "string" ? body.signature : undefined;
+    const result = await who.session.approveMarket(body.run, body.code, signed);
     if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
     return Response.json({ run: result.run });
   } catch (error) {

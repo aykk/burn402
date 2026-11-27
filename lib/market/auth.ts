@@ -34,9 +34,10 @@ export async function signerFromSecret(secretKeyBase58: string): Promise<Signer>
   };
 }
 
-export function authMessage(p: { address: string; method: string; path: string; body: string; timestampMs: number; nonce: string }): string {
+/** `chain` is "solana" unless given: an Ethereum wallet signs the same lines with "base" and its address in lower case. */
+export function authMessage(p: { chain?: "solana" | "base"; address: string; method: string; path: string; body: string; timestampMs: number; nonce: string }): string {
   const bodyHash = createHash("sha256").update(p.body, "utf8").digest("hex");
-  return ["X402-COMPUTE-AUTH", "v1", "solana", p.address, p.method.toUpperCase(), p.path, bodyHash, String(p.timestampMs), p.nonce].join("\n");
+  return ["X402-COMPUTE-AUTH", "v1", p.chain ?? "solana", p.address, p.method.toUpperCase(), p.path, bodyHash, String(p.timestampMs), p.nonce].join("\n");
 }
 
 export async function authHeaders(

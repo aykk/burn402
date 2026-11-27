@@ -1,9 +1,12 @@
 import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import type { Network, PaymentPayload, PaymentRequirements } from "@x402/core/types";
+import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 
 export const SOLANA_DEVNET: Network = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+/** Base's test network, where the test seller takes USDC from Ethereum wallets. */
+export const BASE_SEPOLIA: Network = "eip155:84532";
 export const DEFAULT_FACILITATOR = "https://x402.org/facilitator";
 
 export type Settlement = { ok: true; tx: string; payer: string | null; network: string } | { ok: false; reason: string };
@@ -32,7 +35,8 @@ export class X402Processor implements PaymentProcessor {
     this.payTo = options.payTo;
     this.server = new x402ResourceServer(new HTTPFacilitatorClient({ url: options.facilitatorUrl ?? DEFAULT_FACILITATOR })).register(
       this.network,
-      new ExactSvmScheme(),
+      // an Ethereum-type network is paid with a signed USDC authorization, Solana with a signed transfer
+      this.network.startsWith("eip155:") ? new ExactEvmScheme() : new ExactSvmScheme(),
     );
   }
 

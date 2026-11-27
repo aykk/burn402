@@ -84,7 +84,7 @@ function gaugeLabel(j: JobGauge, v: MeterView): string {
   if (j.state === "quoted") return `This rental will use ${v.quotedExact ?? usd4(j.scaleUsd)}`;
   if (j.state === "sent") return `A payment of ${v.paidExact ?? usd4(j.scaleUsd)} was sent and is not confirmed yet`;
   if (j.state === "draining" && j.secondsLeft !== null && v.spanSeconds !== null) return `Time left: ${timeLeft(j.secondsLeft)} of ${hoursText(v.spanSeconds / 3600)}`;
-  if (j.state === "shut") return "The machine is destroyed; no prepaid time is left";
+  if (j.state === "shut") return v.phase === "released" && !v.destroyed ? "The rental is over; no prepaid time is left" : "The machine is destroyed; no prepaid time is left";
   return `Prepaid machine time, ${v.paidExact ?? usd4(j.scaleUsd)}`;
 }
 
@@ -159,7 +159,7 @@ export function BudgetMeter(props: {
   draftValid?: boolean;
   /** False once this run's payment was dismissed from open purchases. */
   listed?: boolean;
-  job: (MeterJob & Pick<MarketRunView, "id" | "market" | "leftOut">) | null;
+  job: (MeterJob & Pick<MarketRunView, "id" | "market" | "leftOut"> & Partial<Pick<MarketRunView, "selfManaged">>) | null;
   /** ms, the server's clock */
   nowMs: number;
 }) {
@@ -286,7 +286,9 @@ export function BudgetMeter(props: {
                   ? `${v.spent === "paid" ? "Paid" : "Sent, not confirmed:"} ${paidText}. The machine may still be running.`
                   : shut
                     ? `Spent ${paidText}`
-                    : "Destroyed when this reaches zero"}
+                    : props.job?.selfManaged
+                      ? "Your prepaid time ends when this reaches zero"
+                      : "Destroyed when this reaches zero"}
           </p>
           <p className="text-muted">{j.state === "quoted" ? `This rental: ${h.amount}` : j.state === "draining" ? hoursText(spanHours) : shut ? "" : paidText}</p>
         </div>

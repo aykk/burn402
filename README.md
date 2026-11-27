@@ -32,7 +32,7 @@ It never pays twice: a purchase journal is written before signing, a failed paid
 
 ## Paying from your own wallet
 
-**Pay from** can be switched to **My wallet**: a Solana wallet in the browser (Phantom, Solflare, Backpack, MetaMask). The site never holds its key or its money. The owner can do this on either market. A public visitor can on the test market, and on the real market only when the owner opened it (see *A public demo*); a visitor's real machine is set up with the visitor's own SSH public key, so only they can log in.
+**Pay from** can be switched to **My wallet**: your own wallet in the browser, paying in USDC on Solana (Phantom, Solflare, Backpack, MetaMask's Solana accounts) or on Base (MetaMask and other Ethereum wallets; see below). This part is about Solana. The site never holds its key or its money. The owner can do this on either market. A public visitor can on the test market, and on the real market only when the owner opened it (see *A public demo*); a visitor's real machine is set up with the visitor's own SSH public key, so only they can log in.
 
 1. **Connect.** The wallet shares its address. Nothing is signed.
 2. **Approve.** At each payment the wallet is asked to sign one transaction: let the agent move exactly the quoted amount of USDC out of your account (an SPL token approval), with a note tying it to this run. The wallet pays that transaction's network fee, well under a cent of SOL.
@@ -43,6 +43,26 @@ The agent's wallet, not yours, signs the payment and so owns the machine. That i
 A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run. If a run ends without paying after your wallet approved, the page offers to check the chain and revoke the unused approval.
 
 **Proven on mainnet (2026-11-27):** a real rental paid from Phantom. Phantom signed the approval for exactly $0.01 USDC, the agent paid x402layer out of that wallet (transaction `2M8ScMfZcfGdZA8sULU7A6qXFZ7BvWrfCfWKGTZMpbKCD7ezi2PoBzJf1NTvnuZpetGGaPh5ZFKygLp1H7rhaiLs`, signed by the agent and the seller's fee payer only), the approval was used up, and a real Vultr machine came up with SSH open, managed by the agent. The same flow passes on devnet with a stand-in wallet (`npm run wallet:test`).
+
+### From an Ethereum wallet (MetaMask and others), on Base
+
+Under **My wallet**, choose **Base** instead of **Solana** to pay from an Ethereum wallet: MetaMask, Coinbase Wallet, Rabby, Rainbow, Phantom's Ethereum side, or any other browser wallet that announces itself the standard way (EIP-6963). The payment is USDC on Base. It works differently from the Solana path, because the trick used there has no Ethereum equivalent:
+
+1. **Connect.** The wallet shares its address. Nothing is signed.
+2. **Sign.** At the payment the wallet is asked to sign one message: move exactly the quoted amount of USDC from this wallet to the seller (an EIP-3009 transfer authorization, which is how x402 pays on Ethereum-type chains). The wallet shows every field. Signing is free: the wallet sends no transaction and pays no network fee, and it needs no ETH.
+3. **Pay.** The server checks that the signature is this wallet's signature of exactly the message it prepared, then sends it to the seller with the order. If the seller's terms changed in between (amount, recipient, token, network), the signature no longer fits and nothing is paid.
+
+The wallet pays the seller itself, so **the machine belongs to the wallet**, not to the agent. The seller answers questions about a machine only to its owner, with a fresh signature every time (it refuses a repeated one). So on this path the app cannot watch the machine or destroy it by itself:
+
+- **Check machine** asks the wallet to sign a short sign-in message, then shows the machine's address. On the real seller a machine takes two to three minutes to come up.
+- **Destroy now** asks for one more signature.
+- When the prepaid time is up the rental ends on the page. The app did not destroy the machine and says so; a prepaid machine is the seller's to switch off.
+
+The sign-in messages move no money and cost nothing. The spending limits, the fixed-price check and the one-payment rule apply as on every run. The site never holds the wallet's key or its money.
+
+RainbowKit is not used. It would add a QR code for phone wallets, but it needs an account with WalletConnect and lets the page talk to their servers; today the page talks to nothing but itself. Browser-extension wallets are found without it.
+
+**Status:** tested end to end on Base's test network with a stand-in wallet up to the payment (`npm run wallet:test:base`). Not yet proven: a settled payment, and a real MetaMask signing on the page.
 
 ## Records
 

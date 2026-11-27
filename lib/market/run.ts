@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 import { DEFAULT_RULES } from "./types";
 import { betterMachine, choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
-import { checkPayment, NETWORKS, type Accepts } from "./guard";
+import { checkPayment, networkFor, type Accepts, type Chain } from "./guard";
 import { usdExact } from "./money";
 import type { Journal, JournalEntry } from "./journal";
 import { payerSignatureOf, type Payer, type PaymentRequired } from "./pay";
@@ -52,6 +52,15 @@ export type MarketRunView = {
   wallet: string | null;
   /** true once that wallet's approval was sent to the chain for this run (it may then be left unused if the run does not pay) */
   walletApproved: boolean;
+  /** the chain this run pays on: Base when an Ethereum wallet pays, else Solana */
+  chain: Chain;
+  /**
+   * True when the connected wallet pays the seller itself and so owns the machine (an Ethereum wallet, on
+   * Base). The app then cannot look at the machine or destroy it by itself: each needs that wallet's signature.
+   */
+  selfManaged: boolean;
+  /** when the wallet last signed a look at its machine; null when it never has, or the agent owns the machine */
+  checkedAt: number | null;
   agent: { name: string; ansName: string };
   sources: { name: string; ok: boolean; count: number; note: string | null }[];
   rows: OfferRow[];
@@ -399,6 +408,10 @@ export class MarketRun {
   private fallbackNotes: string[] = [];
   private choiceNote: string | null = null;
   private walletApproved = false;
+  /** a wallet-owned machine: when the wallet last looked at it, and whether a look or the ready step is under way */
+  private checkedAt: number | null = null;
+  private looking = false;
+  private readying = false;
   /** plan key -> the regions that failed for it, with the code */
   private readonly failures = new Map<string, { region: string; code: string }[]>();
   private ranked: Candidate[] = [];
@@ -446,6 +459,78 @@ export class MarketRun {
     return this.phase === "approval" && this.approval && this.current && sameCode(code, this.approval.code) ? this.approval : null;
   }
 
+  /** The quote this code would pay, with the seller's full payment terms; null when the run is not waiting or the code is wrong. */
+  awaitingQuote(code: string): Quote | null {
+    return this.awaiting(code) ? this.current : null;
+  }
+
+  /** True when the connected wallet pays the seller itself and owns the machine. */
+  private get self(): boolean {
+    return this.d.payer?.self === true;
+  }
+
+  private get chain(): Chain {
+    return this.d.payer?.chain === "base" ? "base" : "solana";
+  }
+
+  /**
+   * A wallet-owned machine, looked at with a sign-in its wallet just signed. The seller answers only to
+   * that wallet and takes each signature once, so this is the only way the run learns the machine's
+   * address or that it is gone.
+   */
+  async look(auth: Record<string, string>): Promise<{ ok: true } | { ok: false; error: string }> {
+    const m = this.machine;
+    const q = this.current;
+    if (!this.self || !m || !q) return { ok: false, error: "this run has no machine that your wallet owns" };
+    if (this.phase !== "provisioning" && this.phase !== "ready") return { ok: false, error: "this rental is over" };
+    if (this.looking) return { ok: false, error: "a check is already under way" };
+    this.looking = true;
+    try {
+      let inst: Instance | null;
+      try {
+        inst = await this.d.seller.instance(m.id, auth);
+      } catch (e) {
+        return { ok: false, error: msg(e) };
+      }
+      // "not found" is not taken for "gone": a seller can answer it for a moment, and ending the rental here
+      // would hide a machine that is still running. The rental ends when the seller says destroyed, or its time is up.
+      if (!inst) return { ok: false, error: "The seller does not list this machine for your wallet right now. Try again in a minute." };
+      // the rental may have ended while the seller was being asked (its time ran out): an ended run is not rewritten
+      if (this.phase !== "provisioning" && this.phase !== "ready") return { ok: false, error: "this rental is over" };
+      this.checkedAt = this.now();
+      if (inst.status === "destroyed") {
+        this.closeOwned("gone", "the seller reports the machine destroyed");
+        return { ok: true };
+      }
+      this.setMachine(q, inst);
+      if (this.phase === "provisioning" && !this.readying && inst.status === "active" && validIp(inst.ip)) void this.guarded(() => this.becomeReady(q, inst));
+      return { ok: true };
+    } finally {
+      this.looking = false;
+    }
+  }
+
+  /** Destroys a wallet-owned machine with a sign-in its wallet just signed. */
+  async destroyOwned(auth: Record<string, string>): Promise<{ ok: true } | { ok: false; error: string }> {
+    const m = this.machine;
+    if (!this.self || !m || !this.current) return { ok: false, error: "this run has no machine that your wallet owns" };
+    if (m.status === "destroyed") return { ok: true };
+    // also after the prepaid time ran out: the app could not see the machine go, so its owner may still want to be sure
+    if (this.phase !== "provisioning" && this.phase !== "ready" && this.phase !== "failed" && this.phase !== "released") return { ok: false, error: "this rental has no machine to destroy yet" };
+    try {
+      await this.d.seller.destroy(m.id, auth);
+    } catch (e) {
+      return { ok: false, error: `Destroy failed, the machine may still be running: ${msg(e)}` };
+    }
+    if (this.phase === "released") {
+      // the rental was already over on the page; now the seller has confirmed the destroy
+      m.status = "destroyed";
+      return { ok: true };
+    }
+    this.closeOwned("destroyed", "destroyed with the wallet's signature");
+    return { ok: true };
+  }
+
   approve(code: string): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "approval" || !this.approval || !this.current) return { ok: false, error: "the run is not waiting for approval" };
     if (!sameCode(code, this.approval.code)) return { ok: false, error: "the approval code does not match" };
@@ -464,6 +549,8 @@ export class MarketRun {
 
   destroy(): Promise<void> {
     if (this.ended && !this.machine) return Promise.resolve();
+    // a machine the visitor's wallet owns answers only to that wallet: see destroyOwned
+    if (this.self && this.machine) return Promise.resolve();
     if (this.phase === "approval") {
       this.cancel();
       return Promise.resolve();
@@ -493,6 +580,9 @@ export class MarketRun {
       askBeforePaying: this.d.askBeforePaying,
       wallet: this.d.payer?.funds ?? null,
       walletApproved: this.walletApproved,
+      chain: this.chain,
+      selfManaged: this.self,
+      checkedAt: this.checkedAt,
       agent: this.d.agent,
       sources: this.sources,
       rows: this.rows,
@@ -661,6 +751,7 @@ export class MarketRun {
       rateUsdHr: this.d.limits.rateUsdHr,
       hours: q.hours,
       alreadyPaid: this.alreadyPaid,
+      chain: this.chain,
     });
     if (!g.ok) return this.quoteFailed(c, region, g.detail, g.code, q.amountUsd, q.atomic);
     this.attempt(c.offer.id, region, `quoted ${usdExact(q.atomic)}`, true);
@@ -734,7 +825,7 @@ export class MarketRun {
         exact: usdExact(q.atomic),
         surcharge: this.surchargeFor(q),
         token: "USDC",
-        network: NETWORKS[this.d.market].label,
+        network: networkFor(this.d.market, this.chain).label,
         payTo: q.accepts.payTo,
         plan: q.candidate.offer.id,
         region: q.region,
@@ -757,10 +848,13 @@ export class MarketRun {
     // machines that exist before this payment cannot be the one it buys
     // null when the list could not be read: then no machine is ever adopted by plan and region alone
     let before: Set<string> | null = null;
-    try {
-      before = new Set((await this.d.seller.instances()).map((i) => i.id));
-    } catch {
-      // without it an unknown outcome is reported as unknown, never matched to a machine
+    // a wallet that pays for itself owns its machines: their list answers only to its signature, so it is not asked for
+    if (!this.self) {
+      try {
+        before = new Set((await this.d.seller.instances()).map((i) => i.id));
+      } catch {
+        // without it an unknown outcome is reported as unknown, never matched to a machine
+      }
     }
 
     if (this.destroyRequested) return this.refuse("STOPPED", STOPPED);
@@ -789,6 +883,7 @@ export class MarketRun {
         alreadyPaid: this.alreadyPaid || this.signing,
         payTo: q.accepts.payTo,
         payer: payer.address,
+        chain: this.chain,
       });
       if (!g.ok) {
         this.refusal = { code: g.code, detail: g.detail };
@@ -799,7 +894,7 @@ export class MarketRun {
       this.alreadyPaid = true;
       // from here the money may be out: the payment shows as sent until it is confirmed
       this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.funds ?? payer.address, status: "unconfirmed" };
-      this.paySignature = payerSignatureOf(headers);
+      this.paySignature = payer.payReference?.() ?? payerSignatureOf(headers);
       return headers;
     };
 
@@ -850,7 +945,7 @@ export class MarketRun {
     const paidUsd = this.payment?.usd ?? q.amountUsd;
     this.safeAppend(this.entry("unknown", q, { usd: paidUsd, detail: outcome.detail }));
     this.attempt(q.candidate.offer.id, q.region, outcome.detail, false, "UNKNOWN");
-    const found = this.d.adopt === false ? null : await this.findMachine(q, intentAt, before);
+    const found = this.d.adopt === false || this.self ? null : await this.findMachine(q, intentAt, before);
     if (!found) return this.afterSignature(q, "unclear", outcome.detail, true);
     this.paidAt = this.now();
     await this.lookUpTx(q);
@@ -965,9 +1060,27 @@ export class MarketRun {
     return null;
   }
 
+  /**
+   * When a wallet-owned machine's prepaid time ends: the hours that were paid for, or the seller's own
+   * figure when that is later. Never earlier: ending the rental here takes away the owner's only way to
+   * look at the machine through this app, so a short or wrong figure from the seller must not do it.
+   */
+  private ownedUntil(q: Quote): number {
+    const paidFor = (this.paidAt ?? this.now()) + q.hours * 3600_000;
+    return Math.max(paidFor, this.machine?.expiresAt ?? 0);
+  }
+
   private async provision(q: Quote, first: Instance): Promise<void> {
     this.setPhase("provisioning");
     this.setMachine(q, first);
+    if (this.self) {
+      // The wallet owns the machine. From here the run moves only when the wallet signs a look (see look()),
+      // and ends when the prepaid time is up or the wallet destroys the machine.
+      this.machine!.destroyAt = this.ownedUntil(q);
+      this.schedule();
+      if (first.status === "active" && validIp(first.ip)) return this.becomeReady(q, first);
+      return;
+    }
     let inst: Instance | null = first;
     for (let i = 0; !(inst && inst.status === "active" && validIp(inst.ip)); i++) {
       if (this.destroyRequested) return this.releaseOnRequest();
@@ -982,32 +1095,65 @@ export class MarketRun {
       if (inst) this.setMachine(q, inst);
     }
     if (this.destroyRequested) return this.releaseOnRequest();
+    return this.becomeReady(q, inst);
+  }
 
+  /** The machine is up: see whether it takes logins, record it, and start the clock to its end. */
+  private async becomeReady(q: Quote, inst: Instance): Promise<void> {
+    if (this.readying || this.phase !== "provisioning") return;
+    this.readying = true;
+    const first = inst;
     const ip = validIp(inst.ip)!;
     let port22: "open" | "closed" | "not checked" = "not checked";
     if (!TEST_NET_3.test(ip) && probeable(ip)) {
       port22 = "closed";
       for (let i = 0; i < PROBE_TRIES; i++) {
         if (i > 0) await this.sleep(PROBE_GAP_MS);
-        if (this.destroyRequested) return this.releaseOnRequest();
+        // ended meanwhile (a wallet-owned machine destroyed, or its time ran out)
+        if (this.phase !== "provisioning") return;
+        if (this.destroyRequested && !this.self) return this.releaseOnRequest();
         if (await this.probe(ip).catch(() => false)) {
           port22 = "open";
           break;
         }
       }
     }
-    if (!this.machine) return;
+    if (!this.machine || this.phase !== "provisioning") return;
     this.machine.port22 = port22;
     this.safeAppend(this.entry("active", q, { usd: this.payment?.usd ?? q.amountUsd, tx: this.payment?.tx ?? null, instance: first.id }));
 
     const paidAt = this.paidAt ?? this.now();
     const byHours = paidAt + this.d.need.hours * 3600_000;
-    this.machine.destroyAt = this.machine.expiresAt === null ? byHours : Math.min(byHours, this.machine.expiresAt);
+    // the agent destroys its own machine when the asked-for time is up; a wallet-owned one runs to the end of what was paid for
+    this.machine.destroyAt = this.self ? this.ownedUntil(q) : this.machine.expiresAt === null ? byHours : Math.min(byHours, this.machine.expiresAt);
     this.readyAt = this.now();
     this.setPhase("ready");
     this.record("accepted", null);
-    if (this.destroyRequested) return this.startRelease();
+    if (this.destroyRequested && !this.self) return this.startRelease();
     this.schedule();
+  }
+
+  /**
+   * The end of a wallet-owned machine as far as this app can know it: its wallet destroyed it, the seller
+   * no longer lists it, or its prepaid time ran out. The app never destroyed it itself and says so.
+   */
+  private closeOwned(how: "destroyed" | "gone" | "expired", detail: string): void {
+    const m = this.machine;
+    const q = this.current;
+    if (!m || this.phase === "released") return;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    m.status = how;
+    m.ip = null;
+    m.ssh = null;
+    if (q) this.safeAppend(this.entry("released", q, { usd: this.payment?.usd ?? q.amountUsd, tx: this.payment?.tx ?? null, instance: m.id, detail }));
+    this.record("accepted", how === "expired" ? null : `${detail} before it was ready`);
+    this.releasedAt = this.now();
+    this.error = null;
+    this.setPhase("released");
+    this.end();
   }
 
   private schedule(): void {
@@ -1017,6 +1163,12 @@ export class MarketRun {
     const delay = Math.min(Math.max(at - this.now(), 1), MAX_TIMER_MS);
     this.timer = setTimeout(() => {
       this.timer = null;
+      if (this.self) {
+        // nothing here can destroy a wallet-owned machine: when its prepaid time is up the run is over
+        if (this.phase !== "ready" && this.phase !== "provisioning") return;
+        if (this.now() < at) return this.schedule();
+        return this.closeOwned("expired", "the prepaid time ended; the paying wallet owns the machine, so this app did not destroy it");
+      }
       if (this.phase !== "ready") return;
       if (this.now() < at) return this.schedule();
       void this.destroy();
@@ -1026,6 +1178,8 @@ export class MarketRun {
 
   /** Retries the destroy every 60 s, at most 10 times; release() clears it. */
   private armDestroyRetry(): void {
+    // a wallet-owned machine cannot be destroyed from here, however often it is tried
+    if (this.self) return;
     if (!this.machine || this.machine.status === "destroyed" || this.phase === "released") return;
     if (this.destroyRetries >= DESTROY_RETRIES) return;
     if (this.timer) clearTimeout(this.timer);
@@ -1039,7 +1193,7 @@ export class MarketRun {
 
   private startRelease(): Promise<void> {
     if (this.destroying) return this.destroying;
-    if (this.phase === "released" || !this.machine) return Promise.resolve();
+    if (this.phase === "released" || !this.machine || this.self) return Promise.resolve();
     this.destroying = this.release().finally(() => {
       this.destroying = null;
     });

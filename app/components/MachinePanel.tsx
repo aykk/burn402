@@ -10,8 +10,10 @@ import type { FocusNext } from "./MarketPanel";
 export type Send = (path: string, body?: unknown) => Promise<{ error: string | null; message: string | null }>;
 import { Swatch } from "./BudgetMeter";
 import { clock } from "./format";
-import { sentence, solscanUrl, timeLeft } from "./market-copy";
+import { sentence, shortAddress, solscanUrl, timeLeft } from "./market-copy";
 import { BTN, MONO, MONO_ID, TEXT_BTN } from "./ui";
+import { signTextWithWallet, useWallet } from "./wallet";
+import { WalletConnect } from "./WalletConnect";
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
   return (
@@ -79,6 +81,11 @@ export function MachinePanel({
   const [armedRun, setArmedRun] = useState<string | null>(null);
   // Blocks a second click in the same tick, before the busy state has rendered.
   const inFlight = useRef(false);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const wallet = useWallet();
+  // An Ethereum wallet that paid the seller itself owns the machine: the seller answers only to its signature.
+  const owner = run.selfManaged ? run.wallet : null;
   const m = run.machine;
   const p = run.payment;
   // The run this page watched before its machine existed. Only then can a click meant for Pay land on Destroy
@@ -89,7 +96,9 @@ export function MachinePanel({
   // Gone only when the run says released; the seller-reported status alone does not end the machine block.
   const gone = run.phase === "released";
   const releasing = run.phase === "releasing";
-  const canDestroy = m !== null && !gone && run.phase !== "paying";
+  // A wallet-owned machine whose time ran out: the app could not see it go, so its owner can still destroy it to be sure.
+  const ranOut = run.selfManaged && run.phase === "released" && m?.status === "expired";
+  const canDestroy = m !== null && (!gone || ranOut) && run.phase !== "paying";
   const armed = armedRun === run.id || watchedRun !== run.id;
 
   useEffect(() => {
@@ -105,6 +114,37 @@ export function MachinePanel({
   const confirmed = p?.status === "confirmed";
   const ended = ENDED.has(run.phase);
 
+  /**
+   * One call to the seller as the wallet that owns the machine: the server hands over the seller's sign-in
+   * message, the wallet signs it (free, it moves no money), and the server uses it once.
+   */
+  const asOwner = async (kind: "look" | "destroy"): Promise<{ error: string | null; message: string | null }> => {
+    let ask: { message?: string; error?: string };
+    try {
+      const res = await fetch("/api/market/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run: run.id, signIn: kind }) });
+      ask = (await res.json().catch(() => ({}))) as typeof ask;
+      if (!res.ok || !ask.message) return { error: ask.error ?? `The server answered HTTP ${res.status}`, message: null };
+    } catch {
+      return { error: "Can't reach the site right now.", message: null };
+    }
+    const signed = await signTextWithWallet(ask.message, owner!);
+    if (!signed.ok) return { error: signed.error, message: null };
+    return send("/api/market/wallet", { run: run.id, signIn: kind, signature: signed.signature });
+  };
+
+  const check = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      setCheckError(null);
+      setChecking(true);
+      setCheckError((await asOwner("look")).error);
+    } finally {
+      setChecking(false);
+      inFlight.current = false;
+    }
+  };
+
   const destroy = async () => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -113,7 +153,7 @@ export function MachinePanel({
       setDestroyNote(null);
       setDestroying(true);
       onFocusNext?.("heading");
-      const r = await send("/api/market/destroy", { run: run.id });
+      const r = owner ? await asOwner("destroy") : await send("/api/market/destroy", { run: run.id });
       if (r.error) onFocusNext?.(null);
       setDestroyError(r.error);
       setDestroyNote(r.message);
@@ -141,7 +181,11 @@ export function MachinePanel({
         {!gone && m && !m.ip && (
           <Row k="Status">
             <span className="text-foreground">{m.status}.</span>{" "}
-            <span className="text-muted">Waiting for an address. On the real seller this usually takes 2 to 3 minutes.</span>
+            <span className="text-muted">
+              {owner
+                ? "The machine is your wallet's, so only your wallet can ask the seller whether it is up. On the real seller that usually takes 2 to 3 minutes: then press Check and sign."
+                : "Waiting for an address. On the real seller this usually takes 2 to 3 minutes."}
+            </span>
           </Row>
         )}
         {!m && p && !ended && (
@@ -186,12 +230,26 @@ export function MachinePanel({
         {!gone && run.phase === "ready" && secondsLeft !== null && (
           <Row k="Time left">
             <span className="font-medium text-foreground tabular-nums">{timeLeft(secondsLeft)}</span>
-            <span className="text-muted">, destroyed at {clock(m!.destroyAt!).slice(0, 5)} UTC</span>
+            <span className="text-muted">
+              {owner ? `, your prepaid time ends at ${clock(m!.destroyAt!).slice(0, 5)} UTC` : `, destroyed at ${clock(m!.destroyAt!).slice(0, 5)} UTC`}
+            </span>
+          </Row>
+        )}
+        {owner && !gone && m && (
+          <Row k="Owner">
+            Your wallet <span className={MONO_ID}>{shortAddress(owner)}</span>
+            <span className="text-muted">{run.checkedAt ? `, last checked at ${clock(run.checkedAt).slice(0, 5)} UTC` : ", not checked yet"}</span>
           </Row>
         )}
         {gone && (
           <Row k="Status">
-            Destroyed{run.releasedAt ? ` at ${clock(run.releasedAt).slice(0, 5)} UTC` : ""} and gone from the seller&apos;s list.
+            {m?.status === "expired"
+              ? `The prepaid time ended${run.releasedAt ? ` at ${clock(run.releasedAt).slice(0, 5)} UTC` : ""}. A prepaid machine is the seller's to switch off then. This app cannot confirm that it did, because only your wallet can ask.`
+              : m?.status === "gone"
+                ? `The seller reports this machine destroyed${run.releasedAt ? ` (checked at ${clock(run.releasedAt).slice(0, 5)} UTC)` : ""}.`
+                : owner
+                  ? `Destroyed${run.releasedAt ? ` at ${clock(run.releasedAt).slice(0, 5)} UTC` : ""} with your wallet's signature.`
+                  : `Destroyed${run.releasedAt ? ` at ${clock(run.releasedAt).slice(0, 5)} UTC` : ""} and gone from the seller's list.`}
           </Row>
         )}
         {p && (
@@ -217,8 +275,14 @@ export function MachinePanel({
           {/* At the far end of the block, never where Pay and rent was, and off for its first two seconds. */}
           <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
             {runError && !destroyError && <span className="min-w-0 text-bad">{sentence(runError)}</span>}
-            <button className={BTN} disabled={!armed || destroying || releasing} aria-describedby={armed ? undefined : "destroy-wait"} onClick={() => void destroy()}>
-              {destroying || releasing ? "Destroying…" : "Destroy now"}
+            {/* A wallet-owned machine: each look at it is one signature in the wallet. */}
+            {owner && (run.phase === "provisioning" || run.phase === "ready") && (
+              <button className={BTN} disabled={checking || destroying} onClick={() => void check()}>
+                {checking ? "Check your wallet…" : m?.ip ? "Check again" : "Check machine"}
+              </button>
+            )}
+            <button className={BTN} disabled={!armed || destroying || releasing || checking} aria-describedby={armed ? undefined : "destroy-wait"} onClick={() => void destroy()}>
+              {destroying || releasing ? (owner ? "Check your wallet…" : "Destroying…") : "Destroy now"}
             </button>
             {!armed && (
               <span id="destroy-wait" className="sr-only">
@@ -226,6 +290,9 @@ export function MachinePanel({
               </span>
             )}
           </div>
+          {owner && <p className="text-right text-[12px] leading-4 text-muted">Checking and destroying each ask your wallet for a signature. It is free and moves no money.</p>}
+          {owner && wallet.connected?.address.toLowerCase() !== owner.toLowerCase() && <WalletConnect only="evm" />}
+          <ActionError what="The machine wasn't checked" message={checkError} onDismiss={() => setCheckError(null)} />
           <ActionError what="The machine wasn't destroyed" message={destroyError} onDismiss={() => setDestroyError(null)} />
         </div>
       )}

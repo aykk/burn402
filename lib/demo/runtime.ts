@@ -107,7 +107,12 @@ export async function createRuntime(config: DemoConfig): Promise<Runtime> {
       network,
       storage: "uploading",
       storageError: null,
-      solscan: record.tx ? `https://solscan.io/tx/${record.tx}${cluster === "devnet" ? "?cluster=devnet" : ""}` : null,
+      // a payment made on Base (an Ethereum-type transaction id) is looked up on Base's explorer
+      solscan: !record.tx
+        ? null
+        : /^0x[0-9a-fA-F]{64}$/.test(record.tx)
+          ? `https://${cluster === "devnet" ? "sepolia." : ""}basescan.org/tx/${record.tx}`
+          : `https://solscan.io/tx/${record.tx}${cluster === "devnet" ? "?cluster=devnet" : ""}`,
     };
     transactions.push(entry);
     // nothing reads old entries: keep the list from growing without end

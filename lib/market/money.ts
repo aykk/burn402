@@ -6,9 +6,13 @@
 const WRAPPED_SOL = "So11111111111111111111111111111111111111112";
 /** The USDC mints of the two markets (the same values as NETWORKS in guard.ts; a test checks they agree). */
 const USDC_MINTS = new Set(["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]);
+/** USDC on Base and on its test network, lower case (an Ethereum address is the same in any letter case). */
+const USDC_ON_BASE = new Set(["0x036cbd53842c5426634e7929541ec2318f3dcf7e", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"]);
 const NETWORK_NAMES: Record<string, string> = {
   "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "Solana devnet",
   "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "Solana mainnet",
+  "eip155:84532": "Base Sepolia (test network)",
+  "eip155:8453": "Base",
 };
 
 const MAX_REASON = 120;
@@ -63,7 +67,7 @@ const short = (s: string) => (s.length > 10 ? `${s.slice(0, 4)}…${s.slice(-4)}
 /** "USDC", "SOL", or "another token (Abcd…Wxyz)". */
 export function tokenName(mint: string): string {
   if (mint === WRAPPED_SOL) return "SOL";
-  if (USDC_MINTS.has(mint)) return "USDC";
+  if (USDC_MINTS.has(mint) || USDC_ON_BASE.has(String(mint).toLowerCase())) return "USDC";
   return `another token (${short(String(mint))})`;
 }
 

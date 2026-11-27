@@ -17,6 +17,40 @@ export const NETWORKS: Record<MarketId, { caip2: string; usdc: string; label: st
   },
 };
 
+/** Where a payment is made: Solana (the agent's wallets and Solana wallets), or Base, where an Ethereum wallet pays for itself. */
+export type Chain = "solana" | "base";
+
+/**
+ * USDC on Base, for a rental an Ethereum wallet (MetaMask and the like) pays for directly. `chainId` is
+ * what the wallet is asked to switch to; `explorer` is where a payment can be looked up.
+ */
+export const BASE_NETWORKS: Record<MarketId, { caip2: string; usdc: string; label: string; rpcUrl: string; chainId: number; explorer: string }> = {
+  test: {
+    caip2: "eip155:84532",
+    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    label: "Base Sepolia (test network)",
+    rpcUrl: "https://sepolia.base.org",
+    chainId: 84532,
+    explorer: "https://sepolia.basescan.org",
+  },
+  real: {
+    caip2: "eip155:8453",
+    usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    label: "Base",
+    rpcUrl: "https://mainnet.base.org",
+    chainId: 8453,
+    explorer: "https://basescan.org",
+  },
+};
+
+/** The network a market's payments are made on, for the chain the run pays on. */
+export function networkFor(market: MarketId, chain: Chain = "solana"): { caip2: string; usdc: string; label: string; rpcUrl: string } {
+  return chain === "base" ? BASE_NETWORKS[market] : NETWORKS[market];
+}
+
+/** Ethereum addresses are the same whatever their letter case; Solana's are not. */
+const sameAddress = (a: string, b: string, chain: Chain): boolean => (chain === "base" ? a.toLowerCase() === b.toLowerCase() : a === b);
+
 export type GuardCode =
   | "WRONG_NETWORK"
   | "WRONG_ASSET"
@@ -39,6 +73,8 @@ type GuardInput = {
   payTo?: string;
   /** the paying wallet's address; a requirement naming it as fee payer is refused */
   payer?: string;
+  /** the chain this run pays on; Solana when absent */
+  chain?: Chain;
 };
 type GuardResult = { ok: true; usd: number } | { ok: false; code: GuardCode; detail: string };
 
@@ -63,12 +99,15 @@ const clip = (v: unknown): string => {
 
 const FIELD_NAMES = { scheme: "kind of payment", network: "network", asset: "token", amount: "amount", payTo: "recipient" } as const;
 
-/** The token as the owner would say it; a USDC mint from the other market names that market. */
-function tokenFor(asset: string, market: MarketId): string {
+/** The token as the owner would say it; a USDC mint from the other market or the other chain names where it is from. */
+function tokenFor(asset: string, market: MarketId, chain: Chain): string {
   const name = tokenName(asset);
-  if (name !== "USDC" || asset === NETWORKS[market].usdc) return name;
-  const other = (Object.keys(NETWORKS) as MarketId[]).find((m) => NETWORKS[m].usdc === asset);
-  return other ? `USDC from ${NETWORKS[other].label}` : name;
+  if (name !== "USDC" || sameAddress(asset, networkFor(market, chain).usdc, chain)) return name;
+  for (const c of ["solana", "base"] as Chain[]) {
+    const other = (Object.keys(NETWORKS) as MarketId[]).find((m) => sameAddress(asset, networkFor(m, c).usdc, c));
+    if (other) return `USDC from ${networkFor(other, c).label}`;
+  }
+  return name;
 }
 
 const fail = (code: GuardCode, detail: string): GuardResult => ({ ok: false, code, detail });
@@ -88,8 +127,9 @@ export function checkPayment(input: GuardInput): GuardResult {
 
 function check(input: GuardInput): GuardResult {
   const { accepts, market, approvedAtomic, budgetLeftUsd, rateUsdHr, hours, alreadyPaid, payTo, payer } = input;
-  const net = NETWORKS[market];
-  if (!net) return fail("MALFORMED", "Unknown market");
+  const chain: Chain = input.chain === "base" ? "base" : "solana";
+  if (!NETWORKS[market]) return fail("MALFORMED", "Unknown market");
+  const net = networkFor(market, chain);
   if (!accepts || typeof accepts !== "object") return fail("MALFORMED", "Payment terms are missing");
   for (const k of ["scheme", "network", "asset", "amount", "payTo"] as const) {
     if (typeof accepts[k] !== "string" || accepts[k] === "") return fail("MALFORMED", `The seller's payment terms have no ${FIELD_NAMES[k]}.`);
@@ -111,13 +151,13 @@ function check(input: GuardInput): GuardResult {
   if (accepts.network !== net.caip2) return fail("WRONG_NETWORK", `The seller asked to be paid on ${clip(networkName(accepts.network))} instead of ${net.label}.`);
   const feePayer = accepts.extra && typeof accepts.extra === "object" ? accepts.extra.feePayer : undefined;
   if (typeof payer === "string" && payer !== "" && feePayer === payer) return fail("WRONG_NETWORK", "The seller asked your wallet to pay the network fee.");
-  if (accepts.asset !== net.usdc) return fail("WRONG_ASSET", `The seller asked to be paid in ${tokenFor(accepts.asset, market)} instead of USDC on ${net.label}.`);
+  if (!sameAddress(accepts.asset, net.usdc, chain)) return fail("WRONG_ASSET", `The seller asked to be paid in ${tokenFor(accepts.asset, market, chain)} instead of USDC on ${net.label}.`);
 
   const amount = BigInt(accepts.amount);
   if (amount > approvedAtomic) {
     return fail("OVER_QUOTE", `The seller now asks ${usdExact(accepts.amount)}, more than the ${usdExact(approvedAtomic.toString())} you approved.`);
   }
-  if (payTo !== undefined && payTo !== accepts.payTo) {
+  if (payTo !== undefined && !sameAddress(payTo, accepts.payTo, chain)) {
     return fail("OVER_QUOTE", `The seller changed the recipient of the payment from ${clip(payTo)} to ${clip(accepts.payTo)}.`);
   }
   if (amount > MAX_PAYMENT_ATOMIC) {

@@ -293,6 +293,9 @@ export function NeedForm(props: {
   const ownWallet = payFrom === "wallet" || publicReal;
   // Paying from your own wallet needs it connected; comparing prices does not.
   const needsWallet = ownWallet && !wallet.connected;
+  // An Ethereum wallet pays on Base, itself: no wallet of the app's is involved, only the seller's side has to take Base.
+  const onBase = ownWallet && wallet.connected?.kind === "evm";
+  const baseClosed = onBase && !!snap && !snap.baseReady[market];
   // The key is for logging in to a real machine. The test market's machines are simulated, so the box is
   // not shown there and nothing typed earlier is sent.
   const wantsKey = ownWallet && market === "real";
@@ -310,11 +313,13 @@ export function NeedForm(props: {
     "A run is in progress"
   ) : needsWallet ? (
     "Connect a wallet to pay from it."
+  ) : onBase && snap && !snap.baseReady[market] ? (
+    market === "test" ? "The test market is not set up to be paid on Base. Pay on Solana, or use the real market." : "Paying on Base is not open here."
   ) : keyBad ? (
     "That is not an SSH public key. Paste the one line from your .pub file."
   ) : needsKey ? (
     "Add your SSH public key: it is how you log in to the machine."
-  ) : market === "real" && snap && !snap.walletReady.real ? (
+  ) : onBase ? null : market === "real" && snap && !snap.walletReady.real ? (
     "Fund a mainnet wallet to pay on the real market."
   ) : market === "test" && snap && !snap.walletReady.test ? (
     "Set up the devnet wallet to pay on the test market."
@@ -469,7 +474,7 @@ export function NeedForm(props: {
       <div className="space-y-2 pt-1">
         {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right under them. */}
         <span className="flex flex-col gap-2">
-          <button className={`${START} w-full justify-center`} disabled={blocked || needsWallet || keyBad || needsKey} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
+          <button className={`${START} w-full justify-center`} disabled={blocked || needsWallet || keyBad || needsKey || baseClosed} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
             {starting ? "Starting…" : "Find and rent"}
           </button>
           {/* Reads prices only: starts no run and spends nothing. */}

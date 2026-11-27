@@ -26,6 +26,8 @@ export type MeterView = {
   spent: MarketRunView["spent"];
   /** The run knew of a machine at some point. */
   hadMachine: boolean;
+  /** That machine was destroyed (by the agent, or by the wallet that owns it). False when a wallet-owned rental simply ran out of time. */
+  destroyed: boolean;
   /** Seconds of prepaid time the payment bought (the hours asked for, or until the destroy time). */
   spanSeconds: number | null;
   /** The share of the paid amount the machine time used so far stands for; prepaid, so nothing moves. */
@@ -81,6 +83,7 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
       paidExact: null,
       spent: "nothing",
       hadMachine: false,
+      destroyed: false,
       spanSeconds: null,
       usedUsd: null,
       secondsLeft: null,
@@ -130,6 +133,7 @@ export function meterView(input: { formBudgetUsd: number; formRateUsdHr: number;
     paidExact: paid !== null && job.payment ? usdExact(job.payment.atomic) : null,
     spent: job.spent,
     hadMachine: job.machine !== null,
+    destroyed: job.machine?.status !== "expired" && job.machine?.status !== "gone",
     spanSeconds,
     usedUsd,
     secondsLeft,
@@ -212,7 +216,7 @@ export function meterHeadline(v: MeterView, j: JobGauge, spanHours: number): Met
     case "held":
       return { label: spentLabel, amount: paid, time: null, suffix: "" };
     case "shut":
-      return { label: spentLabel, amount: paid, time: null, suffix: v.phase === "released" ? "machine destroyed" : "" };
+      return { label: spentLabel, amount: paid, time: null, suffix: v.phase === "released" ? (v.destroyed ? "machine destroyed" : "rental over") : "" };
   }
 }
 

@@ -52,9 +52,13 @@ describe("parseRunInput", () => {
     // without a wallet the choice stands
     const plain = parseRunInput({ ...good, askBeforePaying: false, wallet: null });
     expect(plain.ok && plain.value.askBeforePaying).toBe(false);
-    for (const bad of ["", "nope", 42, "0x52908400098527886E0F7030069857D2E4169EE7", {}]) {
-      expect(parseRunInput({ ...good, wallet: bad })).toEqual({ ok: false, error: "that is not a Solana wallet address" });
+    for (const bad of ["", "nope", 42, "0x52908400098527886E0F7030069857D2E4169E", "52908400098527886E0F7030069857D2E4169EE7", {}]) {
+      expect(parseRunInput({ ...good, wallet: bad })).toEqual({ ok: false, error: "that is not a Solana or Ethereum wallet address" });
     }
+    // an Ethereum wallet pays on Base, and it too approves each payment itself
+    const evm = parseRunInput({ ...good, askBeforePaying: false, wallet: "0x52908400098527886E0F7030069857D2E4169EE7" });
+    expect(evm.ok && evm.value.wallet).toBe("0x52908400098527886E0F7030069857D2E4169EE7");
+    expect(evm.ok && evm.value.askBeforePaying).toBe(true);
   });
 
   it.each([

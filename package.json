@@ -12,6 +12,7 @@
     "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_MARKET=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/market/seller.live.test.ts",
     "market:sweep": "tsx scripts/market-sweep.ts",
     "wallet:test": "tsx scripts/wallet-test.ts",
+    "wallet:test:base": "tsx scripts/wallet-test-base.ts",
     "burn402": "tsx cli/burn402.ts",
     "demo": "tsx scripts/demo.ts",
     "public": "bash scripts/public.sh",
@@ -23,6 +24,7 @@
     "@solana-program/token": "0.16.1",
     "@solana/kit": "8.6.0",
     "@x402/core": "2.29.0",
+    "@x402/evm": "2.29.0",
     "@x402/fetch": "2.29.0",
     "@x402/next": "2.29.0",
     "@x402/svm": "2.29.0",
@@ -30,7 +32,8 @@
     "jose": "^6.2.12",
     "next": "16.4.6",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "viem": "2.58.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

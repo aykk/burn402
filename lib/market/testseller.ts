@@ -1,6 +1,7 @@
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { X402Processor, type PaymentProcessor } from "../x402/processor";
+import { BASE_SEPOLIA, X402Processor, type PaymentProcessor } from "../x402/processor";
 import { verifyAuth } from "./auth";
+import { isEvmAddress, verifyWalletAuth } from "./evm";
 import plansFeed from "./fixtures/plans.sample.json";
 import { defaultJournal } from "./journal";
 
@@ -73,6 +74,8 @@ export class TestSeller {
   readonly settlements: Settlement[] = [];
 
   private readonly processor: PaymentProcessor;
+  /** takes USDC on Base's test network from Ethereum wallets; absent when no receiver is set for it */
+  private readonly baseProcessor: PaymentProcessor | null;
   private readonly resourceUrl: string;
   private readonly now: () => number;
   private readonly activeAfterMs: number;
@@ -89,8 +92,9 @@ export class TestSeller {
   private readonly nonces = new Map<string, number>();
   private counter = 0;
 
-  constructor(o: { processor: PaymentProcessor; resourceUrl: string; now?: () => number; activeAfterSec?: number }) {
+  constructor(o: { processor: PaymentProcessor; baseProcessor?: PaymentProcessor | null; resourceUrl: string; now?: () => number; activeAfterSec?: number }) {
     this.processor = o.processor;
+    this.baseProcessor = o.baseProcessor ?? null;
     this.resourceUrl = o.resourceUrl;
     this.now = o.now ?? Date.now;
     this.activeAfterMs = (o.activeAfterSec ?? 3) * 1000;
@@ -135,7 +139,9 @@ export class TestSeller {
   private async auth(request: Request, path: string): Promise<{ ok: true; address: string } | { ok: false; reason: string }> {
     const body = await request.text();
     const nowMs = this.now();
-    const result = verifyAuth(request.headers, { method: request.method.toUpperCase(), path, body, nowMs, maxSkewMs: MAX_SKEW_MS });
+    const check = { method: request.method.toUpperCase(), path, body, nowMs, maxSkewMs: MAX_SKEW_MS };
+    // like the real seller: a Solana wallet signs in with its key, an Ethereum wallet ("base") with a signed message
+    const result = request.headers.get("X-Auth-Chain") === "base" ? await verifyWalletAuth(request.headers, check) : verifyAuth(request.headers, check);
     if (!result.ok) return result;
     for (const [n, ts] of this.nonces) if (nowMs - ts > 2 * MAX_SKEW_MS) this.nonces.delete(n);
     const nonce = request.headers.get("X-Auth-Nonce")!;
@@ -198,14 +204,17 @@ export class TestSeller {
       return json(400, { error: `prepaid_hours must be a whole number of at least ${RULES.min_hours_by_kind[kind]}` });
     }
     if (this.faults.outOfStockRegions.includes(region)) return json(503, { error: `plan is out of stock in ${region}` });
+    // the order names the network it will be paid on, as with the real seller: "base" is USDC from an Ethereum wallet
+    const processor = body.network === "base" ? this.baseProcessor : this.processor;
+    if (!processor) return json(400, { error: "this seller is not set up to be paid on base" });
 
-    if (!signature) return this.quote(text, body, plan, region, hours, kind);
+    if (!signature) return this.quote(text, body, plan, region, hours, kind, processor);
 
     let finish!: (s: Settled | null) => void;
     this.paid.set(signature, { body: text, result: new Promise((resolve) => (finish = resolve)) });
     let settled: Settled | null = null;
     try {
-      const out = await this.settlePaid(text, signature, plan, region, hours, kind);
+      const out = await this.settlePaid(text, signature, plan, region, hours, kind, processor);
       settled = out.settled;
       return out.response;
     } finally {
@@ -219,20 +228,20 @@ export class TestSeller {
     return plan.our_hourly * hours * surcharge;
   }
 
-  private async quote(text: string, body: Obj, plan: Plan, region: string, hours: number, kind: "gpu" | "machine"): Promise<Response> {
+  private async quote(text: string, body: Obj, plan: Plan, region: string, hours: number, kind: "gpu" | "machine", processor: PaymentProcessor): Promise<Response> {
     const seen = (this.quotes.get(text) ?? 0) + 1;
     this.quotes.set(text, seen);
     let usd = this.priceUsd(plan, hours, kind);
     if (seen >= 2 && this.faults.quoteBumpPct) usd *= 1 + this.faults.quoteBumpPct / 100;
 
-    const requirements = await this.processor.requirements(usd);
+    const requirements = await processor.requirements(usd);
     const quoteUsd = Number(requirements.amount) / 1e6;
     if (typeof body.max_total_usd === "number" && quoteUsd > body.max_total_usd) {
       return json(409, { error: `quote $${quoteUsd} is above max_total_usd $${body.max_total_usd}`, quote_usd: quoteUsd });
     }
     const advertised = this.faults.wrongAsset ? { ...requirements, asset: WRONG_ASSET } : requirements;
     this.advertised.set(text, advertised);
-    const header = await this.processor.paymentRequiredHeader(advertised, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
+    const header = await processor.paymentRequiredHeader(advertised, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
     return json(402, { error: "payment required", quote_usd: quoteUsd }, { "PAYMENT-REQUIRED": header });
   }
 
@@ -243,16 +252,17 @@ export class TestSeller {
     region: string,
     hours: number,
     kind: "gpu" | "machine",
+    processor: PaymentProcessor,
   ): Promise<{ response: Response; settled: Settled | null }> {
     const fail = (response: Response) => ({ response, settled: null });
-    const requirements = this.advertised.get(text) ?? (await this.processor.requirements(this.priceUsd(plan, hours, kind)));
+    const requirements = this.advertised.get(text) ?? (await processor.requirements(this.priceUsd(plan, hours, kind)));
     let payload: PaymentPayload;
     try {
-      payload = this.processor.decode(signature);
+      payload = processor.decode(signature);
     } catch {
       return fail(json(402, { error: "payment header could not be decoded" }));
     }
-    const verified = await this.processor.verify(payload, requirements);
+    const verified = await processor.verify(payload, requirements);
     if (!verified.ok) return fail(json(402, { error: "payment rejected", reason: verified.reason }));
 
     if (this.faults.fail5xxOnce) {
@@ -260,14 +270,14 @@ export class TestSeller {
       return fail(json(503, { error: "temporary failure, nothing was charged" }));
     }
 
-    const settlement = await this.processor.settle(payload, requirements);
+    const settlement = await processor.settle(payload, requirements);
     if (!settlement.ok) return fail(json(402, { error: "settlement failed", reason: settlement.reason }));
     this.settlements.push({ at: this.now(), usd: Number(requirements.amount) / 1e6, payer: settlement.payer, plan: plan.id, region });
 
     if (this.faults.settleThenReject) {
       // dishonest: keep the money, build nothing, and ask to be paid again as if the payment had been rejected
-      const again = await this.processor.requirements(this.priceUsd(plan, hours, kind));
-      const header = await this.processor.paymentRequiredHeader(again, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
+      const again = await processor.requirements(this.priceUsd(plan, hours, kind));
+      const header = await processor.paymentRequiredHeader(again, this.resourceUrl, `${plan.id} in ${region}, ${hours}h prepaid`);
       return fail(json(402, { error: "payment rejected" }, { "PAYMENT-REQUIRED": header }));
     }
 
@@ -275,7 +285,8 @@ export class TestSeller {
     const createdAt = this.now();
     const machine: Machine = {
       id: `tsm-${n}`,
-      owner: settlement.payer ?? "",
+      // an Ethereum address is the same in any letter case; its owner signs in with it in lower case
+      owner: isEvmAddress(settlement.payer) ? settlement.payer.toLowerCase() : (settlement.payer ?? ""),
       plan: plan.id,
       region,
       ip: `203.0.113.${((n - 1) % 254) + 1}`,
@@ -335,8 +346,11 @@ export function getTestSeller(): TestSeller | null {
   const payTo = process.env.SOLANA_RECEIVER_ADDRESS;
   if (!payTo) return null;
   if (!holder.seller) {
+    // with a receiver set for Base's test network, the test seller also takes USDC from Ethereum wallets there
+    const basePayTo = process.env.BASE_RECEIVER_ADDRESS;
     holder.seller = new TestSeller({
       processor: new X402Processor({ payTo }),
+      baseProcessor: isEvmAddress(basePayTo) ? new X402Processor({ payTo: basePayTo, network: BASE_SEPOLIA }) : null,
       resourceUrl: "http://127.0.0.1:3000/api/testseller/compute/provision",
     });
     releaseStalePurchases();

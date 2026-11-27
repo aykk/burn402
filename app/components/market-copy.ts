@@ -43,14 +43,19 @@ export function shortAddress(a: string): string {
 /** A Solana transaction signature: base58, about 64 to 90 characters. */
 const SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 
-/** A Solscan link only for a tx id of the expected shape; anything else gets no link (null). */
+/** A payment made on Base: an Ethereum-type transaction id. */
+const BASE_TX_RE = /^0x[0-9a-fA-F]{64}$/;
+
+/** A link to the payment only for a tx id of an expected shape (Solscan for Solana, Basescan for Base); anything else gets no link (null). */
 export function solscanUrl(tx: string | null | undefined, market: MarketId): string | null {
   return solscanUrlForCluster(tx, market === "test" ? "devnet" : "mainnet");
 }
 
 /** The same link by cluster, for stored records; no link when the cluster is not known. */
 export function solscanUrlForCluster(tx: string | null | undefined, cluster: "devnet" | "mainnet" | null | undefined): string | null {
-  if (!tx || !SIGNATURE_RE.test(tx) || !cluster) return null;
+  if (!tx || !cluster) return null;
+  if (BASE_TX_RE.test(tx)) return `https://${cluster === "devnet" ? "sepolia." : ""}basescan.org/tx/${tx}`;
+  if (!SIGNATURE_RE.test(tx)) return null;
   return `https://solscan.io/tx/${tx}${cluster === "devnet" ? "?cluster=devnet" : ""}`;
 }
 
@@ -62,6 +67,12 @@ export function approvalSentence(a: NonNullable<MarketRunView["approval"]>): str
 }
 
 /** Where the money goes, under the approval sentence: the token, the network and the seller's wallet. */
+/**
+ * A rental that is over without anything here having destroyed the machine: a machine its own wallet owns
+ * ran out of prepaid time, or the seller stopped listing it. (The agent's own machines always end destroyed.)
+ */
+export const endedUndestroyed = (run: Pick<MarketRunView, "phase" | "machine">): boolean => run.phase === "released" && (run.machine?.status === "expired" || run.machine?.status === "gone");
+
 export function approvalDetail(a: NonNullable<MarketRunView["approval"]>): string {
   return `Paid in ${a.token} on ${a.network}, to the seller's wallet ${shortAddress(a.payTo)}.`;
 }

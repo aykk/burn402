@@ -3,10 +3,13 @@ import { clusterForMarket, toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { WalletError, approvalMemo, buildApproval, buildRevoke, checkSignedApproval, checkSignedRevoke, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
+import { EvmWalletError, chainOfWallet, isEvmAddress, preparePayment, secondsLeft, signedByWallet, walletAuthChallenge, walletAuthHeaders, type PreparedPayment, type WalletAuthChallenge, type WalletPayer, type WalletTypedData } from "../market/evm";
+import { BASE_NETWORKS } from "../market/guard";
 import { usdExact } from "../market/money";
 import type { Payer } from "../market/pay";
+import { SellerClient } from "../market/seller";
 import { publicHosts, publicReal } from "../market/access";
-import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, payerOwning, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { baseReady, delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, payerOwning, sellerFor, sshKeyDir, walletPayerFor, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { DemoLog } from "./log";
 import type { Actor, Runtime } from "./runtime";
@@ -17,6 +20,13 @@ export const MARKET_ENDED: ReadonlySet<MarketPhase> = new Set(["released", "fail
 const sharedWallets = (): boolean => publicHosts().size > 0;
 /** Phases in which a run is talking to the seller right now (not waiting for a person, not holding a machine). */
 const MARKET_WORKING: ReadonlySet<MarketPhase> = new Set(["scanning", "choosing", "quoting", "paying", "provisioning", "releasing"]);
+/** A sign-in message the wallet was handed is taken back within this long (the seller allows five minutes). */
+const SIGN_IN_TTL_MS = 4 * 60_000;
+/** What an Ethereum wallet needs to know about the network it signs for, to switch to it or add it. */
+export type WalletNetwork = { chainId: number; name: string; rpcUrl: string; explorer: string };
+const shortEvm = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+/** A signed payment with less than this left before it expires is not sent. */
+const MIN_SIGNATURE_SECONDS = 45;
 
 /**
  * One visitor's session: their current market run, signed by the owner's key and recorded on Arweave.
@@ -35,6 +45,10 @@ export class DemoSession {
   private marketPayer: Payer | null = null;
   /** True while a wallet's approval is being checked and sent, so two clicks cannot send it twice. */
   private approving = false;
+  /** The payment an Ethereum wallet was last asked to sign, kept so only its signature for exactly that is taken. */
+  private walletPayment: { run: string; code: string; prepared: PreparedPayment } | null = null;
+  /** The sign-in message an Ethereum wallet was last asked to sign, to look at or destroy its own machine. Good once. */
+  private walletSignIn: { run: string; kind: "look" | "destroy"; challenge: WalletAuthChallenge; at: number } | null = null;
 
   constructor(rt: Runtime, kind: "owner" | "public" = "owner") {
     this.rt = rt;
@@ -119,8 +133,11 @@ export class DemoSession {
     if (this.kind === "public" && input.market === "real" && (!publicReal() || !input.wallet || !input.sshPublicKey)) {
       throw new Error("a public visitor's real rental needs their own wallet and their own SSH key");
     }
+    // An Ethereum wallet pays the seller itself, on Base, and owns the machine: no key of this app's signs anything.
+    const chain = chainOfWallet(input.wallet);
+    if (chain === "base" && !baseReady()[input.market]) throw new Error("the test market is not set up to be paid on Base (the test seller has no Base address to be paid at)");
     // a public visitor's rental is signed by the public agent key, never by the owner's
-    const payer = input.wallet ? await delegatePayerFor(input.market, input.wallet, this.kind) : await payerFor(input.market, this.kind);
+    const payer = !input.wallet ? await payerFor(input.market, this.kind) : chain === "base" ? walletPayerFor(input.wallet) : await delegatePayerFor(input.market, input.wallet, this.kind);
     const run = new MarketRun({
       id,
       market: input.market,
@@ -138,7 +155,7 @@ export class DemoSession {
       // While the site is public, agent wallets are shared (visitors with each other, and on the test market with
       // the owner): a machine is then never adopted by plan and region alone, for anyone. It could be someone else's.
       adopt: !sharedWallets(),
-      findPayment: findPaymentFor(input.market),
+      findPayment: findPaymentFor(input.market, undefined, chain),
       onRecord: (record) => {
         void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti, cluster: clusterForMarket(input.market) }), {
           signer,
@@ -150,6 +167,8 @@ export class DemoSession {
     });
     this.market = run;
     this.marketPayer = payer;
+    this.walletPayment = null;
+    this.walletSignIn = null;
     this.log.push(
       "step",
       "MARKET",
@@ -166,7 +185,8 @@ export class DemoSession {
     const approval = run.awaiting(code);
     if (!approval) return { ok: false, error: "the run is not waiting for this approval" };
     const payer = this.marketPayer;
-    if (!payer?.funds) return { ok: true, ask: null };
+    // an Ethereum wallet signs the payment itself (see walletTypedPayment): there is no approval for the agent to ask for
+    if (!payer?.funds || payer.self) return { ok: true, ask: null };
     return { ok: true, ask: { market: run.view().market, owner: payer.funds, delegate: payer.address, atomic: BigInt(approval.atomic), memo: approvalMemo(runId, code) } };
   }
 
@@ -177,7 +197,7 @@ export class DemoSession {
   async walletApproval(runId: string, code: string): Promise<{ ok: true; transaction: string; chain: "solana:devnet" | "solana:mainnet"; wallet: string } | { ok: false; error: string }> {
     const found = this.approvalAsk(runId, code);
     if (!found.ok) return found;
-    if (!found.ask) return { ok: false, error: "this run is paid from the agent's wallet, not a connected one" };
+    if (!found.ask) return { ok: false, error: this.marketPayer?.self ? "this run is paid by an Ethereum wallet, which signs the payment itself" : "this run is paid from the agent's wallet, not a connected one" };
     try {
       const transaction = await buildApproval(rpcFor(found.ask.market), found.ask);
       return { ok: true, transaction, chain: found.ask.market === "real" ? "solana:mainnet" : "solana:devnet", wallet: found.ask.owner };
@@ -195,6 +215,7 @@ export class DemoSession {
     const found = this.approvalAsk(runId, code);
     if (!found.ok) return found;
     const run = this.market!;
+    if (this.marketPayer?.self) return this.approveFromWallet(run, code, signedTransaction);
     // the overspend test sets the test seller's faults; a payment must not start while it runs
     if (overspendRunning()) return { ok: false, error: OVERSPEND_BUSY };
     if (found.ask) {
@@ -225,12 +246,103 @@ export class DemoSession {
     return result;
   }
 
+  /**
+   * The message an Ethereum wallet signs at the approval stop of a run it pays for itself: USDC, exactly the
+   * quoted amount, from that wallet to the seller. Unsigned; nothing is sent or paid here. The network is
+   * what the wallet must be switched to before it will sign.
+   */
+  async walletTypedPayment(runId: string, code: string): Promise<{ ok: true; typedData: WalletTypedData; network: WalletNetwork; wallet: string } | { ok: false; error: string }> {
+    const run = this.market;
+    if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    const payer = this.marketPayer;
+    if (!payer?.self) return { ok: false, error: "this run is not paid by an Ethereum wallet" };
+    const quote = run.awaitingQuote(code);
+    if (!quote) return { ok: false, error: "the run is not waiting for this approval" };
+    if (!quote.required) return { ok: false, error: "the seller's payment terms for this quote were not kept" };
+    const market = run.view().market;
+    try {
+      const prepared = await preparePayment(quote.required, { wallet: payer.address, market });
+      this.walletPayment = { run: runId, code, prepared };
+      const net = BASE_NETWORKS[market];
+      return { ok: true, typedData: prepared.typedData, network: { chainId: net.chainId, name: net.label, rpcUrl: net.rpcUrl, explorer: net.explorer }, wallet: prepared.wallet };
+    } catch (error) {
+      return { ok: false, error: error instanceof EvmWalletError ? error.message : `The payment could not be prepared: ${(error as Error).message}` };
+    }
+  }
+
+  /**
+   * Pays for the quote with the message the Ethereum wallet signed. Only the signature of exactly the
+   * payment this session prepared for this approval is taken; it is checked to be that wallet's before
+   * the run goes on.
+   */
+  private async approveFromWallet(run: MarketRun, code: string, signature?: string): Promise<{ ok: true; run: MarketRunView } | { ok: false; error: string }> {
+    const runId = run.view().id;
+    if (overspendRunning()) return { ok: false, error: OVERSPEND_BUSY };
+    const held = this.walletPayment;
+    if (typeof signature !== "string" || !signature || !held || held.run !== runId || held.code !== code) return { ok: false, error: "sign the payment in your wallet first" };
+    if (this.approving) return { ok: false, error: "the payment is already being sent" };
+    this.approving = true;
+    try {
+      if (!(await signedByWallet(held.prepared, signature))) {
+        return { ok: false, error: "The signature was not accepted: it is not this wallet's signature of this payment. Nothing was paid. (A smart-contract wallet account cannot be used here yet; use an ordinary account.)" };
+      }
+      // A signature is good for a few minutes only. One about to run out would be refused by the seller after being
+      // sent, which reads as a payment in doubt; it is dropped here instead, unsent.
+      if (secondsLeft(held.prepared) < MIN_SIGNATURE_SECONDS) {
+        this.walletPayment = null;
+        return { ok: false, error: "That signature has run out of time (it is good for a few minutes). Nothing was sent or paid. Press the button again to sign a fresh one." };
+      }
+      if (!run.awaiting(code)) return { ok: false, error: "The run was no longer waiting, so nothing was paid. The signature was not sent anywhere." };
+      (this.marketPayer as WalletPayer).arm(held.prepared, signature);
+      this.walletPayment = null;
+      const result = run.approve(code);
+      if (!result.ok) return result;
+      this.log.push("info", "MARKET", `run ${runId}: the wallet ${shortEvm(held.prepared.wallet)} signed a payment of ${usdExact(held.prepared.terms.amount)} to the seller`);
+      return { ok: true, run: run.view() };
+    } finally {
+      this.approving = false;
+    }
+  }
+
+  /**
+   * The sign-in message an Ethereum wallet signs to look at ("look") or destroy ("destroy") the machine it
+   * owns. The seller takes each signed message once, so a new one is made every time. Nothing is sent here.
+   */
+  walletSignInMessage(runId: string, kind: "look" | "destroy"): { ok: true; message: string; wallet: string } | { ok: false; error: string } {
+    const run = this.market;
+    if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    const payer = this.marketPayer;
+    const machine = run.view().machine;
+    if (!payer?.self || !machine) return { ok: false, error: "this run has no machine that your wallet owns" };
+    const challenge = walletAuthChallenge(payer.address, kind === "look" ? "GET" : "DELETE", SellerClient.instancePath(machine.id));
+    this.walletSignIn = { run: runId, kind, challenge, at: Date.now() };
+    return { ok: true, message: challenge.message, wallet: payer.address };
+  }
+
+  /** Uses the sign-in the wallet signed: one look at its machine, or its destroy. */
+  async useWalletSignIn(runId: string, kind: "look" | "destroy", signature: string): Promise<{ ok: true; run: MarketRunView } | { ok: false; error: string }> {
+    const run = this.market;
+    const held = this.walletSignIn;
+    const payer = this.marketPayer;
+    if (!run || run.view().id !== runId || !payer?.self) return { ok: false, error: "that run is not the current run" };
+    if (!held || held.run !== runId || held.kind !== kind || Date.now() - held.at > SIGN_IN_TTL_MS) return { ok: false, error: "That sign-in is too old or was already used. Try again." };
+    // good once: the seller refuses a repeat, so it is not kept
+    this.walletSignIn = null;
+    const headers = await walletAuthHeaders(payer.address, held.challenge, signature);
+    if (!headers) return { ok: false, error: "The signature was not accepted: it is not this wallet's signature of the sign-in message." };
+    const result = kind === "look" ? await run.look(headers) : await run.destroyOwned(headers);
+    if (!result.ok) return result;
+    if (kind === "destroy") this.log.push("info", "MARKET", `run ${runId}: the wallet ${shortEvm(payer.address)} destroyed its machine`);
+    return { ok: true, run: run.view() };
+  }
+
   /** The wallet and agent of a wallet-funded run that is over: the only time an approval can be left unused. */
   private endedWalletRun(runId: string): { ok: true; market: RunInput["market"]; owner: string; delegate: string } | { ok: false; error: string } {
     const run = this.market;
     if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
     const payer = this.marketPayer;
     if (!payer?.funds) return { ok: false, error: "this run was paid from the agent's wallet, not a connected one" };
+    if (payer.self) return { ok: false, error: "this run was paid by your wallet directly, so the agent was never given an approval to take back" };
     if (!MARKET_ENDED.has(run.view().phase)) return { ok: false, error: "wait until the run is over" };
     return { ok: true, market: run.view().market, owner: payer.funds, delegate: payer.address };
   }
@@ -273,6 +385,11 @@ export class DemoSession {
     if (!target) return { ok: false, error: "say which run" };
     if (current && current.view().id === target) {
       if (input.cancel) return current.cancel();
+      const owned = current.view();
+      // a machine the visitor's Ethereum wallet owns answers only to that wallet
+      if (owned.selfManaged && owned.machine && (owned.phase === "provisioning" || owned.phase === "ready" || owned.phase === "failed")) {
+        return { ok: false, error: "This machine belongs to your wallet, so destroying it needs your wallet's signature. Press Destroy now and sign in the wallet." };
+      }
       await current.destroy();
       const v = current.view();
       if (v.error && v.machine && v.machine.status !== "destroyed" && v.phase !== "paying" && v.phase !== "provisioning") return { ok: false, error: v.error };
@@ -291,6 +408,10 @@ export class DemoSession {
     // with no machine id the search goes by plan and region through everything the wallet owns; every public
     // visitor shares that wallet, so the search could land on someone else's machine
     if (this.kind === "public" && !open.instance) return { ok: false, error: "This purchase has no machine on record. Dismiss it instead." };
+    // paid by an Ethereum wallet: the machine is that wallet's, and nothing on this computer can sign for it
+    if (isEvmAddress(open.agent)) {
+      return { ok: false, error: `This machine belongs to the wallet ${shortEvm(open.agent)} that paid for it, and only that wallet can destroy it. It runs until its prepaid time is over. Once it is gone, dismiss this.` };
+    }
     // the same holds for the owner while the site is public: the match could land on a visitor's machine
     if (!open.instance && sharedWallets()) {
       return { ok: false, error: "This purchase has no machine on record, and while the site is public a machine is never picked by plan and region alone (it could be a visitor's). Check the seller's list with npm run market:sweep (add --audience public for visitors' machines), then dismiss this." };

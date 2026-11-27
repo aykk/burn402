@@ -1,6 +1,6 @@
 import { usdExact } from "../../lib/market/money";
 import type { MarketRunView } from "@/lib/market/run";
-import { endState, sentence } from "./market-copy";
+import { endState, sentence, endedUndestroyed } from "./market-copy";
 import { MARKET_STAGES, marketStage } from "./stages";
 
 /** What the live region remembers about a run between polls. */
@@ -32,7 +32,8 @@ export function marketAnnouncement(prev: MarketMark | null | undefined, run: Mar
 
   if (next.phase === "released") {
     const money = !amount ? "" : run.spent === "paid" ? ` Spent ${amount}.` : run.spent === "maybe" ? ` A payment of ${amount} was sent and is not confirmed.` : "";
-    if (changed) parts.push(`Machine destroyed.${money}`);
+    // a machine its own wallet owns may simply have run out of prepaid time: nothing here destroyed it
+    if (changed) parts.push(`${endedUndestroyed(run) ? "Rental over." : "Machine destroyed."}${money}`);
   } else if (next.phase === "refused") {
     if (changed) parts.push(endState(run)?.sentence ?? "Stopped before paying.");
   } else if (next.phase === "failed") {

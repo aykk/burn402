@@ -6,7 +6,7 @@ import { ActionError, type Post } from "./ActionError";
 import { approvalDetail, approvalSentence, billedHoursLine, shortAddress, surchargeLine } from "./market-copy";
 import type { FocusNext } from "./MarketPanel";
 import { BTN } from "./ui";
-import { signWithWallet, useWallet, type WalletChain } from "./wallet";
+import { readyWalletForNetwork, signPaymentWithWallet, signWithWallet, useWallet, type EvmNetwork, type WalletChain } from "./wallet";
 import { WalletConnect } from "./WalletConnect";
 
 const PAY_TEST =
@@ -53,6 +53,39 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
     return post("/api/market/approve", { run: run.id, code: a.code, signedTransaction: signed.signed });
   };
 
+  /**
+   * A run an Ethereum wallet pays for itself, on Base: the server prepares one message (USDC, exactly this
+   * amount, to the seller), the wallet shows it and signs, and the signature goes back with the one-time
+   * code. Signing costs nothing; declining leaves the run waiting here, and nothing was sent.
+   */
+  const payFromEthereumWallet = async (address: string): Promise<string | null> => {
+    setBusy("wallet");
+    type Prepared = { typedData?: unknown; network?: EvmNetwork; error?: string };
+    const prepare = async (): Promise<Prepared> => {
+      try {
+        const res = await fetch("/api/market/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run: run.id, code: a.code }) });
+        const body = (await res.json().catch(() => ({}))) as Prepared;
+        return res.ok && body.typedData && body.network ? body : { error: body.error ?? `The server answered HTTP ${res.status}` };
+      } catch {
+        return { error: "Can't reach the site right now. Nothing was sent." };
+      }
+    };
+    let prepared = await prepare();
+    if (!prepared.typedData || !prepared.network) return prepared.error ?? "The payment could not be prepared.";
+    // The message is good for a few minutes only. If the wallet first had to be moved to the payment's network
+    // (which can take a while the first time), a fresh one is prepared before the wallet is asked to sign.
+    const ready = await readyWalletForNetwork(prepared.network, address);
+    if (!ready.ok) return ready.error;
+    if (ready.moved) {
+      prepared = await prepare();
+      if (!prepared.typedData || !prepared.network) return prepared.error ?? "The payment could not be prepared.";
+    }
+    const signed = await signPaymentWithWallet(prepared.typedData, prepared.network, address);
+    if (!signed.ok) return signed.error;
+    setBusy("pay");
+    return post("/api/market/approve", { run: run.id, code: a.code, signature: signed.signature });
+  };
+
   // The guard is released in `finally`, so a throw can never leave Pay and Cancel dead.
   const pay = async () => {
     if (inFlight.current) return;
@@ -62,7 +95,7 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
       setBusy("pay");
       // This bar goes away once the payment is sent: focus moves on to the machine block.
       onFocusNext?.("machine");
-      const failed = run.wallet ? await payFromWallet(run.wallet) : await post("/api/market/approve", { run: run.id, code: a.code });
+      const failed = !run.wallet ? await post("/api/market/approve", { run: run.id, code: a.code }) : run.selfManaged ? await payFromEthereumWallet(run.wallet) : await payFromWallet(run.wallet);
       if (failed) onFocusNext?.(null);
       setPayError(failed);
     } finally {
@@ -91,8 +124,11 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
 
   // Paid from the visitor's own wallet: it must be connected, on the account the run was started with.
   const own = run.wallet;
-  const ownReady = own === null || wallet.connected?.address === own;
-  const reason = !walletReady
+  // an Ethereum address is the same in any letter case
+  const ownReady = own === null || (run.selfManaged ? wallet.connected?.address.toLowerCase() === own.toLowerCase() : wallet.connected?.address === own);
+  // a wallet that pays the seller itself needs no wallet of the app's
+  const agentReady = walletReady || run.selfManaged;
+  const reason = !agentReady
     ? real
       ? "Fund a mainnet wallet to pay on the real market."
       : "Set up the devnet wallet to pay on the test market."
@@ -112,10 +148,16 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
         <p className="mt-1 max-w-[64ch] text-foreground tabular-nums">{approvalDetail(a)}</p>
         {billed && <p className="mt-1 max-w-[64ch] text-foreground">{billed}</p>}
         {surcharge && <p className="mt-1 max-w-[64ch] text-foreground">{surcharge}</p>}
-        {own && (
+        {own && !run.selfManaged && (
           <p className="mt-1 max-w-[64ch] text-foreground">
             Your wallet {shortAddress(own)} will ask you to approve exactly {a.exact}. Your agent then pays the seller from it. Your wallet also pays a network fee of well
             under a cent.
+          </p>
+        )}
+        {own && run.selfManaged && (
+          <p className="mt-1 max-w-[64ch] text-foreground">
+            Your wallet {shortAddress(own)} will ask you to sign a payment of exactly {a.exact} to the seller. Signing is free: there is no network fee. The machine
+            will belong to your wallet, so you sign again each time you check on it or destroy it.
           </p>
         )}
         <p className="mt-1 max-w-[64ch] text-[12px] leading-4 text-muted">
@@ -132,8 +174,8 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
           </p>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <button className={real ? PAY_REAL : PAY_TEST} disabled={busy !== null || !walletReady || !ownReady} aria-describedby={reason ? "pay-reason" : undefined} onClick={() => void pay()}>
-            {busy === "wallet" ? "Check your wallet…" : busy === "pay" ? "Paying…" : own ? "Approve in wallet and rent" : "Pay and rent"}
+          <button className={real ? PAY_REAL : PAY_TEST} disabled={busy !== null || !agentReady || !ownReady} aria-describedby={reason ? "pay-reason" : undefined} onClick={() => void pay()}>
+            {busy === "wallet" ? "Check your wallet…" : busy === "pay" ? "Paying…" : own ? (run.selfManaged ? "Sign in wallet and rent" : "Approve in wallet and rent") : "Pay and rent"}
           </button>
           <button className={BTN} disabled={busy !== null} onClick={() => void cancel()}>
             {busy === "cancel" ? "Cancelling…" : "Cancel"}
@@ -144,7 +186,7 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
             </span>
           )}
         </div>
-        {own && !wallet.connected && <WalletConnect />}
+        {own && !ownReady && <WalletConnect only={run.selfManaged ? "evm" : "solana"} />}
         <ActionError what="The payment didn't go ahead" message={payError} onDismiss={() => setPayError(null)} />
         <ActionError what="The run wasn't cancelled" message={cancelError} onDismiss={() => setCancelError(null)} />
       </div>

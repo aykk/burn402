@@ -7,7 +7,7 @@ import { ApprovalBar } from "./ApprovalBar";
 import { RevokeApproval } from "./RevokeApproval";
 import { MachinePanel, type Send } from "./MachinePanel";
 import { MarketPrices } from "./MarketPrices";
-import { PHASE_HEADING, endState, fallbackLine, panelBody, sentence } from "./market-copy";
+import { PHASE_HEADING, endState, endedUndestroyed, fallbackLine, panelBody, sentence } from "./market-copy";
 import { OffersTable } from "./OffersTable";
 import { MARKET_STAGES, marketStage } from "./stages";
 import { TEXT_BTN } from "./ui";
@@ -169,7 +169,8 @@ export function MarketPanel({
     setStopError(await post("/api/market/destroy", { run: run.id }));
     setStopping(false);
   };
-  const heading = ended ? ended.title : PHASE_HEADING[run.phase];
+  // a machine its own wallet owns can run out of prepaid time without anything here destroying it
+  const heading = ended ? ended.title : endedUndestroyed(run) ? "Rental over" : PHASE_HEADING[run.phase];
   // Once the money is out, the table is history: the lead line stays and the table opens on request.
   const prices = (
     <MarketPrices
@@ -242,7 +243,8 @@ export function MarketPanel({
 
       {run.phase === "paying" && !run.payment && run.approval && (
         <p className="border-l-2 border-foreground pl-3 text-foreground tabular-nums">
-          Paying {run.approval.exact} {run.approval.token} over x402 on {run.approval.network}. Your agent signs once and never pays twice for this run.
+          Paying {run.approval.exact} {run.approval.token} over x402 on {run.approval.network}.{" "}
+          {run.selfManaged ? "Your wallet signed once, and that signature can pay only this amount, once." : "Your agent signs once and never pays twice for this run."}
         </p>
       )}
 

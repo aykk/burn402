@@ -15,7 +15,16 @@ export type Payer = {
   signer: Signer;
   /** set when the money is not the signer's own: the connected wallet whose USDC it moves under that wallet's approval */
   funds?: string;
+  /**
+   * True when that connected wallet pays the seller itself (an Ethereum wallet, on Base): it owns the machine,
+   * and nothing on this computer can sign for it. Every look at the machine and its destroy are signed in the browser.
+   */
+  self?: true;
+  /** the chain the payment is made on; Solana when absent */
+  chain?: "base";
   payHeaders(required: PaymentRequired): Promise<Record<string, string>>;
+  /** how this payer's payment is found on chain later, when it is not a Solana signature */
+  payReference?(): string | null;
 };
 
 /**

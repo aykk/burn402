@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { parseNuzaFeed } from "./catalog";
 import { choose, summarize, type RejectReason } from "./choose";
 import { findPayment } from "./chain";
-import { NETWORKS } from "./guard";
+import { NETWORKS, type Chain } from "./guard";
+import { findBasePayment, isEvmAddress, makeWalletPayer } from "./evm";
 import { defaultJournal, type Journal } from "./journal";
 import { accessVerdict, headersOf, visitorOf } from "./access";
 import { isWalletAddress, makeDelegatePayer } from "./delegate";
@@ -39,6 +40,20 @@ export function secretFor(market: MarketId, env: Env = process.env, audience: Au
 /** "A key is configured", not "it has funds". The test market also needs the test seller's receiver. */
 export function walletReady(env: Env = process.env): { test: boolean; real: boolean } {
   return { test: !!secretFor("test", env) && !!env.SOLANA_RECEIVER_ADDRESS, real: !!secretFor("real", env) };
+}
+
+/**
+ * Whether a rental can be paid from an Ethereum wallet, on Base. No key of this app's is involved: the
+ * wallet pays the seller itself. The test market only needs the test seller to have somewhere to be paid
+ * on Base's test network.
+ */
+export function baseReady(env: Env = process.env): { test: boolean; real: boolean } {
+  return { test: isEvmAddress(env.BASE_RECEIVER_ADDRESS), real: true };
+}
+
+/** A payer for one run that is the visitor's own Ethereum wallet: it pays the seller directly and owns the machine. */
+export function walletPayerFor(wallet: string): Payer {
+  return makeWalletPayer(wallet);
 }
 
 type PayerCache = Map<string, Promise<Payer>>;
@@ -100,11 +115,14 @@ export async function payerOwning(market: MarketId, agent: string | null | undef
 }
 
 export function sellerFor(market: MarketId, payer: Payer | null): SellerClient {
-  return new SellerClient(SELLERS[market], { signer: payer?.signer ?? null });
+  // a wallet that pays for itself signs in the browser: the client has no signer of its own for its machines
+  return new SellerClient(SELLERS[market], { signer: payer?.self ? null : (payer?.signer ?? null), chain: payer?.chain === "base" ? "base" : "solana" });
 }
 
 /** The read-only chain check a run uses after a signed payment: this market's RPC and USDC mint. */
-export function findPaymentFor(market: MarketId, fetchImpl?: typeof fetch): NonNullable<MarketRunDeps["findPayment"]> {
+export function findPaymentFor(market: MarketId, fetchImpl?: typeof fetch, chain: Chain = "solana"): NonNullable<MarketRunDeps["findPayment"]> {
+  // on Base the payment is found by the one-time number of the authorization the wallet signed
+  if (chain === "base") return (q) => findBasePayment({ market, payer: q.payer, nonce: q.signature });
   const net = NETWORKS[market];
   return (q) => findPayment({ rpcUrl: net.rpcUrl, mint: net.usdc, ...q, fetch: fetchImpl });
 }
@@ -230,7 +248,7 @@ export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { 
   const limits = parseLimits(budgetUsd, rateUsdHr);
   if (!limits.ok) return limits;
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
-  if (wallet !== undefined && wallet !== null && !isWalletAddress(wallet)) return { ok: false, error: "that is not a Solana wallet address" };
+  if (wallet !== undefined && wallet !== null && !isWalletAddress(wallet) && !isEvmAddress(wallet)) return { ok: false, error: "that is not a Solana or Ethereum wallet address" };
   const hasKey = sshPublicKey !== undefined && sshPublicKey !== null && sshPublicKey !== "";
   const key = hasKey ? sshPublicKeyOf(sshPublicKey) : null;
   if (hasKey && key === null) return { ok: false, error: "that is not an SSH public key; paste the one line from your .pub file (it starts with ssh-ed25519 or ssh-rsa)" };

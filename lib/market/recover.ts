@@ -62,6 +62,13 @@ export async function destroyOpenPurchase(open: OpenPurchase, seller: Manage, jo
  * machine on record has to be destroyed, and an intent-only entry has its machine looked for by Destroy.
  */
 export function dismissOpenPurchase(open: OpenPurchase, journal: Journal, opts: { now?: () => number } = {}): RecoverResult {
+  // A machine an Ethereum wallet paid for is that wallet's: nothing here can destroy it, so its purchase can only ever be dismissed.
+  const walletOwned = typeof open.agent === "string" && /^0x[0-9a-fA-F]{40}$/.test(open.agent);
+  if (walletOwned && open.instance) {
+    const at = (opts.now ?? Date.now)();
+    journal.append({ at, run: open.run, market: open.market, seller: open.seller, event: "failed", plan: open.plan, region: open.region, usd: open.usd, tx: open.tx, instance: open.instance, agent: open.agent ?? undefined, detail: "dismissed by owner; the machine belongs to the wallet that paid and was not destroyed by this app" });
+    return { ok: true, destroyed: [], message: "Dismissed. This app did not destroy the machine: it belongs to the wallet that paid, and runs until its prepaid time is over." };
+  }
   if (open.instance) return { ok: false, error: `This purchase has a machine on record (${open.instance}). Destroy it instead; it cannot be dismissed.` };
   if (open.lastEvent !== "paid" && open.lastEvent !== "unknown") {
     return { ok: false, error: "No payment was recorded for this purchase yet, so there is nothing to dismiss. Use Destroy to look for its machine." };

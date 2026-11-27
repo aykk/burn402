@@ -302,3 +302,41 @@ An independent reviewer read everything after commit 02a986d. No Critical or Hig
 | L6 | `market:sweep` could not see machines on the visitors' agent wallet. | Fixed: `--audience public` lists them (never destroys them). |
 
 **What no code change removes.** With `--real`, strangers get root on real machines rented under an agent identity this app controls. The separate key keeps that away from the owner's own wallet and machines, but abuse still lands on that identity at the seller. It stays the owner's decision each time the site is started.
+
+## Addendum 2026-11-27: paying from an Ethereum wallet, on Base
+
+**Why.** A friend of the owner asked for MetaMask "and other major wallets", suggesting RainbowKit. The Solana path already lists MetaMask's Solana accounts through the Wallet Standard, but most MetaMask users hold Ethereum-type accounts only. The real seller also quotes on Base (`network: "base"` in the order, USDC `0x8335…2913`, EIP-3009 `extra: { name: "USD Coin", version: "2" }`).
+
+**Approaches considered.**
+1. *The wallet pays the seller directly (chosen by the owner).* One free signature (an EIP-3009 `TransferWithAuthorization`), no gas, the site never holds money. Cost: the wallet owns the machine, and the seller wants a fresh wallet signature for every management call, so looking at the machine and destroying it are signed in the browser.
+2. *The visitor first sends USDC to the agent, which then rents.* Keeps the automatic machine handling, but the site holds visitors' money, needs refunds, and the visitor pays gas. Rejected.
+3. *The Solana trick (approve the agent as delegate, the agent pays).* No equivalent: an ERC-20 `approve` plus `transferFrom` by the agent is not an x402 "exact" payment, and the seller ties the machine to the address in the authorization.
+
+**Facts established from the seller, with free read-only calls and a throwaway key (2026-11-27).**
+- Sign-in for an Ethereum wallet: the same `X402-COMPUTE-AUTH` lines with chain `base`, the address in **lower case** (checksum case is refused), signed with `personal_sign`, sent as hex (`X-Auth-Sig-Encoding: hex`).
+- Each signed request is taken **once** ("Replay detected (nonce already used)") and only within **300 s** of its timestamp. So one signature cannot cover several status checks.
+
+**Design.**
+- `lib/market/evm.ts`: `preparePayment` has the x402 library write the payment with a signer that only records what it is asked to sign, then checks every field of it against the quote (primary type, chain id, USDC contract, token name and version, from, to, value, a validity of at most two hours) before a wallet is shown it. `signedByWallet` checks the signature (an ordinary wallet by arithmetic; a smart-contract wallet by a read-only call). `makeWalletPayer` pays once, only for the terms the signature covers.
+- `checkPayment` takes the chain; on Base it compares addresses without regard to letter case. A Solana run still refuses Base terms and the other way round.
+- `SellerClient` asks for quotes on the run's chain and accepts a sign-in made elsewhere for `instance` and `destroy`.
+- `MarketRun`: a payer with `self` set makes the run wallet-owned. It skips the instance list, never adopts a machine, and after paying moves only on `look(auth)` and `destroyOwned(auth)`. `destroy()` without the wallet does nothing. "Not found" from a look is never taken for "gone". At the end of the prepaid time the run ends as `released` with the machine marked `expired`, and the journal says the app did not destroy it.
+- The session keeps the one prepared payment and the one sign-in message it last handed out, and takes a signature only for exactly those. A sign-in message is good once and for four minutes.
+- The page finds Ethereum wallets through EIP-6963 announcements, the counterpart of the Wallet Standard discovery already used for Solana. No connector library; the page still talks to nothing but itself.
+- Test market: with `BASE_RECEIVER_ADDRESS` set the test seller also quotes on Base Sepolia (USDC `0x036C…CF7e`) through the same hosted facilitator, and checks `base` sign-ins the way the real seller does.
+
+**Known limits.**
+- A seller that rejects an order after receiving the signed authorization could still use it until it expires (the seller's own timeout, one hour at x402layer; five minutes at the test seller). The run then says the payment was signed and sent and not confirmed, and the chain check reads the authorization's state from USDC itself.
+- The app cannot confirm that a wallet-owned machine was switched off when its time ran out.
+- Phone wallets need the wallet app's own browser; there is no QR-code connection (that is what RainbowKit with WalletConnect would add).
+
+**Independent review of the Base path (2026-11-27), and what was changed.** A fresh reviewer found no way to make a wallet sign anything wider than the quote, to replay a signature, to pay twice, to cross sessions, or to reach the agent keys. It found these, all in what happens after payment:
+1. *A smart-contract wallet could pay and then never reach its machine* (the seller's sign-in takes ordinary signatures only). Now only an ordinary account's 65-byte signature is accepted for the payment, on the page and on the server.
+2. *A signed destroy read the seller's "not found" as destroyed.* A wallet-signed destroy now counts only a success; "not found" leaves the run open.
+3. *`market:sweep` would close a wallet-owned purchase it could not destroy.* It now leaves open any purchase paid by a wallet other than the one it runs with.
+4. *A signature about to expire was still sent*, ending the run as a payment in doubt. One with under 45 s left is dropped unsent, and the page prepares the payment only after the wallet is on the right network.
+5. *The seller's end time alone could end a wallet-owned rental early.* The rental now lasts at least the hours paid for; after it ends, the owner can still destroy the machine with a signature.
+6. *A wallet-owned open purchase could become impossible to close after a restart.* It can now be dismissed, and the journal says the app did not destroy the machine.
+7. *A look that returned after the rental ended rewrote the ended run.* It no longer does.
+
+Left open, known: if the seller takes the payment and its answer is lost (three failed tries), a wallet-owned run ends without a machine id and the app has no way to find the machine; the agent-owned path finds it from the wallet's list, which here would need another wallet signature. The loss is at most the one payment.

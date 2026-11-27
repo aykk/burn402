@@ -5,7 +5,7 @@ import { OWNER_HEADER, ownerToken } from "./access";
 import { authHeaders } from "./auth";
 import { parsePlansFeed } from "./catalog";
 import type { Candidate } from "./choose";
-import { atomicToUsd, type Accepts } from "./guard";
+import { atomicToUsd, type Accepts, type Chain } from "./guard";
 import { sellerReason, usdPlain } from "./money";
 import { readPaymentRequired, type PaymentRequired } from "./pay";
 import { readTextCapped, TooLargeError } from "./read";
@@ -30,6 +30,8 @@ export type Quote = {
   atomic: string;
   accepts: Accepts;
   body: string;
+  /** the seller's full payment terms for this quote, cut down to the one offer the run would pay */
+  required?: PaymentRequired;
 };
 
 export type QuoteErrorCode = "OUT_OF_STOCK" | "PRICE_CAP" | "NO_402" | "SELLER_ERROR" | "UNREACHABLE";
@@ -102,13 +104,14 @@ function toInstance(raw: unknown): Instance | null {
 
 const nonEmpty = (v: unknown): boolean => typeof v === "string" && v !== "";
 
-/** First well-formed requirement on a Solana network. */
-function solanaRequirement(required: PaymentRequired): PaymentRequirements | null {
+/** First well-formed requirement on the run's kind of network: Solana, or an Ethereum-type one for Base. The guard checks which exactly. */
+function requirementOn(required: PaymentRequired, chain: Chain): PaymentRequirements | null {
+  const prefix = chain === "base" ? "eip155:" : "solana:";
   const r = required.accepts.find(
     (a) =>
       isObj(a) &&
       typeof a.network === "string" &&
-      a.network.startsWith("solana:") &&
+      a.network.startsWith(prefix) &&
       typeof a.amount === "string" &&
       /^\d+$/.test(a.amount) &&
       nonEmpty(a.asset) &&
@@ -137,11 +140,14 @@ export class SellerClient {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly timeouts: { read: number; paid: number };
+  /** the chain quotes are asked for and paid on */
+  private readonly chain: Chain;
 
   constructor(
     readonly config: SellerConfig,
-    deps: { fetch?: typeof fetch; signer?: Signer | null; now?: () => number; sleep?: (ms: number) => Promise<void>; timeouts?: { read: number; paid: number } } = {},
+    deps: { fetch?: typeof fetch; signer?: Signer | null; now?: () => number; sleep?: (ms: number) => Promise<void>; timeouts?: { read: number; paid: number }; chain?: Chain } = {},
   ) {
+    this.chain = deps.chain === "base" ? "base" : "solana";
     // The test seller is this app's own API, open to the owner only: the app's calls to it carry the owner key.
     // The key is never sent to another host.
     const own = config.id === "testseller" && /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(`${config.baseUrl}/`);
@@ -188,7 +194,7 @@ export class SellerClient {
       label: LABEL,
       prepaid_hours: hours,
       ssh_public_key: opts.sshPublicKey,
-      network: "solana",
+      network: this.chain,
       max_total_usd: opts.maxTotalUsd,
     });
 
@@ -206,8 +212,8 @@ export class SellerClient {
       throw new QuoteError(refusal.code, refusal.detail);
     }
     const required = readPaymentRequired(response, text);
-    const req = required ? solanaRequirement(required) : null;
-    if (!req) throw new QuoteError("NO_402", `${this.config.label} asked for payment but did not say how to pay on Solana.`);
+    const req = required ? requirementOn(required, this.chain) : null;
+    if (!required || !req) throw new QuoteError("NO_402", `${this.config.label} asked for payment but did not say how to pay on ${this.chainName()}.`);
     const accepts = toAccepts(req);
     return {
       seller: this.config.id,
@@ -219,7 +225,12 @@ export class SellerClient {
       atomic: accepts.amount,
       accepts,
       body,
+      required: { ...required, accepts: [req] },
     };
+  }
+
+  private chainName(): string {
+    return this.chain === "base" ? "Base" : "Solana";
   }
 
   /** Why an unpaid request did not return a 402. */
@@ -252,9 +263,9 @@ export class SellerClient {
     }
     if (fresh.status !== 402) return { kind: "not_charged", ...this.refusal(fresh.status, freshText) };
     const required = readPaymentRequired(fresh, freshText);
-    const req = required ? solanaRequirement(required) : null;
+    const req = required ? requirementOn(required, this.chain) : null;
     if (!required || !req) {
-      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} asked for payment but did not say how to pay on Solana.` };
+      return { kind: "not_charged", code: "SELLER_ERROR", detail: `${this.config.label} asked for payment but did not say how to pay on ${this.chainName()}.` };
     }
 
     // 2. the only call to pay; it signs for exactly the requirement the guard sees
@@ -313,16 +324,25 @@ export class SellerClient {
     return { kind: "unknown", detail: `${this.config.label} gave an unexpected answer to the paid request (error ${status}): ${said(text)}` };
   }
 
-  private async signed(method: "GET" | "DELETE", path: string): Promise<{ response: Response; text: string }> {
-    if (!this.signer) throw new Error(NO_WALLET);
-    const headers = await authHeaders(this.signer, { method, path, body: "", now: this.now });
+  /**
+   * `auth` is a sign-in the owner of the machine already signed elsewhere (an Ethereum wallet, in the
+   * browser); without it the client signs with its own wallet.
+   */
+  private async signed(method: "GET" | "DELETE", path: string, auth?: Record<string, string>): Promise<{ response: Response; text: string }> {
+    if (!auth && !this.signer) throw new Error(NO_WALLET);
+    const headers = auth ?? (await authHeaders(this.signer!, { method, path, body: "", now: this.now }));
     const signal = AbortSignal.timeout(method === "DELETE" ? this.timeouts.paid : this.timeouts.read);
     const response = await this.fetch(this.url(path), { method, headers: { Accept: "application/json", ...headers }, signal });
     return { response, text: await readTextCapped(response) };
   }
 
-  async instance(id: string): Promise<Instance | null> {
-    const { response, text } = await this.signed("GET", `/compute/instances/${encodeURIComponent(id)}`);
+  /** The path of one machine, as a wallet signs it. */
+  static instancePath(id: string): string {
+    return `/compute/instances/${encodeURIComponent(id)}`;
+  }
+
+  async instance(id: string, auth?: Record<string, string>): Promise<Instance | null> {
+    const { response, text } = await this.signed("GET", SellerClient.instancePath(id), auth);
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`${this.config.label} could not show machine ${id} (error ${response.status}): ${said(text)}`);
     const body = parseJson(text);
@@ -339,9 +359,11 @@ export class SellerClient {
     return rows.map(toInstance).filter((i): i is Instance => i !== null);
   }
 
-  async destroy(id: string): Promise<void> {
-    const { response, text } = await this.signed("DELETE", `/compute/instances/${encodeURIComponent(id)}`);
-    if (response.ok || response.status === 404) return;
+  async destroy(id: string, auth?: Record<string, string>): Promise<void> {
+    const { response, text } = await this.signed("DELETE", SellerClient.instancePath(id), auth);
+    // With the agent's own wallet a follow-up look confirms the machine is gone. A sign-in the owner signed
+    // elsewhere is good for this one call, so "not found" cannot be confirmed and is not taken for destroyed.
+    if (response.ok || (response.status === 404 && !auth)) return;
     throw new Error(`${this.config.label} could not destroy machine ${id} (error ${response.status}): ${said(text)}`);
   }
 }

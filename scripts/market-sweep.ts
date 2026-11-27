@@ -74,6 +74,12 @@ async function main() {
       say(`run ${o.run} has no known machine id; left open`);
       continue;
     }
+    // A machine paid for by another wallet (a visitor's Ethereum wallet, or the other agent wallet) answers only
+    // to that wallet. This wallet would be told "not found", which must not be read as "destroyed".
+    if (o.agent && o.agent !== payer.address) {
+      say(`run ${o.run}: machine ${o.instance} belongs to the wallet ${o.agent}, not this one; left open`);
+      continue;
+    }
     try {
       if (!gone.has(o.instance)) await seller.destroy(o.instance);
       const after = await seller.instance(o.instance);

@@ -2,7 +2,7 @@ import { publicReal, type Visitor } from "../market/access";
 import type { OpenPurchase } from "../market/journal";
 import { visibleOpenPurchases } from "../market/recover";
 import type { MarketRunView } from "../market/run";
-import { marketJournal, walletReady } from "../market/session";
+import { baseReady, marketJournal, walletReady } from "../market/session";
 import type { LogLine } from "./log";
 import type { Runtime } from "./runtime";
 import type { DemoSession } from "./script";
@@ -21,6 +21,8 @@ export type Snapshot = {
   /** journal purchases that were paid and not released; the current run is left out only while it is still going */
   openPurchases: OpenPurchase[];
   walletReady: { test: boolean; real: boolean };
+  /** whether a rental can be paid from an Ethereum wallet, on Base, in each market */
+  baseReady: { test: boolean; real: boolean };
   /** true when the owner has opened the real market to public visitors (who pay from their own wallets) */
   publicReal: boolean;
 };
@@ -71,6 +73,7 @@ export function snapshot(rt: Runtime, s: DemoSession | null, kind: "owner" | "pu
     market: market && kind === "public" ? publicView(market) : market,
     openPurchases,
     walletReady: kind === "owner" ? ready : { test: ready.test, real: ready.real && publicReal() },
+    baseReady: kind === "owner" ? baseReady() : { test: baseReady().test, real: publicReal() },
     publicReal: publicReal(),
   };
 }
