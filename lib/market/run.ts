@@ -182,10 +182,12 @@ export function tieNote(sorted: Quote[]): string | null {
   if (tied.length < 2) return null;
   const count = tied.length === 2 ? "Two plans" : tied.length === 3 ? "Three plans" : `${tied.length} plans`;
   const a = first.candidate.offer;
-  const b = tied[1].candidate.offer;
-  // only the plan name told them apart: say so instead of calling one stronger
-  const equal = betterMachine({ ...a, id: "" }, { ...b, id: "" }) === 0;
-  return `${count} quoted the same ${usdExact(first.atomic)}. The agent took ${a.id}${equal ? "; on paper they are the same machine" : ", the strongest machine at that price"}.`;
+  // set the plan names aside: a name is how ties are settled, not a reason one machine is stronger
+  const apart = (x: Quote) => betterMachine({ ...a, id: "" }, { ...x.candidate.offer, id: "" }) !== 0;
+  const beatsNext = apart(tied[1]);
+  const beatsSome = tied.some(apart);
+  const why = beatsNext ? ", the strongest machine at that price" : beatsSome ? ", one of the strongest machines at that price" : "; on paper they are the same machine";
+  return `${count} quoted the same ${usdExact(first.atomic)}. The agent took ${a.id}${why}.`;
 }
 
 /** Why a chooser left a plan out, in words. */

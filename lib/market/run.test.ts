@@ -234,6 +234,9 @@ describe("which quote the agent takes", () => {
     expect(tieNote([vhf, vc2, dear].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vhf-1c-1gb, the strongest machine at that price.");
     const twin = quoteOf("10000", { id: "vc2-1c-1gb-b", listHourlyUsd: 0.0069 });
     expect(tieNote([vc2, twin].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vc2-1c-1gb; on paper they are the same machine.");
+    // what the real seller quoted: two equally strong plans and a weaker one, all at one cent
+    const amd = quoteOf("10000", { id: "vhp-1c-1gb-amd", listHourlyUsd: 0.0083 });
+    expect(tieNote([vc2, amd, vhf].sort(cheapestThenBest))).toBe("Three plans quoted the same $0.0100. The agent took vhf-1c-1gb, one of the strongest machines at that price.");
     expect(tieNote([])).toBeNull();
     expect(tieNote([vc2])).toBeNull();
   });
