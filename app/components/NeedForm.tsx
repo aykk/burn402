@@ -292,7 +292,10 @@ export function NeedForm(props: {
   const ownWallet = payFrom === "wallet" || publicReal;
   // Paying from your own wallet needs it connected; comparing prices does not.
   const needsWallet = ownWallet && !wallet.connected;
-  const key = sshKey.trim();
+  // The key is for logging in to a real machine. The test market's machines are simulated, so the box is
+  // not shown there and nothing typed earlier is sent.
+  const wantsKey = ownWallet && market === "real";
+  const key = wantsKey ? sshKey.trim() : "";
   const keyBad = key !== "" && !SSH_KEY_RE.test(key);
   // A visitor's real machine is set up with their key and nobody else's: without one they could not log in.
   const needsKey = publicReal && key === "";
@@ -326,7 +329,7 @@ export function NeedForm(props: {
       rateUsdHr: rate,
       askBeforePaying: asks,
       wallet: ownWallet ? (wallet.connected?.address ?? null) : null,
-      sshPublicKey: ownWallet && key !== "" ? key : null,
+      sshPublicKey: key !== "" ? key : null,
     });
     setStartError(failed);
     setStarting(false);
@@ -428,7 +431,7 @@ export function NeedForm(props: {
           />
           {publicReal && <p className="text-foreground">On the real market you pay from your own wallet.</p>}
           {ownWallet && <WalletConnect id="pay-from-wallet" disabled={disabled} />}
-          {ownWallet && (
+          {wantsKey && (
             <div className="space-y-1.5 pt-1">
               <Label help="sshKey" htmlFor="ssh-key-input">
                 Your SSH public key
@@ -448,11 +451,7 @@ export function NeedForm(props: {
                 onChange={(e) => setSshKey(e.target.value)}
               />
               <p id="ssh-key-note" className="text-[12px] leading-4 text-muted">
-                {publicDemo
-                  ? market === "real"
-                    ? "Needed: the machine is set up with this key, so only you can log in."
-                    : "You can skip this on the test market. There is no real machine to log in to."
-                  : "Optional. Leave it empty and the app makes a key on this computer."}
+                {publicDemo ? "Needed: the machine is set up with this key, so only you can log in." : "Optional. Leave it empty and the app makes a key on this computer."}
               </p>
             </div>
           )}
