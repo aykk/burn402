@@ -25,6 +25,12 @@ for arg in "$@"; do
     *) echo "unknown option: $arg (the only option is --real)"; exit 1 ;;
   esac
 done
+# Visitors' real rentals are signed by an agent key of their own, never by yours: without one, --real is refused.
+if [ "$PUBLIC_REAL" = "1" ] && ! grep -Eq '^PUBLIC_MAINNET_SOLANA_SECRET_KEY=.{32,}' .env.local 2>/dev/null; then
+  echo "--real needs PUBLIC_MAINNET_SOLANA_SECRET_KEY in .env.local: a separate agent wallet for visitors (see env.example)."
+  echo "Without it, strangers' machines would be rented under your own wallet. Nothing was started."
+  exit 1
+fi
 
 command -v cloudflared >/dev/null || { echo "cloudflared is not installed: brew install cloudflared"; exit 1; }
 
@@ -139,17 +145,24 @@ fi
 
 # caffeinate keeps the Mac awake while the site is up
 # The owner key: while the site is public, a request counts as yours only if it carries this key. Looking
-# local is not enough (a proxy can make anyone look local). It is made fresh for every start, kept in a file
-# only you can read (scripts use it), and handed to your browser by the link below.
+# local is not enough (a proxy can make anyone look local). It is made fresh for every start and kept in a
+# file only you can read (scripts use it). Your browser gets it from the link below, which carries a
+# one-time code, not the key: the link works once and is worth nothing afterwards.
 OWNER_TOKEN="$(openssl rand -hex 32)"
+OWNER_ENTRY="$(openssl rand -hex 32)"
 OWNER_FILE=.burn402/owner-token
 ( umask 077; printf '%s\n' "$OWNER_TOKEN" > "$OWNER_FILE" )
-OWNER_LINK="http://127.0.0.1:3000/api/owner?token=$OWNER_TOKEN"
-echo "  Your own page opens by itself in a moment. If it does not, open this link (it carries your owner key):"
+OWNER_LINK="http://127.0.0.1:3000/api/owner?token=$OWNER_ENTRY"
+echo "  Your own page opens by itself in a moment. If it does not, open this link once (it gives this browser your owner key):"
 echo "  $OWNER_LINK"
+echo "  For another browser, or after clearing cookies: run npm run public again (the public address stays the same)."
 echo
-# opens once the app answers; the app itself replaces this shell just below
-( for _ in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:3000/ && break; sleep 1; done; open "$OWNER_LINK" >/dev/null 2>&1 ) &
+# Opens once this app answers, and only then: if the app failed to start, the link is not sent to whatever else
+# may be listening. The app itself replaces this shell just below.
+( for _ in $(seq 1 90); do
+    if curl -s -o /dev/null --max-time 2 http://127.0.0.1:3000/api/demo/state; then open "$OWNER_LINK" >/dev/null 2>&1; break; fi
+    sleep 1
+  done ) &
 
 # session cookies are signed with a key made fresh for this launch (sessions live in memory, so nothing is lost)
-BURN402_OWNER_TOKEN="$OWNER_TOKEN" BURN402_PUBLIC_REAL="$PUBLIC_REAL" BURN402_SESSION_SECRET="$(openssl rand -hex 32)" BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1
+BURN402_OWNER_TOKEN="$OWNER_TOKEN" BURN402_OWNER_ENTRY="$OWNER_ENTRY" BURN402_PUBLIC_REAL="$PUBLIC_REAL" BURN402_SESSION_SECRET="$(openssl rand -hex 32)" BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1

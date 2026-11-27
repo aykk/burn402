@@ -31,7 +31,8 @@ export type Audience = "owner" | "public";
  */
 export function secretFor(market: MarketId, env: Env = process.env, audience: Audience = "owner"): string | null {
   if (market !== "real") return env.AGENT_SOLANA_SECRET_KEY || null;
-  if (audience === "public" && env.PUBLIC_MAINNET_SOLANA_SECRET_KEY) return env.PUBLIC_MAINNET_SOLANA_SECRET_KEY;
+  // no falling back to the owner's key: a stranger's real rental is signed by the visitors' key or not at all
+  if (audience === "public") return env.PUBLIC_MAINNET_SOLANA_SECRET_KEY || null;
   return env.MAINNET_SOLANA_SECRET_KEY || env.AGENT_SOLANA_SECRET_KEY || null;
 }
 
@@ -159,13 +160,19 @@ export type RunInput = {
 };
 
 /** One line of an OpenSSH public key: a key type this app knows, the key, and an optional short comment. */
-const SSH_PUBLIC_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]{60,1100}={0,2}( [\x20-\x7e]{0,80})?$/;
+const SSH_PUBLIC_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) ([A-Za-z0-9+/]{60,1100}={0,2})( [\x20-\x7e]{0,80})?$/;
 
-/** The key as it will be handed to the seller (trimmed), or null when it is not a public key line. A private key never passes. */
+/**
+ * The key as it will be handed to the seller, or null when it is not a public key line. A private key
+ * never passes. Only the type and the key itself go on: the comment is the renter's free text, and how the
+ * seller writes the line into a machine is not ours to know, so it is dropped.
+ */
 export function sshPublicKeyOf(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const line = v.trim();
-  return line.length <= 1300 && SSH_PUBLIC_KEY_RE.test(line) ? line : null;
+  if (line.length > 1300) return null;
+  const m = SSH_PUBLIC_KEY_RE.exec(line);
+  return m ? `${m[1]} ${m[2]}` : null;
 }
 
 type Obj = Record<string, unknown>;
@@ -374,7 +381,8 @@ export async function priceComparison(
   const seller = deps.seller ?? new SellerClient(SELLERS[input.market], { signer: null, timeouts: { read: timeoutMs, paid: timeoutMs } });
   const [market, catalog] = await Promise.all([
     (deps.prices ?? marketPricesFeed)().catch((): MarketPrices => ({ prices: [], sources: [], asOf: Date.now() })),
-    within(Promise.resolve().then(() => seller.catalog()), timeoutMs).catch(() => null),
+    // the price list is read at most once a minute for everyone (a seller handed in by a test is asked directly)
+    within(deps.seller ? Promise.resolve().then(() => seller.catalog()) : cachedCatalog(input.market).then((c) => c.catalog), timeoutMs).catch(() => null),
   ]);
   const top = catalog ? choose(catalog.offers, input.need, input.limits ?? COMPARE_LIMITS, catalog.rules).ranked.find((c) => !c.offer.spot && c.offer.rentable) : undefined;
   const buyable =

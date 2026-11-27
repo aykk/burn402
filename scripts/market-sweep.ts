@@ -4,7 +4,7 @@ import { marketJournal, payerFor, sellerFor } from "../lib/market/session";
 import type { MarketId } from "../lib/market/types";
 
 /**
- * npm run market:sweep -- --market test|real [--yes-destroy]
+ * npm run market:sweep -- --market test|real [--audience owner|public] [--yes-destroy]
  * Lists every machine the market's wallet owns and the journal's open purchases, then destroys
  * them: always on the test market, on the real market only with --yes-destroy. Prints ids,
  * plans, regions and statuses; never keys.
@@ -19,22 +19,28 @@ try {
 
 const say = (line: string) => process.stdout.write(`${line}\n`);
 
-function args(argv: string[]): { market: MarketId; destroy: boolean } {
+function args(argv: string[]): { market: MarketId; destroy: boolean; audience: "owner" | "public" } {
+  const usage = "usage: npm run market:sweep -- --market test|real [--audience owner|public] [--yes-destroy]";
   const at = argv.indexOf("--market");
   const market = at >= 0 ? argv[at + 1] : undefined;
-  if (market !== "test" && market !== "real") throw new Error("usage: npm run market:sweep -- --market test|real [--yes-destroy]");
-  return { market, destroy: market === "test" || argv.includes("--yes-destroy") };
+  if (market !== "test" && market !== "real") throw new Error(usage);
+  const au = argv.indexOf("--audience");
+  const audience = au >= 0 ? argv[au + 1] : "owner";
+  if (audience !== "owner" && audience !== "public") throw new Error(usage);
+  // --audience public: the agent wallet that signs for public visitors' real rentals. Their machines are theirs,
+  // paid for from their own wallets, so they are only ever listed here, never destroyed in bulk.
+  return { market, audience, destroy: audience === "owner" && (market === "test" || argv.includes("--yes-destroy")) };
 }
 
 async function main() {
   const file = join(process.cwd(), ".env.local");
   if (existsSync(file)) process.loadEnvFile(file);
-  const { market, destroy } = args(process.argv.slice(2));
-  const payer = await payerFor(market);
-  if (!payer) throw new Error(`no wallet key is set for the ${market} market`);
+  const { market, destroy, audience } = args(process.argv.slice(2));
+  const payer = await payerFor(market, audience);
+  if (!payer) throw new Error(audience === "public" ? "no agent key is set for public visitors on this market (PUBLIC_MAINNET_SOLANA_SECRET_KEY)" : `no wallet key is set for the ${market} market`);
   const seller = sellerFor(market, payer);
   const journal = marketJournal();
-  say(`${seller.config.label}, wallet ${payer.address}`);
+  say(`${seller.config.label}, ${audience === "public" ? "visitors' agent wallet" : "wallet"} ${payer.address}`);
 
   const instances = await seller.instances();
   const live = instances.filter((i) => i.status !== "destroyed");
@@ -46,7 +52,8 @@ async function main() {
   for (const o of open) say(`  run ${o.run}  ${o.plan}  ${o.region}  ${o.state}  machine ${o.instance ?? "unknown"}${o.tx ? `  tx ${o.tx}` : ""}`);
 
   if (!destroy) {
-    if (live.length > 0 || open.length > 0) say("nothing destroyed: on the real market add --yes-destroy to destroy these");
+    if (audience === "public") say("listed only: visitors' machines are theirs and are never destroyed from here");
+    else if (live.length > 0 || open.length > 0) say("nothing destroyed: on the real market add --yes-destroy to destroy these");
     return;
   }
 
