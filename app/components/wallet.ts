@@ -96,14 +96,32 @@ function add(w: unknown) {
     // a wallet without change events still works; the address is checked again when it signs
   }
   // the wallet used last time connects again without a prompt, if it still trusts this site
-  if (remembered() === w.name && !state.connected) {
-    void feature<ConnectFeature>(w, "standard:connect")
-      ?.connect({ silent: true })
-      .then((r) => {
-        if (!state.connected) adopt(w, r.accounts);
-      })
-      .catch(() => {});
-  }
+  if (remembered() === w.name) void reconnectQuietly();
+}
+
+let reconnecting: Promise<void> | null = null;
+
+/**
+ * Connects again to the wallet used last, without a prompt. A wallet drops its connection whenever it
+ * locks or its owner looks at another account, and says nothing when it is unlocked again; so this is
+ * tried when the wallet is found, when the visitor comes back to the page, and before a signature is
+ * asked for. A wallet that is locked or no longer trusts the site simply stays disconnected.
+ */
+function reconnectQuietly(): Promise<void> {
+  const name = remembered();
+  const w = name ? found.get(name) : undefined;
+  const connect = w && feature<ConnectFeature>(w, "standard:connect");
+  if (!w || !connect || state.connected || state.connecting) return Promise.resolve();
+  reconnecting ??= connect
+    .connect({ silent: true })
+    .then((r) => {
+      if (!state.connected) adopt(w, r.accounts);
+    })
+    .catch(() => {})
+    .finally(() => {
+      reconnecting = null;
+    });
+  return reconnecting;
 }
 
 function start() {
@@ -123,6 +141,11 @@ function start() {
     });
     // ...and wallets already loaded are waiting for this one
     window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: api }));
+    // back from the wallet's window (unlocking it, a swap, switching account): pick the connection up again
+    window.addEventListener("focus", () => void reconnectQuietly());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void reconnectQuietly();
+    });
   } catch {
     // no wallets: the page says so
   }
@@ -196,6 +219,8 @@ const CHAIN_NAME: Record<WalletChain, string> = { "solana:devnet": "Solana devne
  * account is refused before the wallet is asked.
  */
 export async function signWithWallet(transactionBase64: string, chain: WalletChain, address: string): Promise<{ ok: true; signed: string } | { ok: false; error: string }> {
+  // the wallet may have dropped the connection since the page last looked
+  if (!state.connected) await reconnectQuietly();
   const w = state.connected ? found.get(state.connected.wallet) : undefined;
   const sign = w && feature<SignFeature>(w, "solana:signTransaction");
   if (!w || !sign || !account) return { ok: false, error: "Connect your wallet first." };
