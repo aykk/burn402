@@ -42,7 +42,7 @@ The agent's wallet, not yours, signs the payment and so owns the machine. That i
 
 A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run.
 
-**Proven so far:** the approval, its checks and the payment built from it are covered by unit tests, and the flow runs in the browser up to the wallet's signature. **Not proven yet:** a payment made this way settling through the hosted facilitator, on devnet or mainnet. To try it for free: turn on Testnet Mode in Phantom, get devnet SOL from [faucet.solana.com](https://faucet.solana.com) and devnet USDC from [faucet.circle.com](https://faucet.circle.com), and rent on the test market with **My wallet**.
+**Proven:** on devnet, end to end, with a stand-in wallet signing as a browser wallet would (`npm run wallet:test`). The payment settled through the hosted facilitator, signed by the agent and the facilitator's fee payer only; the stand-in wallet's balance fell by exactly the quote, the seller's rose by the same, the approval was used up, and the machine came up and was destroyed. **Not proven yet:** Phantom itself signing the approval, and the real seller accepting a payment made this way on mainnet (about one cent of real USDC). To try Phantom for free: turn on Testnet Mode, get devnet SOL from [faucet.solana.com](https://faucet.solana.com) and devnet USDC from [faucet.circle.com](https://faucet.circle.com), and rent on the test market with **My wallet**.
 
 ## Records
 
@@ -67,7 +67,7 @@ npm run dev                        # http://127.0.0.1:3000
 
 `npm run demo` does the ANS, registration and dev-server steps in one go.
 
-`npm test` runs the unit suite. `npm run test:live` checks ANS, Arweave and the real seller with free calls only (no payment). `npm run market:sweep -- --market test|real` lists, and on the test market destroys, every machine your wallet owns.
+`npm test` runs the unit suite. `npm run wallet:test` pays for a test-market rental from a stand-in wallet on devnet, through the running app (the stand-in wallet in `.burn402/keys/standin-wallet.json` needs 0.005 devnet SOL). `npm run test:live` checks ANS, Arweave and the real seller with free calls only (no payment). `npm run market:sweep -- --market test|real` lists, and on the test market destroys, every machine your wallet owns.
 
 By default the app only answers on `127.0.0.1:3000` and `localhost:3000`.
 
