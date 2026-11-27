@@ -13,6 +13,7 @@ import { MarketPrices } from "@/app/components/MarketPrices";
 import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
 import { MARKET_NAME, hoursText, panelBody } from "@/app/components/market-copy";
 import { OpenPurchases } from "@/app/components/OpenPurchases";
+import { PlanPreview, type PreviewState } from "@/app/components/PlanPreview";
 import { BTN } from "@/app/components/ui";
 import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/components/ActionError";
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
@@ -45,6 +46,33 @@ export default function Page() {
   const compareAbort = useRef<AbortController | null>(null);
   // Bumped when the comparison is closed: the form moves focus to Compare prices once it is enabled again.
   const [compareClosed, setCompareClosed] = useState(0);
+
+  // The plans that fit the form's filters, listed while there is no run and refreshed as the filters change.
+  const [want, setWant] = useState<CompareBody | null>(null);
+  const [preview, setPreview] = useState<PreviewState>({ status: "loading", preview: null, need: null });
+  const wantKey = want ? JSON.stringify(want) : null;
+  const idle = snap !== null && snap.market === null;
+  useEffect(() => {
+    if (!idle || !wantKey) return;
+    const body = JSON.parse(wantKey) as CompareBody;
+    const abort = new AbortController();
+    // typing in a number field changes the filters on every key: wait for a pause, then read once
+    const timer = setTimeout(async () => {
+      setPreview((p) => ({ ...p, status: "loading" }));
+      try {
+        const res = await fetch("/api/market/plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: wantKey, signal: abort.signal });
+        const json = (await res.json()) as { preview?: PreviewState["preview"]; error?: string };
+        if (!res.ok || !json.preview) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setPreview({ status: "ready", preview: json.preview, need: body.need });
+      } catch {
+        if (!abort.signal.aborted) setPreview((p) => ({ ...p, status: "failed" }));
+      }
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [idle, wantKey]);
 
   const load = useCallback(async () => {
     let res: Response;
@@ -297,6 +325,7 @@ export default function Page() {
             }}
             onCompare={comparePrices}
             compareClosed={compareClosed}
+            onNeedChange={setWant}
           />
         </div>
 
@@ -313,6 +342,7 @@ export default function Page() {
             walletReady={snap?.walletReady ?? { test: false, real: false }}
             post={post}
             send={send}
+            preview={want ? <PlanPreview state={preview} /> : null}
             compare={
               compare && (
                 <MarketPrices

@@ -157,9 +157,11 @@ export function NeedForm(props: {
   onCompare: (body: CompareBody) => Promise<string | null>;
   /** Bumped when the comparison is closed: focus goes to Compare prices once it is enabled, else to the heading. */
   compareClosed?: number;
+  /** What the form asks for right now, each time it changes; null while a field holds a value the form would refuse. */
+  onNeedChange?: (body: CompareBody | null) => void;
   /** Opens the model picker in the header, where the key is added. */
 }) {
-  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, compareClosed = 0 } = props;
+  const { snap, run, collapsed, running, resetSignal, onDraftChange, onStart, onCompare, compareClosed = 0, onNeedChange } = props;
   const [market, setMarket] = useState<MarketId>("test");
   const [kind, setKind] = useState<"cpu" | "gpu">("cpu");
   const [vcpus, setVcpus] = useState(1);
@@ -210,6 +212,16 @@ export function NeedForm(props: {
     if (valid) lastValid.current = valid;
     onDraftChange({ ...lastValid.current, valid: valid !== null });
   }, [budget, rate, onDraftChange]);
+
+  // The page lists the plans that fit as the filters change: it is told the current need, or null while the form is not valid.
+  useEffect(() => {
+    if (!onNeedChange) return;
+    const regionList = parseRegions(regions);
+    const ok =
+      Number.isInteger(vcpus) && inRange(vcpus, 1, 64) && inRange(ramGb, 0.5, 512) && (kind !== "gpu" || inRange(vramGb, 0, 200)) && inRange(hours, 1 / 60, 72) &&
+      regionList.length <= 10 && regionList.every((x) => REGION_RE.test(x)) && inRange(budget, 0.01, 20) && inRange(rate, 0.001, Math.min(budget, 20));
+    onNeedChange(ok ? { market, need: { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: regionList, allowSpot }, budgetUsd: budget, rateUsdHr: rate } : null);
+  }, [onNeedChange, market, kind, vcpus, ramGb, vramGb, hours, regions, budget, rate, allowSpot]);
 
   // A public visitor gets the test market only.
   const publicDemo = snap?.visitor === "public";
