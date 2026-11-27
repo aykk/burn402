@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
-import { shortAddress } from "./market-copy";
+import { sentence, shortAddress } from "./market-copy";
 import { BTN } from "./ui";
 import { signWithWallet, type WalletChain } from "./wallet";
 
@@ -61,7 +61,7 @@ export function RevokeApproval({ run }: { run: MarketRunView }) {
         <span role="status" className={state.kind === "error" ? "min-w-0 text-bad" : "min-w-0 text-foreground"}>
           {state.kind === "none" && "Nothing is left approved for your agent."}
           {state.kind === "done" && "Revoked. Your agent can no longer move anything from your wallet."}
-          {state.kind === "error" && state.text}
+          {state.kind === "error" && sentence(state.text)}
         </span>
       </div>
     </section>
