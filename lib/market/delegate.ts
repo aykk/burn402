@@ -4,7 +4,7 @@ import type { PaymentRequirements, SchemeNetworkClient } from "@x402/core/types"
 import { toClientSvmSigner } from "@x402/svm";
 import { ExactSvmScheme } from "@x402/svm/exact/client";
 import { getSetComputeUnitLimitInstruction, setTransactionMessageComputeUnitPrice } from "@solana-program/compute-budget";
-import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getApproveCheckedInstruction, getTransferCheckedInstruction } from "@solana-program/token";
+import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getApproveCheckedInstruction, getRevokeInstruction, getTransferCheckedInstruction } from "@solana-program/token";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -55,6 +55,8 @@ const COMPUTE_UNIT_LIMIT = 20_000;
 const COMPUTE_UNIT_PRICE_MICROLAMPORTS = 1;
 /** SPL token instruction 13: ApproveChecked { amount: u64, decimals: u8 }. */
 const IX_APPROVE_CHECKED = 13;
+/** SPL token instruction 5: Revoke, no arguments. */
+const IX_REVOKE = 5;
 /** What an approval costs the wallet in network fee, with room to spare (a signature is 5,000 lamports). */
 const MIN_LAMPORTS = 10_000;
 const MAX_TX_BYTES = 1232;
@@ -189,53 +191,98 @@ export async function buildApproval(rpc: Rpc, ask: ApprovalAsk): Promise<string>
 
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
+type Refused = { ok: false; error: string };
+type Instr = { program: string; accounts: string[]; data: Uint8Array };
+
 /**
- * Checks what the wallet sent back before it is put on chain. The server relays this transaction, so it
- * must be exactly an approval and nothing else:
- *  - signed by the visitor's wallet, the only signer, which also pays the fee;
- *  - it calls only the token program (once: approve exactly `atomic` of the market's USDC, from the
- *    wallet's own account, to `delegate`), the memo program (this run's note), and what a wallet adds of
- *    its own, a priority fee and Phantom's safety checks. Any other program is refused: it could move
- *    the wallet's funds by another route.
+ * The checks every transaction a wallet sends back must pass before this server relays it: readable,
+ * signed by that wallet and by nobody else, the wallet pays the fee, and it calls nothing but the token
+ * program (exactly once), the memo program, and what a wallet adds of its own (a priority fee, Phantom's
+ * safety checks). Any other program is refused: it could move the wallet's funds by another route.
+ * Returns the one token instruction and the rest for the caller to hold to its own rule.
  */
-export function checkSignedApproval(signedBase64: string, ask: ApprovalAsk & { account: string }): { ok: true; wire: string } | { ok: false; error: string } {
-  const bad = (error: string) => ({ ok: false as const, error });
+function readWalletTransaction(signedBase64: string, owner: string): { ok: true; wire: string; token: Instr; others: Instr[] } | Refused {
+  const bad = (error: string): Refused => ({ ok: false, error });
   if (typeof signedBase64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(signedBase64)) return bad("the signed transaction is not base64");
   const bytes = new Uint8Array(Buffer.from(signedBase64, "base64"));
   if (bytes.length === 0 || bytes.length > MAX_TX_BYTES) return bad("the signed transaction has an impossible size");
   try {
     const tx = getTransactionDecoder().decode(bytes);
-    const signature = (tx.signatures as Record<string, Uint8Array | null>)[ask.owner];
+    const signature = (tx.signatures as Record<string, Uint8Array | null>)[owner];
     if (!signature) return bad("the transaction is not signed by your wallet");
-    if (!verifyEd25519(base58Decode(ask.owner), tx.messageBytes as unknown as Uint8Array, signature)) return bad("your wallet's signature on the transaction is not valid");
+    if (!verifyEd25519(base58Decode(owner), tx.messageBytes as unknown as Uint8Array, signature)) return bad("your wallet's signature on the transaction is not valid");
 
     const message = getCompiledTransactionMessageDecoder().decode(tx.messageBytes);
     if (message.version !== "legacy" && message.version !== 0) return bad("the transaction is in a format this app does not read");
     if ("addressTableLookups" in message && Array.isArray(message.addressTableLookups) && message.addressTableLookups.length > 0) return bad("the transaction uses lookup tables, which this app does not read");
     const keys = message.staticAccounts.map(String);
-    if (keys[0] !== ask.owner) return bad("your wallet must pay the approval's network fee");
-    if (message.header.numSignerAccounts !== 1) return bad("the approval must be signed by your wallet alone");
-    if (message.instructions.length > MAX_APPROVAL_INSTRUCTIONS) return bad("the transaction holds more instructions than an approval needs");
-    if (!message.instructions.every((i) => APPROVAL_PROGRAMS.has(keys[i.programAddressIndex]))) return bad("the transaction does something besides the approval");
-
-    const token = message.instructions.filter((ix) => keys[ix.programAddressIndex] === TOKEN_PROGRAM_ADDRESS);
-    if (token.length !== 1) return bad("the transaction must hold exactly one token instruction, the approval");
-    const ix = token[0];
-    const data = ix.data ? new Uint8Array(ix.data) : new Uint8Array();
-    const accounts = (ix.accountIndices ?? []).map((i) => keys[i]);
-    if (data.length !== 10 || data[0] !== IX_APPROVE_CHECKED) return bad("the token instruction is not an approval");
-    const amount = new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(1, true);
-    if (amount !== ask.atomic || data[9] !== USDC_DECIMALS) return bad("the approval is not for the quoted amount");
-    if (accounts.length !== 4 || accounts[0] !== ask.account || accounts[1] !== NETWORKS[ask.market].usdc || accounts[2] !== ask.delegate || accounts[3] !== ask.owner) {
-      return bad("the approval does not name your USDC account and this run's agent");
-    }
-    const memo = new TextEncoder().encode(ask.memo);
-    const noted = message.instructions.some((m) => keys[m.programAddressIndex] === MEMO_PROGRAM && m.data !== undefined && same(new Uint8Array(m.data), memo));
-    if (!noted) return bad("the approval was not made for this run");
-    return { ok: true, wire: Buffer.from(bytes).toString("base64") };
+    if (keys[0] !== owner) return bad("your wallet must pay the transaction's network fee");
+    if (message.header.numSignerAccounts !== 1) return bad("the transaction must be signed by your wallet alone");
+    if (message.instructions.length > MAX_APPROVAL_INSTRUCTIONS) return bad("the transaction holds more instructions than it needs");
+    const all: Instr[] = message.instructions.map((i) => ({ program: keys[i.programAddressIndex], accounts: (i.accountIndices ?? []).map((n) => keys[n]), data: i.data ? new Uint8Array(i.data) : new Uint8Array() }));
+    if (!all.every((i) => APPROVAL_PROGRAMS.has(i.program))) return bad("the transaction does something besides what was asked");
+    const token = all.filter((i) => i.program === TOKEN_PROGRAM_ADDRESS);
+    if (token.length !== 1) return bad("the transaction must hold exactly one token instruction");
+    return { ok: true, wire: Buffer.from(bytes).toString("base64"), token: token[0], others: all.filter((i) => i !== token[0]) };
   } catch {
     return bad("the signed transaction could not be read");
   }
+}
+
+/**
+ * Checks the approval the wallet sent back before it is put on chain. On top of the checks every relayed
+ * transaction passes, its one token instruction must approve exactly `atomic` of the market's USDC, from
+ * the wallet's own account, to `delegate`, and it must carry this run's note.
+ */
+export function checkSignedApproval(signedBase64: string, ask: ApprovalAsk & { account: string }): { ok: true; wire: string } | Refused {
+  const tx = readWalletTransaction(signedBase64, ask.owner);
+  if (!tx.ok) return tx;
+  const bad = (error: string): Refused => ({ ok: false, error });
+  const { data, accounts } = tx.token;
+  if (data.length !== 10 || data[0] !== IX_APPROVE_CHECKED) return bad("the token instruction is not an approval");
+  const amount = new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(1, true);
+  if (amount !== ask.atomic || data[9] !== USDC_DECIMALS) return bad("the approval is not for the quoted amount");
+  if (accounts.length !== 4 || accounts[0] !== ask.account || accounts[1] !== NETWORKS[ask.market].usdc || accounts[2] !== ask.delegate || accounts[3] !== ask.owner) {
+    return bad("the approval does not name your USDC account and this run's agent");
+  }
+  const memo = new TextEncoder().encode(ask.memo);
+  if (!tx.others.some((m) => m.program === MEMO_PROGRAM && same(m.data, memo))) return bad("the approval was not made for this run");
+  return { ok: true, wire: tx.wire };
+}
+
+/**
+ * The transaction that takes back whatever the wallet still lets `delegate` move: an SPL Revoke on the
+ * wallet's USDC account. Null when nothing is left approved for that delegate, so there is nothing to sign.
+ */
+export async function buildRevoke(rpc: Rpc, ask: { market: MarketId; owner: string; delegate: string }): Promise<{ transaction: string; atomic: bigint } | null> {
+  const net = NETWORKS[ask.market];
+  const funds = await walletFunds(rpc, ask.market, ask.owner);
+  if (!funds.exists || funds.delegate !== ask.delegate || funds.delegated <= BigInt(0)) return null;
+  const balance = await rpc("getBalance", [ask.owner, { commitment: "confirmed" }]);
+  const lamports = isObj(balance) && typeof balance.value === "number" ? balance.value : 0;
+  if (lamports < MIN_LAMPORTS) throw new WalletError(`Your wallet needs a little SOL on ${net.label} to pay the network fee (well under a cent).`);
+  const latest = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const lv = isObj(latest) && isObj(latest.value) ? latest.value : null;
+  if (!lv || typeof lv.blockhash !== "string" || typeof lv.lastValidBlockHeight !== "number") throw new Error(`${net.label} did not give a recent blockhash`);
+  const owner = address(ask.owner);
+  const revoke = getRevokeInstruction({ source: address(funds.account), owner: createNoopSigner(owner) });
+  const message = pipe(
+    createTransactionMessage({ version: "legacy" }),
+    (m) => setTransactionMessageFeePayer(owner, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash: lv.blockhash as Blockhash, lastValidBlockHeight: BigInt(lv.lastValidBlockHeight as number) }, m),
+    (m) => appendTransactionMessageInstructions([revoke], m),
+  );
+  return { transaction: getBase64EncodedWireTransaction(compileTransaction(message)), atomic: funds.delegated };
+}
+
+/** Checks a signed revoke before it is relayed: its one token instruction takes back the approval on the wallet's own USDC account. */
+export function checkSignedRevoke(signedBase64: string, ask: { owner: string; account: string }): { ok: true; wire: string } | Refused {
+  const tx = readWalletTransaction(signedBase64, ask.owner);
+  if (!tx.ok) return tx;
+  const { data, accounts } = tx.token;
+  if (data.length !== 1 || data[0] !== IX_REVOKE) return { ok: false, error: "the token instruction is not a revoke" };
+  if (accounts.length !== 2 || accounts[0] !== ask.account || accounts[1] !== ask.owner) return { ok: false, error: "the revoke does not name your USDC account" };
+  return { ok: true, wire: tx.wire };
 }
 
 /** Puts a signed transaction on chain; resolves to its id. The node simulates it first and refuses one that would fail. */

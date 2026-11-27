@@ -11,7 +11,7 @@ The hackathon version negotiated with a Vultr agent and trained a model on the r
 You say what you need (CPU or GPU, vCPUs, memory, hours, regions) and set two limits: a **total budget** and an **hourly limit**.
 
 1. **Scan.** Your agent reads the seller's live price list and keeps the plans that fit your machine and your limits.
-2. **Choose.** It asks for firm quotes on the cheapest few, falls back to another plan or region when one is out of stock, and picks the lowest.
+2. **Choose.** It asks for firm quotes on the cheapest few, falls back to another plan or region when one is out of stock, and picks the lowest. When several plans quote exactly the same amount, it takes the best machine among them (more vCPUs, then more memory, then the stronger class) and says so.
 3. **Pay.** It stops to show you the exact payment (unless you turned that off), then pays over x402 in USDC on Solana.
 4. **Machine.** It shows the machine, its IP and the SSH command, and destroys it when the prepaid time runs out or when you press Destroy.
 
@@ -40,7 +40,7 @@ On the owner's page, **Pay from** can be switched from the agent's wallet to **M
 
 The agent's wallet, not yours, signs the payment and so owns the machine. That is on purpose: the seller asks the paying wallet for a fresh signature on every status check and on destroy, which a browser wallet could only answer with a popup each time.
 
-A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run.
+A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run. If a run ends without paying after your wallet approved, the page offers to check the chain and revoke the unused approval.
 
 **Proven on mainnet (2026-11-27):** a real rental paid from Phantom. Phantom signed the approval for exactly $0.01 USDC, the agent paid x402layer out of that wallet (transaction `2M8ScMfZcfGdZA8sULU7A6qXFZ7BvWrfCfWKGTZMpbKCD7ezi2PoBzJf1NTvnuZpetGGaPh5ZFKygLp1H7rhaiLs`, signed by the agent and the seller's fee payer only), the approval was used up, and a real Vultr machine came up with SSH open, managed by the agent. The same flow passes on devnet with a stand-in wallet (`npm run wallet:test`).
 

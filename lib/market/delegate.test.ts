@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { decodePaymentSignatureHeader } from "@x402/core/http";
-import { TOKEN_PROGRAM_ADDRESS, getApproveCheckedInstruction, getTransferCheckedInstruction } from "@solana-program/token";
+import { TOKEN_PROGRAM_ADDRESS, getApproveCheckedInstruction, getRevokeInstruction, getTransferCheckedInstruction } from "@solana-program/token";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -18,7 +18,7 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { base58Encode, verifyEd25519 } from "./auth";
-import { WalletError, approvalMemo, buildApproval, checkSignedApproval, isWalletAddress, makeDelegatePayer, usdcAccount, waitForAllowance, walletFunds, type ApprovalAsk, type Rpc } from "./delegate";
+import { WalletError, approvalMemo, buildApproval, buildRevoke, checkSignedApproval, checkSignedRevoke, isWalletAddress, makeDelegatePayer, usdcAccount, waitForAllowance, walletFunds, type ApprovalAsk, type Rpc } from "./delegate";
 import { payerSignatureOf } from "./pay";
 import { DEVNET_USDC } from "./testing";
 import { base58Decode } from "../x402/client";
@@ -214,7 +214,7 @@ describe("checkSignedApproval", () => {
     const token2022: Instruction = { programAddress: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), accounts: [], data: new Uint8Array([5]) };
     for (const extra of [solTransfer, unknown, token2022]) {
       const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), extra]), await expected());
-      expect(r).toEqual({ ok: false, error: "the transaction does something besides the approval" });
+      expect(r).toEqual({ ok: false, error: "the transaction does something besides what was asked" });
     }
   });
 
@@ -222,14 +222,14 @@ describe("checkSignedApproval", () => {
     // a memo that names another account as a signer makes the transaction need two signatures
     const cosigned: Instruction = { programAddress: address(MEMO_PROGRAM), accounts: [{ address: address(agent.address), role: 2 }], data: new TextEncoder().encode("x") };
     const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), cosigned]), await expected());
-    expect(r).toEqual({ ok: false, error: "the approval must be signed by your wallet alone" });
+    expect(r).toEqual({ ok: false, error: "the transaction must be signed by your wallet alone" });
   });
 
   it("refuses more instructions than an approval needs", async () => {
     const pad = Array.from({ length: 8 }, (_, i) => memoIx(`pad ${i}`));
     const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), ...pad]), await expected());
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("more instructions than an approval needs");
+    if (!r.ok) expect(r.error).toContain("more instructions than it needs");
   });
 
   it("refuses an unsigned transaction, one signed by someone else, and a changed one", async () => {
@@ -281,6 +281,61 @@ describe("checkSignedApproval", () => {
     expect(checkSignedApproval(Buffer.alloc(2000, 1).toString("base64"), e).ok).toBe(false);
     expect(checkSignedApproval(Buffer.from([1, 2, 3]).toString("base64"), e).ok).toBe(false);
     expect(checkSignedApproval(42 as never, e).ok).toBe(false);
+  });
+});
+
+describe("revoking a leftover approval", () => {
+  const leftover = () => node({ owner: visitor.address, account: { atomic: "5000000", delegate: agent.address, delegated: "10382" } });
+  const want = { market: "test" as const, owner: visitor.address, delegate: agent.address };
+  const expected = async () => ({ owner: visitor.address, account: await usdcAccount("test", visitor.address) });
+
+  it("builds a revoke for what is still approved to the agent, and the signed one is accepted", async () => {
+    const built = await buildRevoke(leftover(), want);
+    expect(built?.atomic).toBe(BigInt(10382));
+    const tx = getTransactionDecoder().decode(new Uint8Array(Buffer.from(built!.transaction, "base64")));
+    expect(Object.keys(tx.signatures)).toEqual([visitor.address]);
+    const message = getCompiledTransactionMessageDecoder().decode(tx.messageBytes);
+    if (message.version !== "legacy") throw new Error("expected a legacy transaction");
+    const keys = message.staticAccounts.map(String);
+    expect(message.instructions).toHaveLength(1);
+    expect(keys[message.instructions[0].programAddressIndex]).toBe(TOKEN_PROGRAM_ADDRESS);
+    expect(Array.from(new Uint8Array(message.instructions[0].data!))).toEqual([5]);
+    expect((message.instructions[0].accountIndices ?? []).map((i) => keys[i])).toEqual([await usdcAccount("test", visitor.address), visitor.address]);
+    const signed = signAs(visitor, built!.transaction);
+    expect(checkSignedRevoke(signed, await expected())).toEqual({ ok: true, wire: signed });
+  });
+
+  it("has nothing to build when nothing is approved, or the approval names someone else", async () => {
+    expect(await buildRevoke(funded(), want)).toBeNull();
+    expect(await buildRevoke(node({ owner: visitor.address, account: null }), want)).toBeNull();
+    expect(await buildRevoke(node({ owner: visitor.address, account: { atomic: "5", delegate: wallet().address, delegated: "99" } }), want)).toBeNull();
+    expect(await buildRevoke(node({ owner: visitor.address, account: { atomic: "5", delegate: agent.address, delegated: "0" } }), want)).toBeNull();
+    await expect(buildRevoke(node({ owner: visitor.address, account: { atomic: "5", delegate: agent.address, delegated: "9" }, lamports: 0 }), want)).rejects.toBeInstanceOf(WalletError);
+  });
+
+  it("refuses anything that is not a revoke of the wallet's own USDC account", async () => {
+    const e = await expected();
+    const mine = address(await usdcAccount("test", visitor.address));
+    const owner = createNoopSigner(address(visitor.address));
+    // an approval where a revoke was asked
+    const r1 = checkSignedRevoke(await custom([await approveIx(), memoIx(ask.memo)]), e);
+    expect(r1).toEqual({ ok: false, error: "the token instruction is not a revoke" });
+    // a transfer
+    const transfer = getTransferCheckedInstruction({ source: mine, mint: address(DEVNET_USDC), destination: address(await usdcAccount("test", agent.address)), authority: owner, amount: BigInt(1), decimals: 6 });
+    expect(checkSignedRevoke(await custom([transfer]), e).ok).toBe(false);
+    // a revoke on another account
+    const other = getRevokeInstruction({ source: address(await usdcAccount("test", agent.address)), owner });
+    expect(checkSignedRevoke(await custom([other]), e)).toEqual({ ok: false, error: "the revoke does not name your USDC account" });
+    // a revoke with something else riding along
+    const ok = getRevokeInstruction({ source: mine, owner });
+    const rider: Instruction = { programAddress: address("11111111111111111111111111111111"), accounts: [{ address: address(visitor.address), role: 3 }, { address: address(agent.address), role: 1 }], data: new Uint8Array([2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]) };
+    expect(checkSignedRevoke(await custom([ok, rider]), e)).toEqual({ ok: false, error: "the transaction does something besides what was asked" });
+    // unsigned
+    const built = await buildRevoke(leftover(), want);
+    expect(checkSignedRevoke(built!.transaction, e)).toEqual({ ok: false, error: "the transaction is not signed by your wallet" });
+    // a wallet's own priority fee is fine
+    const fee = { programAddress: address("ComputeBudget111111111111111111111111111111"), accounts: [], data: new Uint8Array([3, 1, 0, 0, 0, 0, 0, 0, 0]) };
+    expect(checkSignedRevoke(await custom([fee, ok]), e).ok).toBe(true);
   });
 });
 

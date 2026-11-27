@@ -2,6 +2,7 @@
 // End-to-end test of "pay from a connected wallet" on devnet, with a stand-in wallet in place of Phantom.
 // The stand-in wallet (.burn402/keys/standin-wallet.json, a throwaway devnet keypair) needs 0.005 devnet SOL from
 // https://faucet.solana.com. Usage, with the app running: npm run wallet:test [-- minutes to wait for the SOL]
+// Add `revoke` to test taking back an approval left unused: npm run wallet:test -- 0 revoke
 import { readFileSync } from "node:fs";
 import { createPrivateKey, sign } from "node:crypto";
 import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync, getTransferCheckedInstruction } from "@solana-program/token";
@@ -109,6 +110,34 @@ async function main() {
   const prepared = await app("/api/market/wallet", { run: run.id, code: run.approval.code });
   if (!prepared.transaction) throw new Error(`the approval was not prepared: ${prepared.error}`);
   say("approval transaction prepared for", prepared.wallet, "on", prepared.chain);
+
+  // "revoke" mode: the approval reaches the chain, the run ends without paying, and the wallet takes the approval back
+  if (process.argv.includes("revoke")) {
+    const sig = await rpc("sendTransaction", [walletSign(prepared.transaction), { encoding: "base64", preflightCommitment: "confirmed" }]);
+    await confirmed(sig);
+    say("approval on chain, left unused:", JSON.stringify(await usdc(visitor.address), (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+    const cancelled = await app("/api/market/destroy", { run: run.id, cancel: true });
+    say("run cancelled:", cancelled.status);
+    const early = await app("/api/market/wallet", { run: "nope", revoke: true });
+    say("wrong run is refused:", early.status, early.error);
+    const left = await app("/api/market/wallet", { run: run.id, revoke: true });
+    if (!left.transaction) throw new Error(`no revoke was offered: ${JSON.stringify(left)}`);
+    say("revoke offered for", left.exact, "on", left.chain);
+    const wrong = await app("/api/market/wallet", { run: run.id, revoke: true, signedTransaction: walletSign(prepared.transaction) });
+    say("an approval passed off as a revoke is refused:", wrong.status, wrong.error);
+    const sent = await app("/api/market/wallet", { run: run.id, revoke: true, signedTransaction: walletSign(left.transaction) });
+    if (sent.status !== 200) throw new Error(`the revoke was refused: ${sent.error}`);
+    let now = await usdc(visitor.address);
+    for (let i = 0; i < 20 && now?.delegate; i++) {
+      await sleep(1500);
+      now = await usdc(visitor.address);
+    }
+    say("after the revoke, approved to:", now?.delegate ?? "nobody");
+    const again = await app("/api/market/wallet", { run: run.id, revoke: true });
+    say("asking again:", JSON.stringify({ status: again.status, none: again.none }));
+    say(!now?.delegate && again.none === true && wrong.status === 400 ? "RESULT: PASS" : "RESULT: FAIL");
+    return;
+  }
   const before = await usdc(visitor.address);
   const approved = await app("/api/market/approve", { run: run.id, code: run.approval.code, signedTransaction: walletSign(prepared.transaction) });
   if (approved.status !== 200) throw new Error(`the approval was refused: ${approved.error}`);

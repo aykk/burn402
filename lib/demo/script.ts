@@ -2,7 +2,8 @@ import { signMandate, toCompact, type Mandate } from "../mandate";
 import { clusterForMarket, toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
-import { WalletError, approvalMemo, buildApproval, checkSignedApproval, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
+import { WalletError, approvalMemo, buildApproval, buildRevoke, checkSignedApproval, checkSignedRevoke, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
+import { usdExact } from "../market/money";
 import type { Payer } from "../market/pay";
 import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
@@ -190,6 +191,8 @@ export class DemoSession {
         const checked = checkSignedApproval(signedTransaction, { ...found.ask, account: await usdcAccount(found.ask.market, found.ask.owner) });
         if (!checked.ok) return { ok: false, error: `The approval was not accepted: ${checked.error}.` };
         let tx: string;
+        // from here the approval may reach the chain, even if the node's answer is lost
+        run.noteWalletApproval();
         try {
           tx = await sendSigned(rpcFor(found.ask.market), checked.wire);
         } catch (error) {
@@ -206,6 +209,47 @@ export class DemoSession {
     // the run stopped waiting while the wallet's approval was being sent (cancelled, or reset): say what is left behind
     if (found.ask) return { ok: false, error: "Your wallet's approval was sent, but the run was no longer waiting, so nothing was paid. The approval covers this amount only; your next approval replaces it, or revoke it in your wallet." };
     return result;
+  }
+
+  /** The wallet and agent of a wallet-funded run that is over: the only time an approval can be left unused. */
+  private endedWalletRun(runId: string): { ok: true; market: RunInput["market"]; owner: string; delegate: string } | { ok: false; error: string } {
+    const run = this.market;
+    if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    const payer = this.marketPayer;
+    if (!payer?.funds) return { ok: false, error: "this run was paid from the agent's wallet, not a connected one" };
+    if (!MARKET_ENDED.has(run.view().phase)) return { ok: false, error: "wait until the run is over" };
+    return { ok: true, market: run.view().market, owner: payer.funds, delegate: payer.address };
+  }
+
+  /**
+   * What the wallet of an ended wallet-funded run still lets the agent move, read from the chain, and the
+   * transaction that takes it back. `none` when nothing is left. Unsigned; nothing is sent here.
+   */
+  async walletRevoke(runId: string): Promise<{ ok: true; none: true } | { ok: true; none: false; transaction: string; chain: "solana:devnet" | "solana:mainnet"; wallet: string; exact: string } | { ok: false; error: string }> {
+    const found = this.endedWalletRun(runId);
+    if (!found.ok) return found;
+    try {
+      const built = await buildRevoke(rpcFor(found.market), found);
+      if (!built) return { ok: true, none: true };
+      return { ok: true, none: false, transaction: built.transaction, chain: found.market === "real" ? "solana:mainnet" : "solana:devnet", wallet: found.owner, exact: usdExact(built.atomic.toString()) };
+    } catch (error) {
+      return { ok: false, error: error instanceof WalletError ? error.message : `The approval could not be read: ${(error as Error).message}` };
+    }
+  }
+
+  /** Relays the revoke the wallet signed, after checking it is exactly that. */
+  async sendWalletRevoke(runId: string, signedTransaction: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const found = this.endedWalletRun(runId);
+    if (!found.ok) return found;
+    const checked = checkSignedRevoke(signedTransaction, { owner: found.owner, account: await usdcAccount(found.market, found.owner) });
+    if (!checked.ok) return { ok: false, error: `The revoke was not accepted: ${checked.error}.` };
+    try {
+      const tx = await sendSigned(rpcFor(found.market), checked.wire);
+      this.log.push("info", "MARKET", `run ${runId}: the connected wallet took back its unused approval (transaction ${tx})`);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: `The revoke was not confirmed as sent (${(error as Error).message}). Try again.` };
+    }
   }
 
   /** Destroys the current run's machine, cancels it at the approval stop, or destroys a machine recovered from the journal. */

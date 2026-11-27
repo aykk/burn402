@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
+import { RevokeApproval } from "./RevokeApproval";
 import { MachinePanel, type Send } from "./MachinePanel";
 import { MarketPrices } from "./MarketPrices";
 import { PHASE_HEADING, endState, fallbackLine, panelBody, sentence } from "./market-copy";
@@ -247,6 +248,9 @@ export function MarketPanel({
       )}
 
       <MachinePanel run={run} nowMs={nowMs} send={send} headingRef={machineHeadingRef} onFocusNext={setFocusNext} />
+
+      {/* A wallet-funded run that ended without a confirmed payment may have left an approval behind. */}
+      {run.wallet && run.walletApproved && run.spent !== "paid" && (run.phase === "failed" || run.phase === "refused" || run.phase === "released") && <RevokeApproval key={run.id} run={run} />}
 
       {/* An ended run that still needs the owner keeps Destroy now and its money message in view; the comparison goes under it. */}
       {body === "run+compare" && compare}
