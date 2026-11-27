@@ -285,3 +285,20 @@ Not changed: the agent still asks for at most three firm quotes (each takes the 
 - *Refunds:* none by this site. The money goes from the visitor's wallet to the seller; the approval stop says so before the visitor approves, and an unclear payment stays listed with its transaction.
 
 **Why `--real` is off by default.** The machines are rented under this app's agent identity at the seller, and a visitor has root on theirs. Opening that to strangers is the owner's decision each time the site is started. It also still runs from the owner's computer behind a quick tunnel, so a visitor's page goes away if the computer sleeps (the machine itself runs to the end of its paid time, and the visitor has its address and their own key).
+
+## Addendum 2026-11-27: second security review (the owner key and public wallet payments)
+
+An independent reviewer read everything after commit 02a986d. No Critical or High finding; with the real market closed to the public (the default) it judged the change safe to ship. What it found, and what was done:
+
+| # | Finding | Status |
+| --- | --- | --- |
+| A | With one agent wallet shared by the owner and visitors, the owner's run could adopt a visitor's machine after an unclear payment (an automated check raised this first). | Fixed: visitors' real rentals are signed by their own agent key; while the site is public nobody adopts or destroys by plan and region; the journal records which agent wallet paid and recovery uses that wallet. |
+| M1 | `--real` fell back to the owner's mainnet key when no key for visitors was set. | Fixed, fail closed: no fallback (`secretFor`), `publicReal()` is false without a distinct `PUBLIC_MAINNET_SOLANA_SECRET_KEY`, and the launcher refuses `--real` without it. |
+| L1 | "Wallet-funded and own SSH key" for a public real run was checked only in the route. | Fixed: `newMarketRun` refuses it too. |
+| L2 | The owner key failed open when set but too short, and on a hand-set public host with no key. | Fixed: a public site with no valid key has no owner at all. |
+| L3 | The owner link put the key in a URL (process list, scrollback, browser history) and was opened even if the app had not started. | Fixed: the link carries a one-time code that is exchanged for the key once; it is opened only after this app answers. Left as is: the cookie is sent to other servers on 127.0.0.1 (cookies ignore ports); they are the owner's own, and they cannot use it from another machine. |
+| L4 | The price comparison read the real seller's price list on every request. | Fixed: it uses the one-minute cache. |
+| L5 | The SSH key's free-text comment went to the seller verbatim. | Fixed: only the key type and the key are sent. |
+| L6 | `market:sweep` could not see machines on the visitors' agent wallet. | Fixed: `--audience public` lists them (never destroys them). |
+
+**What no code change removes.** With `--real`, strangers get root on real machines rented under an agent identity this app controls. The separate key keeps that away from the owner's own wallet and machines, but abuse still lands on that identity at the seller. It stays the owner's decision each time the site is started.

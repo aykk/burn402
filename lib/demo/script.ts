@@ -5,7 +5,7 @@ import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { WalletError, approvalMemo, buildApproval, buildRevoke, checkSignedApproval, checkSignedRevoke, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
 import { usdExact } from "../market/money";
 import type { Payer } from "../market/pay";
-import { publicHosts } from "../market/access";
+import { publicHosts, publicReal } from "../market/access";
 import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, payerOwning, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { DemoLog } from "./log";
@@ -114,7 +114,12 @@ export class DemoSession {
     const mandate = admitted.mandate.hash;
 
     // from a connected wallet, the agent's key still signs: it spends that wallet's USDC under the wallet's own approval
-    // a public visitor's rental is signed by the public agent key, where one is set, never by the owner's
+    // A stranger's real rental is paid from their own wallet and set up with their own key, or it does not start.
+    // The route checks this too; it is repeated here so no other way in can skip it.
+    if (this.kind === "public" && input.market === "real" && (!publicReal() || !input.wallet || !input.sshPublicKey)) {
+      throw new Error("a public visitor's real rental needs their own wallet and their own SSH key");
+    }
+    // a public visitor's rental is signed by the public agent key, never by the owner's
     const payer = input.wallet ? await delegatePayerFor(input.market, input.wallet, this.kind) : await payerFor(input.market, this.kind);
     const run = new MarketRun({
       id,
@@ -288,7 +293,7 @@ export class DemoSession {
     if (this.kind === "public" && !open.instance) return { ok: false, error: "This purchase has no machine on record. Dismiss it instead." };
     // the same holds for the owner while the site is public: the match could land on a visitor's machine
     if (!open.instance && sharedWallets()) {
-      return { ok: false, error: "This purchase has no machine on record, and while the site is public a machine is never picked by plan and region alone (it could be a visitor's). Check the seller's list with npm run market:sweep, then dismiss this." };
+      return { ok: false, error: "This purchase has no machine on record, and while the site is public a machine is never picked by plan and region alone (it could be a visitor's). Check the seller's list with npm run market:sweep (add --audience public for visitors' machines), then dismiss this." };
     }
     // machines known to belong to other runs are never picked by the plan-and-region match
     const exclude = new Set(journal.all().filter((e) => e.run !== runId && e.instance).map((e) => e.instance!));

@@ -152,7 +152,8 @@ export class SellerClient {
         if (key === null) return fetch(input, init);
         const headers = new Headers(init?.headers);
         headers.set(OWNER_HEADER, key);
-        return fetch(input, { ...init, headers });
+        // never follow a redirect with the key on board
+        return fetch(input, { ...init, headers, redirect: "error" });
       });
     this.signer = deps.signer ?? null;
     this.now = deps.now ?? Date.now;

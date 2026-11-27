@@ -65,6 +65,15 @@ export function ownerToken(env: Env = process.env): string | null {
   return typeof t === "string" && t.length >= 32 ? t : null;
 }
 
+/**
+ * True when an owner key is required. It is whenever one is set, and also whenever the app answers on a
+ * public address: a public site with no key, or with one too short to be a key, has no owner at all rather
+ * than letting the local name stand in (that is exactly the case the key exists for).
+ */
+function ownerKeyRequired(env: Env): boolean {
+  return (typeof env.BURN402_OWNER_TOKEN === "string" && env.BURN402_OWNER_TOKEN !== "") || publicHosts(env).size > 0;
+}
+
 const cookieValue = (cookie: string | null, name: string): string | null => {
   for (const part of (cookie ?? "").split(";")) {
     const at = part.indexOf("=");
@@ -79,18 +88,23 @@ const sameText = (a: string, b: string): boolean => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 
-/** True when no owner key is configured, or the request carries it. */
+/** True when no owner key is required, or the request carries the right one. */
 export function hasOwnerKey(h: Pick<AccessHeaders, "cookie" | "ownerKey">, env: Env = process.env): boolean {
+  if (!ownerKeyRequired(env)) return true;
   const token = ownerToken(env);
-  if (token === null) return true;
+  if (token === null) return false;
   const given = h.ownerKey ?? cookieValue(h.cookie, OWNER_COOKIE);
   return given !== null && sameText(given, token);
 }
 
-/** True when `candidate` is the configured owner key (the launcher's link hands it over once). */
-export function isOwnerToken(candidate: string | null, env: Env = process.env): boolean {
-  const token = ownerToken(env);
-  return token !== null && candidate !== null && sameText(candidate, token);
+/**
+ * True when `candidate` is the one-time code in the launcher's link (BURN402_OWNER_ENTRY). It is not the
+ * owner key itself: the link ends up in the terminal's scrollback and the browser's history, so it buys the
+ * key once and is worth nothing afterwards (the route keeps track of that).
+ */
+export function isOwnerEntry(candidate: string | null, env: Env = process.env): boolean {
+  const code = env.BURN402_OWNER_ENTRY;
+  return typeof code === "string" && code.length >= 32 && ownerToken(env) !== null && candidate !== null && sameText(candidate, code);
 }
 
 /** True when the request was addressed to the app's local name and nothing forwarded it. */
@@ -98,9 +112,16 @@ export function isLocalDirect(h: AccessHeaders, env: Env = process.env): boolean
   return localHosts(env).has((h.host ?? "").toLowerCase()) && !forwarded(h);
 }
 
-/** True when the owner has opened the real market to public visitors, who then pay from their own wallets. */
+/**
+ * True when the owner has opened the real market to public visitors, who then pay from their own wallets.
+ * It takes the switch AND an agent key of the visitors' own (PUBLIC_MAINNET_SOLANA_SECRET_KEY), different
+ * from the owner's keys: strangers' rentals are never signed by, or put on, a wallet of the owner's. Without
+ * that key the switch does nothing.
+ */
 export function publicReal(env: Env = process.env): boolean {
-  return env.BURN402_PUBLIC_REAL === "1";
+  if (env.BURN402_PUBLIC_REAL !== "1") return false;
+  const theirs = env.PUBLIC_MAINNET_SOLANA_SECRET_KEY;
+  return typeof theirs === "string" && theirs.length >= 32 && theirs !== env.MAINNET_SOLANA_SECRET_KEY && theirs !== env.AGENT_SOLANA_SECRET_KEY;
 }
 
 /** The public host names this app answers on, from BURN402_PUBLIC_HOSTS (comma separated, no scheme or port). */
