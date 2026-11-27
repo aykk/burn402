@@ -48,6 +48,8 @@ export type MarketRunView = {
   need: Need;
   limits: Limits;
   askBeforePaying: boolean;
+  /** the connected wallet this run is paid from, or null when the agent's own wallet pays */
+  wallet: string | null;
   agent: { name: string; ansName: string };
   sources: { name: string; ok: boolean; count: number; note: string | null }[];
   rows: OfferRow[];
@@ -395,6 +397,11 @@ export class MarketRun {
     return this.starting;
   }
 
+  /** The approval this code would pay, without paying it; null when the run is not waiting or the code is wrong. */
+  awaiting(code: string): NonNullable<MarketRunView["approval"]> | null {
+    return this.phase === "approval" && this.approval && this.current && sameCode(code, this.approval.code) ? this.approval : null;
+  }
+
   approve(code: string): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "approval" || !this.approval || !this.current) return { ok: false, error: "the run is not waiting for approval" };
     if (!sameCode(code, this.approval.code)) return { ok: false, error: "the approval code does not match" };
@@ -440,6 +447,7 @@ export class MarketRun {
       need: this.d.need,
       limits: this.d.limits,
       askBeforePaying: this.d.askBeforePaying,
+      wallet: this.d.payer?.funds ?? null,
       agent: this.d.agent,
       sources: this.sources,
       rows: this.rows,
@@ -670,7 +678,8 @@ export class MarketRun {
     this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
     this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
-    if (this.d.market === "real" || this.d.askBeforePaying) {
+    // a connected wallet must approve each payment itself, so that run always stops here
+    if (this.d.market === "real" || this.d.askBeforePaying || this.d.payer?.funds) {
       this.approval = {
         code: this.newCode(),
         usd: q.amountUsd,
@@ -742,7 +751,7 @@ export class MarketRun {
       const headers = await payer.payHeaders(required);
       this.alreadyPaid = true;
       // from here the money may be out: the payment shows as sent until it is confirmed
-      this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.address, status: "unconfirmed" };
+      this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.funds ?? payer.address, status: "unconfirmed" };
       this.paySignature = payerSignatureOf(headers);
       return headers;
     };

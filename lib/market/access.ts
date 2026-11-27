@@ -101,6 +101,9 @@ const OWNER_ONLY = ["/api/testseller"];
 export const NOT_PUBLIC = "This is not available on the public demo.";
 /** The most a public visitor may set as a budget: they all spend one devnet wallet. */
 export const PUBLIC_MAX_BUDGET_USD = 1;
+/** A connected wallet is owner-only until a payment made that way has been proven against the hosted facilitator. */
+export const PUBLIC_NO_WALLET = "Paying from your own wallet is not open on the public demo yet.";
+
 export const PUBLIC_TEST_ONLY = "The public demo runs on the test market only: test money and simulated machines.";
 
 /**

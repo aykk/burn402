@@ -57,6 +57,17 @@ export async function authHeaders(
   };
 }
 
+/** True when `signature` is the ed25519 signature of `message` by the 32-byte public key. Never throws. */
+export function verifyEd25519(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean {
+  if (publicKey.length !== 32 || signature.length !== 64) return false;
+  try {
+    const key = createPublicKey({ key: Buffer.concat([SPKI_ED25519_PREFIX, publicKey]), format: "der", type: "spki" });
+    return verify(null, message, key, signature);
+  } catch {
+    return false;
+  }
+}
+
 /** Checks X-Auth-* headers. Does not track nonces; the caller must reject reuse. */
 export function verifyAuth(
   headers: Headers,

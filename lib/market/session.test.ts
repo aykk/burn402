@@ -14,7 +14,20 @@ const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3
 describe("parseRunInput", () => {
   it("accepts the brief's example run", () => {
     const r = parseRunInput(good);
-    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true } });
+    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true, wallet: null } });
+  });
+
+  it("takes a connected wallet to pay from, and then always asks before paying", () => {
+    const wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    const r = parseRunInput({ ...good, askBeforePaying: false, wallet });
+    expect(r.ok && r.value.wallet).toBe(wallet);
+    expect(r.ok && r.value.askBeforePaying).toBe(true);
+    // without a wallet the choice stands
+    const plain = parseRunInput({ ...good, askBeforePaying: false, wallet: null });
+    expect(plain.ok && plain.value.askBeforePaying).toBe(false);
+    for (const bad of ["", "nope", 42, "0x52908400098527886E0F7030069857D2E4169EE7", {}]) {
+      expect(parseRunInput({ ...good, wallet: bad })).toEqual({ ok: false, error: "that is not a Solana wallet address" });
+    }
   });
 
   it.each([
