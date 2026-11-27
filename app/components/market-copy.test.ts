@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
 import type { PriceComparison } from "@/lib/market/prices/compare";
 import type { MarketPrice } from "@/lib/market/prices/types";
-import { approvalSentence, billedHoursLine, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidLine, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalSentence, billedHoursLine, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidFacts, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -10,9 +10,9 @@ const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, re
 function run(over: Partial<MarketRunView>): MarketRunView {
   return {
     id: "mkt_1", market: "test", marketLabel: "Test seller", phase: "scanning", need, limits: { budgetUsd: 1, rateUsdHr: 0.05 },
-    askBeforePaying: true, agent: { name: "your agent", ansName: "ans://x" }, sources: [], rows: [], leftOut: [], approval: null,
+    askBeforePaying: true, wallet: null, walletApproved: false, agent: { name: "your agent", ansName: "ans://x" }, sources: [], rows: [], leftOut: [], approval: null,
     payment: null, machine: null, attempts: [], startedAt: 0, paidAt: null, readyAt: null, releasedAt: null, error: null, refusal: null,
-    spent: "nothing", fallbacks: [], overspendTest: false, prices: null,
+    spent: "nothing", fallbacks: [], choice: null, overspendTest: false, prices: null,
     ...over,
   };
 }
@@ -73,10 +73,11 @@ describe("wording", () => {
     expect(paymentLine({ atomic: "10382", status: "confirmed" }, "test")).toBe("Paid $0.010382 over x402, settled on Solana devnet.");
     expect(paymentLine({ atomic: "10382", status: "unconfirmed" }, "real")).toBe("Sent $0.010382 over x402 on Solana mainnet, not confirmed yet.");
   });
-  it("after an early destroy, one line on what was paid and that unused time is not refunded", () => {
-    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, 51)).toBe("Paid for 1 hour. Destroyed after 51s. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
-    expect(prepaidLine({ atomic: "10382", status: "unconfirmed" }, 2, 125)).toBe("Sent for 2 hours, not confirmed yet. Destroyed after 2m 05s. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
-    expect(prepaidLine({ atomic: "10382", status: "confirmed" }, 1, null)).toBe("Paid for 1 hour. Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.");
+  it("after an early destroy, short facts: what was paid for, how long it ran, and that unused time is not refunded", () => {
+    const unused = { label: "Unused time", value: "Not refunded by this app. The seller decides." };
+    expect(prepaidFacts({ atomic: "10382", status: "confirmed" }, 1, 51)).toEqual([{ label: "Paid for", value: "1 hour" }, { label: "Ran for", value: "51s" }, unused]);
+    expect(prepaidFacts({ atomic: "10382", status: "unconfirmed" }, 2, 125)).toEqual([{ label: "Sent for", value: "2 hours, not confirmed yet" }, { label: "Ran for", value: "2m 05s" }, unused]);
+    expect(prepaidFacts({ atomic: "10382", status: "confirmed" }, 1, null)).toEqual([{ label: "Paid for", value: "1 hour" }, unused]);
   });
   it("sources: plans, spot offers and failures", () => {
     expect(

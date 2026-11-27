@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import type { MarketId } from "@/lib/market/types";
 import { duration, usd2, usd4 } from "./format";
-import { endState, hoursText, paymentLine, prepaidLine, solscanUrl, timeLeft, type EndState } from "./market-copy";
+import { endState, hoursText, paymentLine, prepaidFacts, solscanUrl, timeLeft, type EndState } from "./market-copy";
 import { allowanceWords, budgetShare, jobGauge, meterHeadline, meterView, shareText, walletReadout, type JobGauge, type MeterJob, type MeterView } from "./meter-model";
 
 
@@ -40,16 +40,16 @@ export function Swatch() {
   return <span aria-hidden className="inline-block size-2 shrink-0 rounded-[1px] bg-amber" />;
 }
 
-/** The gauge's height: a fine tick scale, like a dial on an instrument. */
-const GAUGE = "relative h-5 sm:h-6";
+/** The gauge: one solid line, the same kind as the budget line under it, a little thicker because it leads. */
+const GAUGE = "relative h-1.5 overflow-hidden rounded-[1px]";
 
-/** The allowance: light ticks for what is left of the budget being typed, dark ticks for what is gone. */
+/** The allowance: a light line for what is left of the budget being typed, a dark track for what is gone. */
 function WalletGauge({ v, className }: { v: MeterView; className: string }) {
   const left = budgetShare(v.remainingUsd, v.budgetUsd);
   return (
     <div role="img" aria-label={`${usd4(v.remainingUsd)} of ${usd2(v.budgetUsd)} left`} className={`gauge-in ${GAUGE} ${className}`}>
-      <span className="ticks absolute inset-0 text-segment" />
-      <span className="ticks absolute inset-y-0 left-0 text-foreground/80" style={{ width: `${left * 100}%` }} />
+      <span className="absolute inset-0 bg-segment" />
+      <span className="absolute inset-y-0 left-0 bg-foreground" style={{ width: `${left * 100}%` }} />
     </div>
   );
 }
@@ -58,7 +58,7 @@ function WalletGauge({ v, className }: { v: MeterView; className: string }) {
  * The job: a full amber gauge is the paid amount (or the quote). The amber layer is clipped from the
  * right as the server burns it, one linear second per tick so the drain is continuous between polls;
  * when the run ends the remainder collapses to $0 in one quick ease-out, the shutdown. Clipping keeps
- * the last partial tick honest and animates without layout. Reduced motion steps instead.
+ * the edge honest and animates without layout. Reduced motion steps instead.
  */
 function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className: string }) {
   const timing =
@@ -67,12 +67,12 @@ function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className
       : "motion-safe:duration-1000 motion-safe:ease-linear";
   const fill = Math.min(1, Math.max(0, j.fill));
   return (
-    // Once the machine is gone the drain plays out, then the empty tick track folds away (gauge-spent), so a
+    // Once the machine is gone the drain plays out, then the empty track folds away (gauge-spent), so a
     // finished run shows one bar, the budget, instead of an empty one that reads as a second progress bar.
     <div role="img" aria-label={gaugeLabel(j, v)} className={`${GAUGE} ${className} ${j.state === "shut" ? "gauge-spent" : ""}`}>
-      <span className="ticks absolute inset-0 text-segment" />
+      <span className="absolute inset-0 bg-segment" />
       <span
-        className={`ticks absolute inset-0 text-amber motion-safe:transition-[clip-path] ${timing}`}
+        className={`absolute inset-0 bg-amber motion-safe:transition-[clip-path] ${timing}`}
         style={{ clipPath: `inset(0 ${(1 - fill) * 100}% 0 0)` }}
       />
     </div>
@@ -233,6 +233,8 @@ export function BudgetMeter(props: {
   // never what is left of the prepaid time once the machine is gone.
   const h = meterHeadline(v, j, spanHours);
   const paidText = v.paidExact ?? usd4(jobUsd);
+  // Once the machine is gone: the facts under the figure. They include how long it ran, so the readout beside the figure steps aside.
+  const facts = shut && payment ? prepaidFacts(payment, spanHours, v.ranSeconds) : null;
 
   return (
     <section aria-label="Budget meter" className="meter-dark rounded-[12px] px-5 py-5 sm:px-8 sm:py-7">
@@ -257,32 +259,38 @@ export function BudgetMeter(props: {
           )}
           {h.suffix && <span className="text-[20px] leading-[26px] text-muted tabular-nums">{h.suffix}</span>}
         </p>
-        <ReadoutBlock r={r} />
+        {!(facts && v.ranSeconds !== null) && <ReadoutBlock r={r} />}
       </div>
 
       <JobGaugeBar j={j} v={v} className="mt-5" />
 
-      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
-        {/* The release lands here, where the drain ends: the label turns to ink once the amber is gone. */}
-        <p
-          className={`motion-safe:transition-colors motion-safe:duration-300 ${shut ? "font-medium text-foreground motion-safe:delay-500" : j.state === "held" ? "font-medium text-foreground" : "text-muted"}`}
-        >
-          {j.state === "quoted"
-            ? "$0"
-            : j.state === "sent"
-              ? "Waiting for the seller to confirm the payment"
-              : j.state === "held"
-                ? `${v.spent === "paid" ? "Paid" : "Sent, not confirmed:"} ${paidText}. The machine may still be running.`
-                : shut
-                  ? payment
-                    ? prepaidLine(payment, spanHours, v.ranSeconds)
-                    : `Spent ${paidText}`
-                  : "Destroyed when this reaches zero"}
-        </p>
-        <p className="text-muted">
-          {j.state === "quoted" ? `This rental: ${h.amount}` : j.state === "draining" ? hoursText(spanHours) : shut ? "" : paidText}
-        </p>
-      </div>
+      {facts ? (
+        // The release lands here, where the drain ends: what was paid for, how long it ran and what happens to
+        // the unused time, as three short facts instead of one long sentence.
+        <dl className="mt-4 flex flex-wrap gap-x-10 gap-y-3 tabular-nums">
+          {facts.map((f) => (
+            <div key={f.label} className="min-w-0">
+              <dt className="text-[12px] leading-4 text-muted">{f.label}</dt>
+              <dd className="mt-0.5 text-[14px] leading-5 font-medium text-foreground">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 text-[12px] leading-4 tabular-nums">
+          <p className={`motion-safe:transition-colors motion-safe:duration-300 ${shut ? "font-medium text-foreground motion-safe:delay-500" : j.state === "held" ? "font-medium text-foreground" : "text-muted"}`}>
+            {j.state === "quoted"
+              ? "$0"
+              : j.state === "sent"
+                ? "Waiting for the seller to confirm the payment"
+                : j.state === "held"
+                  ? `${v.spent === "paid" ? "Paid" : "Sent, not confirmed:"} ${paidText}. The machine may still be running.`
+                  : shut
+                    ? `Spent ${paidText}`
+                    : "Destroyed when this reaches zero"}
+          </p>
+          <p className="text-muted">{j.state === "quoted" ? `This rental: ${h.amount}` : j.state === "draining" ? hoursText(spanHours) : shut ? "" : paidText}</p>
+        </div>
+      )}
 
       {/* The allowance at its honest proportion: the rental's slice is a hairline, never a whole segment. */}
       <Allowance who={who} leftUsd={allowanceLeft} budgetUsd={v.budgetUsd} share={share} note={`This rental is ${shareText(share)} of the budget`} state={j.state} />

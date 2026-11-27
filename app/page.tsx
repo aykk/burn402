@@ -9,11 +9,11 @@ import { BudgetMeter } from "@/app/components/BudgetMeter";
 import { LogDrawer } from "@/app/components/LogDrawer";
 import type { Send } from "@/app/components/MachinePanel";
 import { MarketPanel } from "@/app/components/MarketPanel";
-import { ModelPicker } from "@/app/components/ModelPicker";
 import { MarketPrices } from "@/app/components/MarketPrices";
 import { NeedForm, needText, type CompareBody, type NeedDraft } from "@/app/components/NeedForm";
 import { MARKET_NAME, hoursText, panelBody } from "@/app/components/market-copy";
 import { OpenPurchases } from "@/app/components/OpenPurchases";
+import { PlanPreview, type PreviewState } from "@/app/components/PlanPreview";
 import { BTN } from "@/app/components/ui";
 import { ActionError, UNREACHABLE, failureMessage, type Post } from "@/app/components/ActionError";
 import { marketAnnouncement, marketMark, type MarketMark } from "@/app/components/announce";
@@ -30,7 +30,6 @@ export default function Page() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const logButton = useRef<HTMLButtonElement>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<NeedDraft>({ budgetUsd: 1, rateUsdHr: 0.05, valid: true });
   // Bumped when a run starts, so focus moves from the form (which collapses) to the run's heading.
   const [startSignal, setStartSignal] = useState(0);
@@ -47,6 +46,33 @@ export default function Page() {
   const compareAbort = useRef<AbortController | null>(null);
   // Bumped when the comparison is closed: the form moves focus to Compare prices once it is enabled again.
   const [compareClosed, setCompareClosed] = useState(0);
+
+  // The plans that fit the form's filters, listed while there is no run and refreshed as the filters change.
+  const [want, setWant] = useState<CompareBody | null>(null);
+  const [preview, setPreview] = useState<PreviewState>({ status: "loading", preview: null, need: null });
+  const wantKey = want ? JSON.stringify(want) : null;
+  const idle = snap !== null && snap.market === null;
+  useEffect(() => {
+    if (!idle || !wantKey) return;
+    const body = JSON.parse(wantKey) as CompareBody;
+    const abort = new AbortController();
+    // typing in a number field changes the filters on every key: wait for a pause, then read once
+    const timer = setTimeout(async () => {
+      setPreview((p) => ({ ...p, status: "loading" }));
+      try {
+        const res = await fetch("/api/market/plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: wantKey, signal: abort.signal });
+        const json = (await res.json()) as { preview?: PreviewState["preview"]; error?: string };
+        if (!res.ok || !json.preview) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setPreview({ status: "ready", preview: json.preview, need: body.need });
+      } catch {
+        if (!abort.signal.aborted) setPreview((p) => ({ ...p, status: "failed" }));
+      }
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [idle, wantKey]);
 
   const load = useCallback(async () => {
     let res: Response;
@@ -197,18 +223,9 @@ export default function Page() {
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-col px-4 py-5 sm:px-6 lg:px-10 lg:py-6">
       <Nav current="/" burning={running}>
-        {snap?.models && (
-          <ModelPicker
-            models={snap.models}
-            disabled={running}
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
-            onSave={(provider, key) => post("/api/demo/model", { provider, key })}
-          />
-        )}
         <button
           ref={logButton}
-          className="underline decoration-1 underline-offset-[3px] hover:decoration-2"
+          className="py-0.5 underline decoration-1 underline-offset-[3px] hover:decoration-2"
           aria-haspopup="dialog"
           aria-expanded={drawer}
           onClick={() => setDrawer(true)}
@@ -217,7 +234,7 @@ export default function Page() {
         </button>
         {/* Reset is destructive: set apart from the rest by a rule, quiet until pointed at. */}
         <button
-          className="border-l border-rule pl-6 text-muted hover:text-foreground hover:underline hover:decoration-1 hover:underline-offset-[3px]"
+          className="border-l border-rule py-0.5 pl-6 text-muted hover:text-foreground hover:underline hover:decoration-1 hover:underline-offset-[3px]"
           title="Forget this session: cancels a run waiting for approval, destroys a test-market machine, clears the log"
           onClick={async () => {
             setResetError(null);
@@ -281,17 +298,18 @@ export default function Page() {
       {error && (
         <div role="status" className="mt-4 shrink-0 text-bad">
           {error.unreachable
-            ? `Can't reach the demo server (${error.message}). Start it with: npm run dev`
-            : `The demo server couldn't report its state (${error.message}). Check the terminal running npm run dev.`}
+            ? "Can't reach the site right now. It will reconnect by itself; if it doesn't, reload the page."
+            : /owner key/.test(error.message)
+              ? "This browser doesn't hold this computer's owner key yet. Open the link the launcher printed in its Terminal window (it starts with http://127.0.0.1:3000/api/owner), and the page will work."
+              : `The site couldn't report its state (${error.message}). Try reloading the page.`}
         </div>
       )}
 
-      {/* One column template in every phase, so nothing jumps when a run starts, pays or ends. The form column
-          is 26rem: its container is 25rem after the padding, wide enough for three number fields in a row
-          (NeedForm switches at 24rem), and the run column keeps room for the plan table. Below lg the columns
-          stack, with the run first while there is one. */}
-      <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-10">
-        <div id="need" className={`form-col lg:pr-4 lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
+      {/* One column template in every phase, so nothing jumps when a run starts, pays or ends: a 17rem filter
+          rail on the left (one filter per row, top to bottom) and the results on the right, which get the rest
+          of the width for the plan table. Below lg the columns stack, with the run first while there is one. */}
+      <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-10">
+        <div id="need" className={`form-col lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
           <NeedForm
             snap={snap}
             run={run}
@@ -309,7 +327,7 @@ export default function Page() {
             }}
             onCompare={comparePrices}
             compareClosed={compareClosed}
-            onAddKey={() => setPickerOpen(true)}
+            onNeedChange={setWant}
           />
         </div>
 
@@ -326,6 +344,7 @@ export default function Page() {
             walletReady={snap?.walletReady ?? { test: false, real: false }}
             post={post}
             send={send}
+            preview={want ? <PlanPreview state={preview} /> : null}
             compare={
               compare && (
                 <MarketPrices

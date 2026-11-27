@@ -17,6 +17,8 @@ export type JournalEntry = {
   tx?: string | null;
   instance?: string | null;
   detail?: string;
+  /** the agent wallet that paid, which is the only one the seller lets manage the machine */
+  agent?: string;
 };
 
 export type OpenPurchase = {
@@ -28,6 +30,8 @@ export type OpenPurchase = {
   usd: number;
   instance: string | null;
   tx: string | null;
+  /** the agent wallet that paid for it; absent on purchases journalled before this was recorded */
+  agent?: string | null;
   state: "paid" | "unknown" | "active";
   at: number;
   /** the latest journal event: "intent" means the outcome was never recorded */
@@ -100,6 +104,7 @@ export class Journal {
         usd: x.usd,
         instance: x.instance ?? prev?.instance ?? null,
         tx: x.tx ?? prev?.tx ?? null,
+        agent: x.agent ?? prev?.agent ?? null,
         state: "unknown",
         at: x.at,
         event: x.event,

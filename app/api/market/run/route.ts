@@ -1,6 +1,6 @@
 import { publicLimit } from "@/lib/demo/limits";
-import { visit } from "@/lib/demo/visit";
-import { PUBLIC_MAX_BUDGET_USD, PUBLIC_TEST_ONLY } from "@/lib/market/access";
+import { errorFor, visit } from "@/lib/demo/visit";
+import { PUBLIC_MAX_BUDGET_USD, PUBLIC_REAL_NEEDS_KEY, PUBLIC_REAL_NEEDS_WALLET, PUBLIC_TEST_ONLY, publicReal } from "@/lib/market/access";
 import { OVERSPEND_BUSY, overspendRunning } from "@/lib/market/overspend-lock";
 import { checkRequest, parseRunInput } from "@/lib/market/session";
 
@@ -15,8 +15,13 @@ export async function POST(request: Request) {
   const seen = await visit(request, { create: false });
   if (seen instanceof Response) return seen;
   if (seen.v.kind === "public") {
-    // the real market spends the owner's wallet: never for a public visitor
-    if (input.value.market !== "test") return Response.json({ error: PUBLIC_TEST_ONLY }, { status: 403 });
+    if (input.value.market !== "test") {
+      // the real market is closed to the public unless the owner opened it; even then a visitor never spends
+      // the agent's wallet: they pay from their own, and log in with their own key
+      if (!publicReal()) return Response.json({ error: PUBLIC_TEST_ONLY }, { status: 403 });
+      if (!input.value.wallet) return Response.json({ error: PUBLIC_REAL_NEEDS_WALLET }, { status: 400 });
+      if (!input.value.sshPublicKey) return Response.json({ error: PUBLIC_REAL_NEEDS_KEY }, { status: 400 });
+    }
     if (input.value.limits.budgetUsd > PUBLIC_MAX_BUDGET_USD) return Response.json({ error: `The public demo allows a budget of up to $${PUBLIC_MAX_BUDGET_USD.toFixed(2)}.` }, { status: 400 });
     // a visitor whose run is still going gets it back and is not counted again
     if (!seen.session?.marketBusy) {
@@ -29,7 +34,6 @@ export async function POST(request: Request) {
   try {
     return Response.json({ run: await who.session!.startMarketRun(input.value) });
   } catch (error) {
-    const message = (error as Error).message;
-    return Response.json({ error: message }, { status: message === OVERSPEND_BUSY ? 409 : 400 });
+    return Response.json({ error: errorFor(who.v, error) }, { status: (error as Error).message === OVERSPEND_BUSY ? 409 : 400 });
   }
 }

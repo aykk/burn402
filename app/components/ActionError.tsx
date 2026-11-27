@@ -5,13 +5,17 @@ import { TEXT_BTN } from "./ui";
 /** Every action on the Run page posts through this; it resolves to null on success or to the reason it failed. */
 export type Post = (path: string, body?: unknown) => Promise<string | null>;
 
-/** Shown when a request never reached the server (browsers word that failure differently, so it is not passed through). */
-export const UNREACHABLE = "The demo server didn't answer. Check that npm run dev is still running, then try again.";
+/**
+ * Shown when a request never reached the server (browsers word that failure differently, so it is not passed
+ * through). Worded for anyone: a visitor to the public site cannot check a terminal.
+ */
+export const UNREACHABLE = "The site didn't answer. Check your connection and try again in a moment.";
+export const UNREADABLE = "The site sent back a reply that couldn't be read. Try again in a moment.";
 
 /** A failed request in one sentence: a network failure names the server; anything else keeps the server's own words. */
 export function failureMessage(e: unknown): string {
   if (e instanceof TypeError) return UNREACHABLE;
-  if (e instanceof SyntaxError) return "The demo server sent back a reply it couldn't read. Check the terminal running npm run dev.";
+  if (e instanceof SyntaxError) return UNREADABLE;
   return (e as Error)?.message || "Something went wrong.";
 }
 

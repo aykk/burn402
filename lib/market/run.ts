@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 import { DEFAULT_RULES } from "./types";
-import { choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
+import { betterMachine, choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
 import { checkPayment, NETWORKS, type Accepts } from "./guard";
 import { usdExact } from "./money";
 import type { Journal, JournalEntry } from "./journal";
@@ -48,6 +48,10 @@ export type MarketRunView = {
   need: Need;
   limits: Limits;
   askBeforePaying: boolean;
+  /** the connected wallet this run is paid from, or null when the agent's own wallet pays */
+  wallet: string | null;
+  /** true once that wallet's approval was sent to the chain for this run (it may then be left unused if the run does not pay) */
+  walletApproved: boolean;
   agent: { name: string; ansName: string };
   sources: { name: string; ok: boolean; count: number; note: string | null }[];
   rows: OfferRow[];
@@ -77,6 +81,8 @@ export type MarketRunView = {
   spent: "nothing" | "paid" | "maybe";
   /** plain notes when the agent used another region or plan than its first choice */
   fallbacks: string[];
+  /** when several plans gave the same lowest quote: which one the agent took and why; else null */
+  choice: string | null;
   /** true for the runs the overspend test makes; the owner's runs are false */
   overspendTest: boolean;
   machine: {
@@ -116,6 +122,16 @@ export type MarketRunDeps = {
   askBeforePaying: boolean;
   agent: { name: string; ansName: string };
   keyDir: string;
+  /**
+   * The renter's own SSH public key. When given, no key is made on this computer: the machine is set up
+   * with theirs, and only they can log in.
+   */
+  sshPublicKey?: string;
+  /**
+   * False: after an unclear payment outcome the run never takes a machine from the wallet's list by plan and
+   * region. Many visitors share one agent wallet, and that match could land on someone else's machine.
+   */
+  adopt?: boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   /** One connection attempt to port 22; the run retries. */
@@ -160,6 +176,29 @@ const DESTROY_RETRIES = 10;
 const STOPPED = "You stopped the run before anything was paid.";
 const CANCELLED = "You cancelled before paying. Nothing was spent.";
 const ALREADY_PAID = "This run already made a payment, so the agent will not pay again.";
+
+/** Firm quotes in the order the agent would take them: the lowest exact amount, and at the same amount the better machine. */
+export function cheapestThenBest(a: Quote, b: Quote): number {
+  const pa = BigInt(a.atomic);
+  const pb = BigInt(b.atomic);
+  return pa < pb ? -1 : pa > pb ? 1 : betterMachine(a.candidate.offer, b.candidate.offer);
+}
+
+/** Said when the lowest quote was shared: the agent did not pick at random, it took the strongest machine at that price. */
+export function tieNote(sorted: Quote[]): string | null {
+  const first = sorted[0];
+  if (!first) return null;
+  const tied = sorted.filter((q) => q.atomic === first.atomic);
+  if (tied.length < 2) return null;
+  const count = tied.length === 2 ? "Two plans" : tied.length === 3 ? "Three plans" : `${tied.length} plans`;
+  const a = first.candidate.offer;
+  // set the plan names aside: a name is how ties are settled, not a reason one machine is stronger
+  const apart = (x: Quote) => betterMachine({ ...a, id: "" }, { ...x.candidate.offer, id: "" }) !== 0;
+  const beatsNext = apart(tied[1]);
+  const beatsSome = tied.some(apart);
+  const why = beatsNext ? ", the strongest machine at that price" : beatsSome ? ", one of the strongest machines at that price" : "; on paper they are the same machine";
+  return `${count} quoted the same ${usdExact(first.atomic)}. The agent took ${a.id}${why}.`;
+}
 
 /** Why a chooser left a plan out, in words. */
 export function leftOutWords(reason: RejectReason | string, need: Pick<Need, "kind">): string {
@@ -350,7 +389,7 @@ export class MarketRun {
 
   private starting: Promise<void> | null = null;
   private ended = false;
-  private key: { publicKey: string; privatePath: string } | null = null;
+  private key: { publicKey: string; privatePath: string | null } | null = null;
   private quotes: Quote[] = [];
   private readonly used = new Set<Quote>();
   private readonly tried = new Set<string>();
@@ -358,6 +397,8 @@ export class MarketRun {
   private lastQuoteError = "";
   private fallbackCount = 0;
   private fallbackNotes: string[] = [];
+  private choiceNote: string | null = null;
+  private walletApproved = false;
   /** plan key -> the regions that failed for it, with the code */
   private readonly failures = new Map<string, { region: string; code: string }[]>();
   private ranked: Candidate[] = [];
@@ -393,6 +434,16 @@ export class MarketRun {
   start(): Promise<void> {
     this.starting ??= this.stopped ? Promise.resolve() : this.guarded(() => this.scan());
     return this.starting;
+  }
+
+  /** Called when the connected wallet's signed approval is handed to the network, whether or not the send is confirmed. */
+  noteWalletApproval(): void {
+    this.walletApproved = true;
+  }
+
+  /** The approval this code would pay, without paying it; null when the run is not waiting or the code is wrong. */
+  awaiting(code: string): NonNullable<MarketRunView["approval"]> | null {
+    return this.phase === "approval" && this.approval && this.current && sameCode(code, this.approval.code) ? this.approval : null;
   }
 
   approve(code: string): { ok: true } | { ok: false; error: string } {
@@ -440,6 +491,8 @@ export class MarketRun {
       need: this.d.need,
       limits: this.d.limits,
       askBeforePaying: this.d.askBeforePaying,
+      wallet: this.d.payer?.funds ?? null,
+      walletApproved: this.walletApproved,
       agent: this.d.agent,
       sources: this.sources,
       rows: this.rows,
@@ -448,6 +501,7 @@ export class MarketRun {
       payment: this.payment,
       spent: !this.alreadyPaid ? "nothing" : this.payment?.status === "confirmed" ? "paid" : "maybe",
       fallbacks: this.fallbackNotes,
+      choice: this.choiceNote,
       overspendTest: this.d.overspendTest === true,
       machine: this.machine,
       attempts: this.attempts,
@@ -566,7 +620,7 @@ export class MarketRun {
     if (this.stopped) return;
     this.setPhase("quoting");
     try {
-      this.key = newSshKey(this.d.keyDir, `run-${this.d.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+      this.key = this.d.sshPublicKey ? { publicKey: this.d.sshPublicKey, privatePath: null } : newSshKey(this.d.keyDir, `run-${this.d.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
     } catch (e) {
       return this.fail(`Could not create an SSH key: ${msg(e)}`);
     }
@@ -583,7 +637,8 @@ export class MarketRun {
     }
     if (this.stopped) return;
     if (this.quotes.length === 0) return this.fail(`No seller gave a usable quote. The last problem: ${this.lastQuoteError || "no seller answered."}`);
-    this.quotes.sort((a, b) => a.amountUsd - b.amountUsd); // stable: ties keep the chooser's order
+    this.quotes.sort(cheapestThenBest);
+    this.choiceNote = tieNote(this.quotes);
     return this.offer(this.quotes[0]);
   }
 
@@ -670,7 +725,8 @@ export class MarketRun {
     this.fallbackNotes = this.fallbackNotesFor(q);
     for (const r of this.rows) if (r.state === "chosen") r.state = "quoted";
     this.updateRow(q.candidate.offer, { state: "chosen", region: q.region, quoteUsd: q.amountUsd, quoteExact: usdExact(q.atomic), note: null, code: null });
-    if (this.d.market === "real" || this.d.askBeforePaying) {
+    // a connected wallet must approve each payment itself, so that run always stops here
+    if (this.d.market === "real" || this.d.askBeforePaying || this.d.payer?.funds) {
       this.approval = {
         code: this.newCode(),
         usd: q.amountUsd,
@@ -742,7 +798,7 @@ export class MarketRun {
       const headers = await payer.payHeaders(required);
       this.alreadyPaid = true;
       // from here the money may be out: the payment shows as sent until it is confirmed
-      this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.address, status: "unconfirmed" };
+      this.payment = { usd: g.usd, atomic: accepts.amount, tx: null, at: this.now(), payer: payer.funds ?? payer.address, status: "unconfirmed" };
       this.paySignature = payerSignatureOf(headers);
       return headers;
     };
@@ -781,6 +837,8 @@ export class MarketRun {
         if (next) {
           this.fallbackCount++;
           this.approval = null;
+          // the first choice could not be bought; the notes about that take over from the note about the tie
+          this.choiceNote = null;
           return this.offer(next);
         }
       }
@@ -792,7 +850,7 @@ export class MarketRun {
     const paidUsd = this.payment?.usd ?? q.amountUsd;
     this.safeAppend(this.entry("unknown", q, { usd: paidUsd, detail: outcome.detail }));
     this.attempt(q.candidate.offer.id, q.region, outcome.detail, false, "UNKNOWN");
-    const found = await this.findMachine(q, intentAt, before);
+    const found = this.d.adopt === false ? null : await this.findMachine(q, intentAt, before);
     if (!found) return this.afterSignature(q, "unclear", outcome.detail, true);
     this.paidAt = this.now();
     await this.lookUpTx(q);
@@ -882,7 +940,7 @@ export class MarketRun {
         return q;
       }
     }
-    return this.quotes.filter((q) => !this.used.has(q)).sort((a, b) => a.amountUsd - b.amountUsd)[0] ?? null;
+    return this.quotes.filter((q) => !this.used.has(q)).sort(cheapestThenBest)[0] ?? null;
   }
 
   private async findMachine(q: Quote, intentAt: number, before: Set<string> | null): Promise<Instance | null> {
@@ -1112,7 +1170,8 @@ export class MarketRun {
       status: inst.status,
       expiresAt: inst.expiresAt === null ? null : inst.expiresAt * 1000,
       destroyAt: this.machine?.destroyAt ?? null,
-      ssh: ip && this.key ? `ssh -i ${shellPath(this.key.privatePath)} root@${ip}` : null,
+      // with the renter's own key there is no key file here to point at: they log in with theirs
+      ssh: ip && this.key ? (this.key.privatePath ? `ssh -i ${shellPath(this.key.privatePath)} root@${ip}` : `ssh root@${ip}`) : null,
       port22: this.machine?.port22 ?? "not checked",
       plan: inst.plan || q.candidate.offer.id,
       region: inst.region || q.region,
@@ -1129,6 +1188,7 @@ export class MarketRun {
       plan: q.candidate.offer.id,
       region: q.region,
       usd: q.amountUsd,
+      ...(this.d.payer ? { agent: this.d.payer.address } : {}),
       ...extra,
     };
   }

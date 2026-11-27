@@ -1,6 +1,7 @@
 "use client";
 
 import { Nav } from "@/app/nav";
+import { UNREACHABLE, UNREADABLE } from "@/app/components/ActionError";
 import { isUnreachable } from "../components/verify-state";
 import { Segmented } from "@/app/components/Segmented";
 import { solscanUrlForCluster } from "@/app/components/market-copy";
@@ -29,7 +30,7 @@ type Record = {
   paymentTx?: string | null;
   paymentCluster?: "devnet" | "mainnet" | null;
 };
-type Response = { network: string; fqdn: string | null; gatewayUrl?: string; records?: Record[]; error?: string };
+type Response = { network: string; fqdn: string | null; gatewayUrl?: string; readAt?: number; records?: Record[]; error?: string };
 
 const TONE: { [K in Outcome["tone"]]: string } = { good: "var(--ok)", bad: "var(--bad)", warn: "var(--muted)" };
 
@@ -89,6 +90,10 @@ function checkOf(r: Record): Check {
   // Not verified with no failed step means the check never finished.
   if (!failed || isUnreachable(failed)) return { state: "unchecked", step: failed };
   if (/no signature attached/i.test(failed.detail)) return { state: "invalid", label: "No signature attached" };
+  // The signer's key is not in this site's transparency log, so the signature cannot be checked here. Still a
+  // failed check (shown as one), but not the same as a signature that is wrong. Only the verifier's own
+  // UNKNOWN_KEY code decides this; the rest of the detail carries text from the record.
+  if (/signature/i.test(failed.name) && /^UNKNOWN_KEY: /.test(failed.detail)) return { state: "invalid", label: "Signer not in this log" };
   if (/signature/i.test(failed.name)) return { state: "invalid", label: "Signature invalid" };
   return { state: "invalid", label: `${stepName(failed.name)} check failed` };
 }
@@ -130,7 +135,7 @@ export default function RecordsPage() {
   const [needle, setNeedle] = useState("");
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(true);
-  // Why the list could not be read: the demo server is down, or it answered but the gateway did not.
+  // Why the list could not be read: the site did not answer, or it answered but Arweave's gateway did not.
   const [failure, setFailure] = useState<{ title: string; detail: string } | null>(null);
   // "Try again" and "Check again" bump this to run the same read once more.
   const [attempt, setAttempt] = useState(0);
@@ -141,7 +146,7 @@ export default function RecordsPage() {
       setTimeout(() => setNetwork(n), 0);
       return;
     }
-    // Open on the network the demo server writes its records to, so the records of a run just made are
+    // Open on the network this site writes its records to, so the records of a run just made are
     // the ones shown. If the server can't say, mainnet as before.
     let cancelled = false;
     fetch("/api/demo/state", { cache: "no-store" })
@@ -172,7 +177,7 @@ export default function RecordsPage() {
         if (!res.ok || body.error || !body.records) {
           setFailure({
             title: "Couldn't read the records from Arweave",
-            detail: `The gateway didn't answer the demo server (${body.error ?? `HTTP ${res.status}`}). This is usually brief; try again in a moment.`,
+            detail: `Arweave's gateway didn't answer (${body.error ?? `HTTP ${res.status}`}). This is usually brief; try again in a moment.`,
           });
           setData(keepSameNetwork);
         } else {
@@ -182,8 +187,8 @@ export default function RecordsPage() {
         if (cancelled) return;
         setFailure(
           e instanceof TypeError
-            ? { title: "Couldn't load the records", detail: "The demo server didn't answer. Check that npm run dev is still running, then try again." }
-            : { title: "Couldn't load the records", detail: "The demo server sent back a reply it couldn't read. Check the terminal running npm run dev." },
+            ? { title: "Couldn't load the records", detail: UNREACHABLE }
+            : { title: "Couldn't load the records", detail: UNREADABLE },
         );
         setData(keepSameNetwork);
       } finally {
@@ -225,18 +230,19 @@ export default function RecordsPage() {
       </Nav>
 
       <div className="shrink-0 pt-2">
-        <h1 className="text-[20px] leading-[26px] font-semibold">
-          {count} on Arweave{where}
-        </h1>
-        {/* The line is always there so the page does not jump when the gateway arrives. */}
-        <p className="mt-1 min-h-4 text-[12px] leading-4 text-muted">
+        {/* The gateway sits beside the heading: when it arrives, nothing below it moves. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+          <h1 className="text-[20px] leading-[26px] font-semibold">
+            {count} on Arweave{where}
+          </h1>
           {data?.gatewayUrl && (
-            <>
-              Gateway <span className="font-mono">{data.gatewayUrl}</span>
-            </>
+            <p className="text-[12px] leading-4 text-muted">
+              Read through <span className="font-mono">{data.gatewayUrl.replace(/^https?:\/\//, "")}</span>
+              {typeof data.readAt === "number" && <> at {new Date(data.readAt).toISOString().slice(11, 16)} UTC</>}
+            </p>
           )}
-        </p>
-        <p className="mt-3 max-w-[64ch] text-muted">
+        </div>
+        <p className="mt-2 max-w-[64ch] text-muted">
           Every payment, refusal and failure your agent makes is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
           Reload the page to read them again.
         </p>

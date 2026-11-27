@@ -11,13 +11,16 @@
     "register-agents": "tsx scripts/register-agents.ts",
     "test:live": "BURN402_LIVE=1 BURN402_LIVE_ARWEAVE=1 BURN402_LIVE_MARKET=1 vitest run lib/ans/live.test.ts lib/anchor/live.test.ts lib/market/seller.live.test.ts",
     "market:sweep": "tsx scripts/market-sweep.ts",
+    "wallet:test": "tsx scripts/wallet-test.ts",
     "burn402": "tsx cli/burn402.ts",
     "demo": "tsx scripts/demo.ts",
-    "public": "bash scripts/public.sh"
+    "public": "bash scripts/public.sh",
+    "public:stop": "bash scripts/public-stop.sh"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.127.0",
     "@ardrive/turbo-upload": "^0.3.0",
+    "@solana-program/compute-budget": "0.18.1",
+    "@solana-program/token": "0.16.1",
     "@solana/kit": "8.6.0",
     "@x402/core": "2.29.0",
     "@x402/fetch": "2.29.0",

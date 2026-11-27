@@ -6,8 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./guard";
 import { Journal } from "./journal";
-import { MarketRun, probeable, type MarketRunDeps, type PurchaseRecord } from "./run";
-import { SELLERS, SellerClient, type SellerConfig } from "./seller";
+import { MarketRun, cheapestThenBest, probeable, tieNote, type MarketRunDeps, type PurchaseRecord } from "./run";
+import { SELLERS, SellerClient, type Quote, type SellerConfig } from "./seller";
 import { newSshKey } from "./sshkey";
 import { base58Encode } from "./auth";
 import { FAKE_PAY_TO, FakeProcessor, fakePayer, inProcess } from "./testing";
@@ -47,6 +47,8 @@ type Setup = {
   activeAfterSec?: number;
   findPayment?: MarketRunDeps["findPayment"];
   payer?: ReturnType<typeof fakePayer>;
+  sshPublicKey?: string;
+  adopt?: boolean;
 };
 
 function setup(o: Setup = {}) {
@@ -84,6 +86,8 @@ function setup(o: Setup = {}) {
     askBeforePaying: o.ask ?? false,
     agent: { name: "Buyer", ansName: "buyer.agents.test" },
     keyDir: path.join(dir, "keys"),
+    sshPublicKey: o.sshPublicKey,
+    adopt: o.adopt,
     now,
     sleep,
     newCode: () => `code-${++codes}`,
@@ -191,6 +195,57 @@ describe("MarketRun happy path", () => {
   });
 });
 
+describe("which quote the agent takes", () => {
+  const offerOf = (over: Partial<Offer>): Offer => ({ seller: "s", id: "p", provider: "vultr", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.009, listHourlyUsd: 0.0069, inStock: true, spot: false, rentable: true, ...over });
+  const quoteOf = (atomic: string, over: Partial<Offer>): Quote => ({
+    seller: "s",
+    market: "test",
+    candidate: { offer: offerOf(over), regions: ["ewr"], hours: 1, estimateUsd: 0.01 },
+    region: "ewr",
+    hours: 1,
+    amountUsd: Number(atomic) / 1e6,
+    atomic,
+    accepts: { scheme: "exact", network: "solana:x", asset: "a", amount: atomic, payTo: "p" },
+    body: "{}",
+  });
+  const order = (qs: Quote[]) => [...qs].sort(cheapestThenBest).map((q) => q.candidate.offer.id);
+
+  it("the lowest firm quote wins, to the last millionth of a dollar, whatever the machine", () => {
+    const big = quoteOf("10001", { id: "big", vcpus: 8, ramGb: 32 });
+    const small = quoteOf("10000", { id: "small" });
+    expect(order([big, small])).toEqual(["small", "big"]);
+    expect(tieNote([small, big])).toBeNull();
+  });
+
+  it("at the same quote the better machine wins: the real seller's three plans at one cent", () => {
+    // what x402layer really quoted on mainnet: all three $0.0100, the first on a cheaper provider list price
+    const vc2 = quoteOf("10000", { id: "vc2-1c-1gb", listHourlyUsd: 0.0069 });
+    const vhf = quoteOf("10000", { id: "vhf-1c-1gb", listHourlyUsd: 0.0083 });
+    const amd = quoteOf("10000", { id: "vhp-1c-1gb-amd", listHourlyUsd: 0.0083 });
+    expect(order([vc2, vhf, amd])).toEqual(["vhf-1c-1gb", "vhp-1c-1gb-amd", "vc2-1c-1gb"]);
+    // more memory at the same price beats a stronger class
+    const roomy = quoteOf("10000", { id: "roomy", ramGb: 2, listHourlyUsd: 0.005 });
+    expect(order([vc2, vhf, roomy])[0]).toBe("roomy");
+    // on-demand beats interruptible at the same price and size
+    const spot = quoteOf("10000", { id: "spot", spot: true, listHourlyUsd: 0.02 });
+    expect(order([spot, vc2])).toEqual(["vc2-1c-1gb", "spot"]);
+  });
+
+  it("says so when the lowest quote was shared, and does not call equal machines stronger", () => {
+    const vc2 = quoteOf("10000", { id: "vc2-1c-1gb", listHourlyUsd: 0.0069 });
+    const vhf = quoteOf("10000", { id: "vhf-1c-1gb", listHourlyUsd: 0.0083 });
+    const dear = quoteOf("12000", { id: "dear" });
+    expect(tieNote([vhf, vc2, dear].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vhf-1c-1gb, the strongest machine at that price.");
+    const twin = quoteOf("10000", { id: "vc2-1c-1gb-b", listHourlyUsd: 0.0069 });
+    expect(tieNote([vc2, twin].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vc2-1c-1gb; on paper they are the same machine.");
+    // what the real seller quoted: two equally strong plans and a weaker one, all at one cent
+    const amd = quoteOf("10000", { id: "vhp-1c-1gb-amd", listHourlyUsd: 0.0083 });
+    expect(tieNote([vc2, amd, vhf].sort(cheapestThenBest))).toBe("Three plans quoted the same $0.0100. The agent took vhf-1c-1gb, one of the strongest machines at that price.");
+    expect(tieNote([])).toBeNull();
+    expect(tieNote([vc2])).toBeNull();
+  });
+});
+
 describe("MarketRun approval", () => {
   it("rests at approval with a code; a wrong code is refused; the right one continues; a second approve is refused", async () => {
     const { run, payer, events } = setup({ ask: true });
@@ -230,6 +285,63 @@ describe("MarketRun approval", () => {
     expect(run.view().phase).toBe("approval");
     expect(run.view().approval?.network).toContain("mainnet");
     expect(payer.calls).toBe(0);
+  });
+
+  it("a run paid from a connected wallet always stops for approval, names that wallet, and records it as the payer", async () => {
+    const payer = Object.assign(fakePayer(), { funds: "Visitor1111111111111111111111111111111111111" });
+    const { run } = setup({ ask: false, payer });
+    void run.start();
+    await waitPhase(run, "approval");
+    expect(run.view().wallet).toBe(payer.funds);
+    expect(payer.calls).toBe(0);
+    // the code is checked without being used up, so the wallet's approval can be sent first
+    const code = run.view().approval!.code;
+    expect(run.awaiting("wrong")).toBeNull();
+    expect(run.awaiting(code)?.atomic).toBe(run.view().approval!.atomic);
+    expect(run.view().phase).toBe("approval");
+    expect(run.approve(code)).toEqual({ ok: true });
+    await waitPhase(run, "ready");
+    // the money is the visitor's, the machine the agent's
+    expect(run.view().payment?.payer).toBe(payer.funds);
+    expect(payer.calls).toBe(1);
+    expect(run.awaiting(code)).toBeNull();
+  });
+
+  it("with the renter's own SSH key no key is made here, the seller gets theirs, and the login line names no key file", async () => {
+    const theirs = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq0m0b1x0u2r3n4t5e6s7t8k9e0y1a2b3c4d5e6f7g8h9 visitor";
+    const seen: string[] = [];
+    const { run, dir } = setup({
+      sshPublicKey: theirs,
+      wrap: (f) =>
+        (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (typeof init?.body === "string" && init.body.includes("ssh_public_key")) seen.push(JSON.parse(init.body).ssh_public_key);
+          return f(input, init);
+        }) as typeof fetch,
+    });
+    void run.start();
+    await waitPhase(run, "ready");
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set([theirs]));
+    expect(run.view().machine?.ssh).toBe(`ssh root@${run.view().machine?.ip}`);
+    // nothing was written to the key folder
+    expect(fs.existsSync(path.join(dir, "keys"))).toBe(false);
+  });
+
+  it("a run paid by the agent's own wallet names no connected wallet", async () => {
+    const { run } = setup();
+    void run.start();
+    await waitPhase(run, "ready");
+    expect(run.view().wallet).toBeNull();
+  });
+
+  it("the journal records which agent wallet paid, so the machine can be managed by that wallet later", async () => {
+    const { run, journal, payer } = setup();
+    void run.start();
+    await waitPhase(run, "ready");
+    const entries = journal.all();
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) expect(e.agent).toBe(payer.address);
+    expect(journal.open()[0].agent).toBe(payer.address);
   });
 
   it("cancel at approval ends refused CANCELLED, no payment, no journal line", async () => {
@@ -433,6 +545,18 @@ describe("MarketRun never pays twice", () => {
     expect(payer.calls).toBe(1);
     expect(v.machine?.id).toBe([...seller.machines.keys()][0]);
     expect(events()).toEqual(["intent", "unknown", "paid", "active"]);
+  });
+
+  it("409 settlement_pending with adoption off (a public visitor): the machine on the shared wallet's list is never taken", async () => {
+    const { run, payer, events, seller } = setup({ faults: { settlementPending409: true }, adopt: false });
+    await run.start();
+    const v = run.view();
+    // the machine exists at the seller, but by plan and region alone it could be another visitor's
+    expect(seller.machines.size).toBe(1);
+    expect(v.machine).toBeNull();
+    expect(v.phase).toBe("failed");
+    expect(payer.calls).toBe(1);
+    expect(events()).toEqual(["intent", "unknown"]);
   });
 
   it("unknown and no machine appears: failed, one payer call, journal ends unknown", async () => {

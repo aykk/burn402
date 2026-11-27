@@ -78,7 +78,8 @@ async function agents(): Promise<void> {
 }
 
 function next(): ChildProcess {
-  const child = spawn("npx", ["next", "dev"], { cwd: ROOT, stdio: "inherit" });
+  // bound to this computer only, like npm run dev
+  const child = spawn("npx", ["next", "dev", "-H", "127.0.0.1"], { cwd: ROOT, stdio: "inherit" });
   children.push(child);
   return child;
 }
@@ -104,12 +105,12 @@ async function main() {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  if (await healthy("http://localhost:3000/api/demo/state")) {
-    log("app already running on http://localhost:3000; ctrl+c stops what this launcher started");
+  if (await healthy("http://127.0.0.1:3000/api/demo/state")) {
+    log("app already running on http://127.0.0.1:3000; ctrl+c stops what this launcher started");
     setInterval(() => {}, 1 << 30);
     return;
   }
-  log("starting the app on http://localhost:3000");
+  log("starting the app on http://127.0.0.1:3000");
   const app = next();
   app.on("exit", (code) => {
     shutdown(stopAns);

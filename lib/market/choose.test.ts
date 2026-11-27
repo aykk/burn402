@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { billedHours, choose, estimateUsd, summarize } from "./choose";
+import { betterMachine, billedHours, choose, estimateUsd, summarize } from "./choose";
 import { DEFAULT_RULES, type Limits, type Need, type Offer } from "./types";
 
 let n = 0;
@@ -98,13 +98,30 @@ describe("choose", () => {
     expect(choose([small, big], need(), BIG, R).ranked[0].offer).toBe(big);
   });
 
-  it("breaks price ties by fewer vcpus, then less ram, then id", () => {
+  it("at the same price the better machine comes first: more vcpus, then more ram, then the dearer list price, then the name", () => {
     const a = offer({ id: "z", vcpus: 2, ramGb: 2 });
     const b = offer({ id: "y", vcpus: 1, ramGb: 4 });
     const c = offer({ id: "x", vcpus: 1, ramGb: 2 });
     const d = offer({ id: "w", vcpus: 1, ramGb: 2 });
-    const ids = choose([a, b, c, d], need(), BIG, R).ranked.map((x) => x.offer.id);
-    expect(ids).toEqual(["w", "x", "y", "z"]);
+    // same size and same price to the buyer, but the provider lists it higher: a stronger class
+    const e = offer({ id: "v", vcpus: 1, ramGb: 2, listHourlyUsd: 0.5 });
+    const ids = choose([d, c, b, a, e], need(), BIG, R).ranked.map((x) => x.offer.id);
+    expect(ids).toEqual(["z", "y", "v", "w", "x"]);
+  });
+
+  it("a better machine never beats a cheaper one", () => {
+    const cheap = offer({ id: "cheap", vcpus: 1, ramGb: 1, hourlyUsd: 0.01 });
+    const strong = offer({ id: "strong", vcpus: 8, ramGb: 32, hourlyUsd: 0.0101 });
+    expect(choose([strong, cheap], need({ vcpus: 1, ramGb: 1 }), BIG, R).ranked.map((x) => x.offer.id)).toEqual(["cheap", "strong"]);
+  });
+
+  it("betterMachine: on-demand over interruptible at the same size, and an order that never depends on the listing", () => {
+    const base = offer({ id: "a", vcpus: 2, ramGb: 4 });
+    expect(betterMachine(base, { ...base, id: "b", spot: true })).toBeLessThan(0);
+    expect(betterMachine({ ...base, spot: true }, { ...base, id: "b" })).toBeGreaterThan(0);
+    expect(betterMachine(base, { ...base, id: "b", vramGb: 8 })).toBeGreaterThan(0);
+    expect(betterMachine(base, { ...base })).toBe(0);
+    expect(betterMachine(base, { ...base, id: "b" })).toBeLessThan(0);
   });
 
   it("rejects the wrong kind and too little vram", () => {

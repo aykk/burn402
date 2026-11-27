@@ -1,7 +1,5 @@
 // The rent page's help labels. Long explanations live here so they can be reworded in one place.
 export const RENT_HELP = {
-  describe:
-    "Say in plain words what machine you need and for how long. A model fills in the fields below; it never picks the plan or touches payment. Check the fields before you start.",
   market:
     "Test pays real devnet USDC to a test seller that runs simulated machines, so nothing costs real money. Real pays USDC on Solana mainnet to x402layer for a real machine, and always waits for you before paying.",
   kind: "CPU for general work. GPU when you need graphics memory, for example to run or train a model.",
@@ -12,4 +10,8 @@ export const RENT_HELP = {
   rate: "The most your agent may pay per hour of machine time. Plans that cost more per hour are left out.",
   spot: "Interruptible machines are cheaper but can be taken back by the provider at any time.",
   ask: "Your agent stops with the exact payment and waits for you to press Pay and rent. The real market always asks.",
+  sshKey:
+    "The public half of an SSH key pair, one line starting with ssh-ed25519 or ssh-rsa (the contents of a .pub file). The machine is set up with it, so you log in with the private half that never leaves your computer. Never paste a private key.",
+  payFrom:
+    "The agent wallet is the one this app runs with. My wallet is your own Solana wallet in this browser: at each payment it asks you to approve exactly the quoted amount for your agent, which then pays the seller. The site never holds your key or your money.",
 } as const;

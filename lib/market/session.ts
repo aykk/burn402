@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { parseNuzaFeed } from "./catalog";
-import { choose } from "./choose";
+import { choose, summarize, type RejectReason } from "./choose";
 import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
 import { accessVerdict, headersOf, visitorOf } from "./access";
+import { isWalletAddress, makeDelegatePayer } from "./delegate";
 import { makePayer, type Payer } from "./pay";
 import { buyableFor, comparePrices, type PriceComparison } from "./prices/compare";
 import { fetchMarketPrices, type MarketPrices } from "./prices/fetch";
@@ -20,10 +21,19 @@ const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 type Env = Record<string, string | undefined>;
 
-/** The secret that pays on a market: the test market uses the agent wallet; the real one prefers its own. */
-export function secretFor(market: MarketId, env: Env = process.env): string | null {
-  const key = market === "real" ? env.MAINNET_SOLANA_SECRET_KEY || env.AGENT_SOLANA_SECRET_KEY : env.AGENT_SOLANA_SECRET_KEY;
-  return key ? key : null;
+/** Whose rental it is: the owner's, or a public visitor's. */
+export type Audience = "owner" | "public";
+
+/**
+ * The agent key for a market: the test market uses the agent wallet; the real one prefers its own.
+ * Public visitors' REAL rentals get an agent identity of their own when PUBLIC_MAINNET_SOLANA_SECRET_KEY
+ * is set, so their machines are never on the same wallet's list as the owner's.
+ */
+export function secretFor(market: MarketId, env: Env = process.env, audience: Audience = "owner"): string | null {
+  if (market !== "real") return env.AGENT_SOLANA_SECRET_KEY || null;
+  // no falling back to the owner's key: a stranger's real rental is signed by the visitors' key or not at all
+  if (audience === "public") return env.PUBLIC_MAINNET_SOLANA_SECRET_KEY || null;
+  return env.MAINNET_SOLANA_SECRET_KEY || env.AGENT_SOLANA_SECRET_KEY || null;
 }
 
 /** "A key is configured", not "it has funds". The test market also needs the test seller's receiver. */
@@ -54,8 +64,8 @@ function spaced(payer: Payer): Payer {
   };
 }
 
-export async function payerFor(market: MarketId): Promise<Payer | null> {
-  const secret = secretFor(market);
+export async function payerFor(market: MarketId, audience: Audience = "owner"): Promise<Payer | null> {
+  const secret = secretFor(market, process.env, audience);
   if (!secret) return null;
   let p = payers.get(secret);
   if (!p) {
@@ -66,6 +76,27 @@ export async function payerFor(market: MarketId): Promise<Payer | null> {
     payers.set(secret, p);
   }
   return p;
+}
+
+/**
+ * A payer for one run that spends a connected wallet's USDC under that wallet's approval. The agent's
+ * key for the market signs; null when none is set. Not cached: it belongs to one visitor's run.
+ */
+export async function delegatePayerFor(market: MarketId, wallet: string, audience: Audience = "owner"): Promise<Payer | null> {
+  const secret = secretFor(market, process.env, audience);
+  if (!secret) return null;
+  return makeDelegatePayer(secret, { market, owner: wallet });
+}
+
+/**
+ * The agent wallet that owns a purchase's machine, to manage it later: the one whose address the journal
+ * recorded with the purchase, else the owner's. A machine answers only to the wallet that paid for it.
+ */
+export async function payerOwning(market: MarketId, agent: string | null | undefined): Promise<Payer | null> {
+  const owner = await payerFor(market, "owner");
+  if (!agent || owner?.address === agent) return owner;
+  const visitor = await payerFor(market, "public");
+  return visitor?.address === agent ? visitor : owner;
 }
 
 export function sellerFor(market: MarketId, payer: Payer | null): SellerClient {
@@ -117,7 +148,32 @@ export function checkRequest(request: Request): Response | null {
   return null;
 }
 
-export type RunInput = { market: MarketId; need: Need; limits: Limits; askBeforePaying: boolean };
+export type RunInput = {
+  market: MarketId;
+  need: Need;
+  limits: Limits;
+  askBeforePaying: boolean;
+  /** the connected wallet to pay from, or null for the agent's own */
+  wallet: string | null;
+  /** the renter's own SSH public key, or null to have one made on this computer */
+  sshPublicKey: string | null;
+};
+
+/** One line of an OpenSSH public key: a key type this app knows, the key, and an optional short comment. */
+const SSH_PUBLIC_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) ([A-Za-z0-9+/]{60,1100}={0,2})( [\x20-\x7e]{0,80})?$/;
+
+/**
+ * The key as it will be handed to the seller, or null when it is not a public key line. A private key
+ * never passes. Only the type and the key itself go on: the comment is the renter's free text, and how the
+ * seller writes the line into a machine is not ours to know, so it is dropped.
+ */
+export function sshPublicKeyOf(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const line = v.trim();
+  if (line.length > 1300) return null;
+  const m = SSH_PUBLIC_KEY_RE.exec(line);
+  return m ? `${m[1]} ${m[2]}` : null;
+}
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -167,44 +223,29 @@ export function parseLimits(budgetUsd: unknown, rateUsdHr: unknown): { ok: true;
 
 export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
   if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
-  const { market, budgetUsd, rateUsdHr, askBeforePaying } = body;
+  const { market, budgetUsd, rateUsdHr, askBeforePaying, wallet, sshPublicKey } = body;
   if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
   const need = parseNeed(body.need);
   if (!need.ok) return need;
   const limits = parseLimits(budgetUsd, rateUsdHr);
   if (!limits.ok) return limits;
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
+  if (wallet !== undefined && wallet !== null && !isWalletAddress(wallet)) return { ok: false, error: "that is not a Solana wallet address" };
+  const hasKey = sshPublicKey !== undefined && sshPublicKey !== null && sshPublicKey !== "";
+  const key = hasKey ? sshPublicKeyOf(sshPublicKey) : null;
+  if (hasKey && key === null) return { ok: false, error: "that is not an SSH public key; paste the one line from your .pub file (it starts with ssh-ed25519 or ssh-rsa)" };
   return {
     ok: true,
     value: {
       market,
       need: need.value,
       limits: limits.value,
-      askBeforePaying,
+      // a connected wallet approves each payment itself
+      askBeforePaying: wallet ? true : askBeforePaying,
+      wallet: typeof wallet === "string" ? wallet : null,
+      sshPublicKey: key,
     },
   };
-}
-
-/**
- * Reads the model's reply to "describe what you need". Only fields that pass the same checks
- * as the form are kept; the model never picks a plan or touches payment.
- */
-export function needFromModelReply(text: string): { need: Partial<Need>; note: string } {
-  const match = /\{[\s\S]*\}/.exec(text);
-  let raw: unknown = null;
-  try {
-    raw = match ? JSON.parse(match[0]) : null;
-  } catch {
-    raw = null;
-  }
-  if (!isObj(raw)) return { need: {}, note: "the model's answer could not be read; fill the form by hand" };
-  const need: Partial<Need> = {};
-  for (const key of NEED_KEYS) {
-    if (raw[key] === undefined || needFieldError(key, raw[key])) continue;
-    (need as Record<string, unknown>)[key] = key === "regions" ? [...(raw[key] as string[])] : raw[key];
-  }
-  const note = typeof raw.note === "string" ? raw.note.slice(0, 300) : "";
-  return { need, note: note || (Object.keys(need).length ? "filled from your description; check the fields" : "nothing in the description matched the form") };
 }
 
 export type PricesInput = { market: MarketId; need: Need; limits?: Limits };
@@ -222,6 +263,79 @@ export function parsePricesInput(body: unknown): { ok: true; value: PricesInput 
   const limits = parseLimits(budgetUsd, rateUsdHr);
   if (!limits.ok) return limits;
   return { ok: true, value: { market, need: need.value, limits: limits.value } };
+}
+
+/** The plans that fit a need, as the page lists them while the filters are being set: no run, no quote, nothing paid. */
+export type PlanPreview = {
+  market: MarketId;
+  seller: string;
+  /** when the seller's price list was read (ms) */
+  asOf: number;
+  /** plans on the price list, and how many of them fit the need and the limits */
+  total: number;
+  fits: number;
+  /** the cheapest that fit, cheapest first and at the same price the better machine first: the order the agent would ask them in */
+  plans: { id: string; provider: string; kind: "cpu" | "gpu"; vcpus: number; ramGb: number; vramGb: number; gpu: string | null; regions: number; spot: boolean; hourlyUsd: number; listHourlyUsd: number | null; hours: number; estimateUsd: number }[];
+  leftOut: { reason: RejectReason; count: number }[];
+};
+
+const PREVIEW_ROWS = 8;
+/** The price list is read from the seller at most this often, however fast the filters change. */
+const CATALOG_TTL_MS = 60_000;
+
+type Catalog = Awaited<ReturnType<SellerClient["catalog"]>>;
+type CatalogCache = Map<MarketId, { at: number; value: Promise<Catalog> }>;
+const catalogs: CatalogCache = ((globalThis as unknown as { __burn402Catalogs?: CatalogCache }).__burn402Catalogs ??= new Map());
+
+/** The seller's price list, read once a minute at most and shared by every visitor. A failed read is not kept. */
+export function cachedCatalog(market: MarketId, deps: { seller?: SellerClient; now?: () => number; cache?: CatalogCache } = {}): Promise<{ catalog: Catalog; asOf: number }> {
+  const now = (deps.now ?? Date.now)();
+  const cache = deps.cache ?? catalogs;
+  let entry = cache.get(market);
+  if (!entry || now - entry.at >= CATALOG_TTL_MS) {
+    const seller = deps.seller ?? new SellerClient(SELLERS[market], { signer: null, timeouts: { read: COMPARE_SELLER_TIMEOUT_MS, paid: COMPARE_SELLER_TIMEOUT_MS } });
+    const made = { at: now, value: Promise.resolve().then(() => seller.catalog()) };
+    made.value.catch(() => {
+      if (cache.get(market) === made) cache.delete(market);
+    });
+    cache.set(market, made);
+    entry = made;
+  }
+  const at = entry.at;
+  return entry.value.then((catalog) => ({ catalog, asOf: at }));
+}
+
+/**
+ * What the agent would look at for this need, from the price list alone: the plans that fit inside the
+ * limits in the order it would ask them for a firm quote, and what was left out and why. Estimates, never
+ * quotes. Reads the (cached) price list only; never quotes, pays or touches a run.
+ */
+export async function planPreview(input: PricesInput & { limits: Limits }, deps: Parameters<typeof cachedCatalog>[1] = {}): Promise<PlanPreview> {
+  const { catalog, asOf } = await cachedCatalog(input.market, deps);
+  const { ranked, rejected } = choose(catalog.offers, input.need, input.limits, catalog.rules);
+  return {
+    market: input.market,
+    seller: (deps.seller ?? { config: SELLERS[input.market] }).config.label,
+    asOf,
+    total: catalog.offers.length,
+    fits: ranked.length,
+    plans: ranked.slice(0, PREVIEW_ROWS).map((c) => ({
+      id: c.offer.id,
+      provider: c.offer.provider,
+      kind: c.offer.kind,
+      vcpus: c.offer.vcpus,
+      ramGb: c.offer.ramGb,
+      vramGb: c.offer.vramGb,
+      gpu: c.offer.gpu,
+      regions: c.regions.length,
+      spot: c.offer.spot,
+      hourlyUsd: c.offer.hourlyUsd,
+      listHourlyUsd: c.offer.listHourlyUsd,
+      hours: c.hours,
+      estimateUsd: c.estimateUsd,
+    })),
+    leftOut: summarize(rejected),
+  };
 }
 
 /** Live prices from other providers for a run (cached for 60 s, never throws). */
@@ -267,7 +381,8 @@ export async function priceComparison(
   const seller = deps.seller ?? new SellerClient(SELLERS[input.market], { signer: null, timeouts: { read: timeoutMs, paid: timeoutMs } });
   const [market, catalog] = await Promise.all([
     (deps.prices ?? marketPricesFeed)().catch((): MarketPrices => ({ prices: [], sources: [], asOf: Date.now() })),
-    within(Promise.resolve().then(() => seller.catalog()), timeoutMs).catch(() => null),
+    // the price list is read at most once a minute for everyone (a seller handed in by a test is asked directly)
+    within(deps.seller ? Promise.resolve().then(() => seller.catalog()) : cachedCatalog(input.market).then((c) => c.catalog), timeoutMs).catch(() => null),
   ]);
   const top = catalog ? choose(catalog.offers, input.need, input.limits ?? COMPARE_LIMITS, catalog.rules).ranked.find((c) => !c.offer.spot && c.offer.rentable) : undefined;
   const buyable =

@@ -216,3 +216,89 @@ Rules:
 **Known limits.** (1) After an unclear payment outcome a run adopts a new machine of the same plan and region from the wallet's list; with a shared wallet that could be another visitor's. On the test market this path only occurs under the overspend test's faults, which run alone. (2) The devnet wallet is finite (about $0.0104 a rental); when it runs dry, rentals fail before paying until it is refilled. (3) A quick tunnel's address changes when it restarts, and the site is only up while the owner's computer is.
 
 **Going live.** `npm run public` builds, opens a Cloudflare quick tunnel, and starts the production server with `BURN402_PUBLIC_HOSTS` set to the tunnel's host and `BURN402_TEST_SELLER=1`.
+
+## Addendum 2026-11-26: paying from a connected wallet
+
+**Why.** The owner wants visitors to rent with their own money on mainnet. This addendum is the first step: the owner's page can pay from a wallet in the browser. The public site still pays from its shared devnet wallet only.
+
+**The constraint that shapes it.** The seller ties a machine to the wallet that paid and asks that wallet for a fresh signature (address, method, path, time, nonce) on every status check, list and destroy. A browser wallet as the x402 payer would need a popup for each status check while the machine boots.
+
+**Approaches.**
+1. *The wallet is the x402 payer.* One popup to pay and no SOL needed, but the machine then belongs to the visitor's wallet and every management call needs another popup. Rejected.
+2. *Deposit to the agent's wallet, which pays.* Works with any facilitator, but the server holds visitors' money, needs refunds when a purchase fails, and mixes it with the owner's funds. Kept as the fallback if (3) is refused on mainnet.
+3. *Token approval (chosen).* The visitor's wallet signs one SPL `ApproveChecked` for exactly the quoted amount to the agent's wallet. The agent signs the x402 `TransferChecked` out of the visitor's account as its delegate. No custody, an on-chain cap equal to the quote, and the agent owns and manages the machine. The x402 reference facilitator names the transfer authority as the payer and does not require the source account to be the authority's own, and it tolerates Phantom's Lighthouse instructions; whether the real seller's facilitator does the same is not known.
+
+**Flow** (`lib/market/delegate.ts`, `DemoSession.walletApproval` and `approveMarket`, `POST /api/market/wallet`, `POST /api/market/approve`):
+1. `POST /api/market/run` takes `wallet` (a 32-byte base58 address). The run's payer signs as the agent and carries `funds`, the visitor's address. Such a run always stops for approval.
+2. At the approval stop the page asks `POST /api/market/wallet` for the approval transaction: legacy format, fee payer the visitor, `ApproveChecked(source = the visitor's USDC account, delegate = the agent, amount = the quote)` and a memo `burn402 <digest of run id and one-time code>`. It is refused in plain words when the wallet holds no USDC, too little, or no SOL for the fee.
+3. The wallet signs (Wallet Standard `solana:signTransaction`, hand-rolled discovery in `app/components/wallet.ts`; no key ever reaches the page or the server). The signed bytes go to `POST /api/market/approve` with the code.
+4. The server checks the signed transaction: signed by the visitor's wallet, which pays its fee; exactly one token instruction, the approval above; this run's memo. A wallet's own extra instructions from other programs are allowed. Then it sends it and the run goes on to pay.
+5. Before the agent signs the payment it waits (up to 60 s) until the chain shows delegate = the agent and at least the amount; the chain, not the browser, is what lets it pay.
+6. The payment is the exact scheme's transaction (compute limit, compute price, `TransferChecked`, memo) with the visitor's account as the source and the agent as authority. The record names the visitor's wallet as the payer; the chain lookup finds the transfer by the agent's signature and the visitor's balance change.
+
+**Why the memo.** A wallet may be left with an unused approval to the agent (a payment refused after the approval landed). Without the memo, another session could name that wallet and spend it. The server only proceeds on a transaction that wallet signed carrying this run's digest, which nobody else can produce.
+
+**Non-goals for now.** Public visitors paying from their own wallet (refused in `POST /api/market/run`); sponsoring the approval's network fee; revoking a leftover approval from the page (the next approval overwrites it, and the wallet can revoke it).
+
+**Proven 2026-11-27 on devnet** (`scripts/wallet-test.ts`, against the running app): a stand-in wallet signed the approval as a browser wallet would; the delegated payment settled through the hosted facilitator (transaction `xo9fezymvgNYB1mVUQkNc3ez3NEUWxBes7SomQiJ52SQcmnxRicGAiQAZ6GJM8HeWEYpGtw6xUZzF3jyAQzPHAY`), signed by the facilitator's fee payer and the agent only; the stand-in wallet's USDC fell by exactly the quote, the approval was left at zero, and the machine came up owned by the agent and was destroyed.
+
+**Proven 2026-11-27 on mainnet, with Phantom, by the owner.** Phantom signed the approval unchanged enough for the server's checks; the real seller's facilitator accepted the delegated payment (transaction `2M8ScMfZcfGdZA8sULU7A6qXFZ7BvWrfCfWKGTZMpbKCD7ezi2PoBzJf1NTvnuZpetGGaPh5ZFKygLp1H7rhaiLs`) and tied the machine to the agent's wallet, which polled it to active and found SSH open. Seen on that run: (1) the seller's order endpoint timed out (60 s) on the first plan before anything was signed; the run fell back to another plan at the same price and stopped for a second approval, which replaced the first; (2) the page drops its wallet connection whenever Phantom locks or switches account, and needs Connect pressed again. Open before this goes public: reconnect without a click, an independent security review, and a permanent address.
+
+## Addendum 2026-11-27: security review and hardening
+
+An independent reviewer read the connected-wallet code, the access rules, every route and the repository's history. Result: no back door, no secret in tracked files or in history, and no path that moves a wallet's USDC without that wallet's signature for that run. No Critical or High finding. What it found, and what was done:
+
+| # | Finding | Status |
+| --- | --- | --- |
+| F1 | Owner status rested on the Host plus the first `X-Forwarded-For` hop: a proxy that rewrites the Host, or a visitor sending `X-Forwarded-For: 127.0.0.1`, could look like the owner behind a front end other than the Cloudflare launcher. | Tightened: any non-local hop, or a `Forwarded`, `Via` or `X-Real-IP` header, means forwarded. A proxy that rewrites the Host and adds nothing still cannot be told from the owner; the README forbids it. **Open before real money is offered publicly:** a separate public process without the mainnet key, or an owner secret. |
+| F2 | The approval checker relayed a signed transaction with any extra instructions or signers beside the approval. | Fixed: one signer; only the token program (once), memo, compute budget and Lighthouse; at most 8 instructions. |
+| F3 | One key signs for public devnet visitors and for the real market. | Done on the owner's machine: `MAINNET_SOLANA_SECRET_KEY` is now a separate wallet, so the key the public demo signs with on devnet is not the real market's. |
+| F4 | An approval can be left on chain (a send that timed out but landed, a cancel mid-send, a refused payment); the page cannot revoke it. | Fixed: wording is honest about a send that may still land, and a wallet-funded run that ends unpaid after an approval was sent offers **Check and revoke** (an SPL Revoke the wallet signs, checked like the approval, proven on devnet with `npm run wallet:test -- 0 revoke`). |
+| F5 | Error bodies to public visitors were not filtered for server paths. | Fixed in every route. |
+| F6 | The reset and records routes relied on the proxy alone for the cross-site check. | Fixed: each applies the rule itself. |
+| F7 | Any well-formed session id was accepted. | Fixed: the cookie carries the server's HMAC on the id. |
+| F8 | The tunnel could serve another program started on the port within three minutes of the app stopping. | Fixed: the watchdog closes the tunnel at once when the port's listener is not the app. |
+| F9 | A scratch path with the macOS user name in a plan document; `.impeccable/` not ignored. | Fixed going forward (the path remains in earlier history). |
+
+Also added: a content security policy (`default-src 'self'`, same-origin connections only), `Cross-Origin-Resource-Policy`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`; owner writes the browser marks `Sec-Fetch-Site: cross-site` or `same-site` are refused; the page reconnects to the wallet without a click after the wallet locks or switches account.
+
+**Still required before connected wallets open to public visitors:** F1's robust fix, limits per wallet and per address on the two routes that call the Solana node, a way for a visitor to reach the machine they paid for (their own SSH key), and a rule for a visitor's money when the seller keeps a payment.
+
+## Addendum 2026-11-27: which quote the agent takes
+
+The lowest firm quote wins, compared on the exact amount. The real seller quotes in whole cents for small machines, so the three cheapest 1 vCPU plans all came back at exactly $0.0100, and the agent kept the first in the chooser's order: the plan with the lowest provider list price, which is the weakest of the three. Now a tie goes to the better machine (`betterMachine` in `lib/market/choose.ts`): more vCPUs, then more memory, then more GPU memory, then on-demand over interruptible, then the higher provider list price, then the plan name. The chooser ranks equal estimates the same way, a fallback after a failed purchase uses the same order, and the run's view carries a `choice` sentence the page shows when the lowest quote was shared.
+
+Not changed: the agent still asks for at most three firm quotes (each takes the real seller 3 to 18 seconds). A fourth plan that would also have quoted the same cent is not asked.
+
+## Addendum 2026-11-27: the plan list, the owner key, and public wallet payments
+
+**Plan list.** While there is no run, the right column lists the plans that fit the form's filters and limits, in the order the agent would ask them, and refreshes as the filters change (350 ms after the last change). `POST /api/market/plans` answers from the seller's price list, read at most once a minute per market and shared by every visitor (`cachedCatalog`). Estimates only: the order endpoint is never called and nothing is paid.
+
+**Owner key (closes F1).** `BURN402_OWNER_TOKEN`, 64 hex characters made by the launcher on every start. When it is set, a local, not-forwarded request is the owner only if it carries the key: the `b402_owner` cookie (HttpOnly, SameSite=Strict) or the `x-b402-owner` header. `GET /api/owner?token=…` hands the key to the browser: it answers on this computer only, stores the cookie and redirects to `/`. The app's own calls to its test seller carry the header (`SellerClient`'s default fetch, for the local test seller only; never to another host). `scripts/wallet-test.ts` and `scripts/market-sweep.ts` read `.burn402/owner-token`. Without the variable (plain `npm run dev`) the local name alone is the owner.
+
+**Public wallet payments.**
+- *Test market:* a public visitor may pay from their own wallet on devnet (their own devnet USDC and SOL).
+- *Real market:* only when the owner starts with `npm run public -- --real` (`BURN402_PUBLIC_REAL=1`). Then a public run on the real market must be wallet-funded and must bring the visitor's SSH public key; the budget cap stays $1. A visitor never spends the agent's wallet.
+- *SSH key:* one OpenSSH public key line (`ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp*`), checked by `sshPublicKeyOf` on the server and the same pattern in the form. With it the run makes no key on this computer and the login line is `ssh root@<ip>`.
+- *Shared agent wallet:* every public machine belongs to the one agent wallet, so a public run never adopts a machine by plan and region after an unclear payment (`adopt: false`); it ends as an open purchase the visitor can see.
+- *Limits:* preparing, sending or revoking an approval is counted per session, per address and overall (`wallet` in `lib/demo/limits.ts`), since each asks the Solana node.
+- *Refunds:* none by this site. The money goes from the visitor's wallet to the seller; the approval stop says so before the visitor approves, and an unclear payment stays listed with its transaction.
+
+**Why `--real` is off by default.** The machines are rented under this app's agent identity at the seller, and a visitor has root on theirs. Opening that to strangers is the owner's decision each time the site is started. It also still runs from the owner's computer behind a quick tunnel, so a visitor's page goes away if the computer sleeps (the machine itself runs to the end of its paid time, and the visitor has its address and their own key).
+
+## Addendum 2026-11-27: second security review (the owner key and public wallet payments)
+
+An independent reviewer read everything after commit 02a986d. No Critical or High finding; with the real market closed to the public (the default) it judged the change safe to ship. What it found, and what was done:
+
+| # | Finding | Status |
+| --- | --- | --- |
+| A | With one agent wallet shared by the owner and visitors, the owner's run could adopt a visitor's machine after an unclear payment (an automated check raised this first). | Fixed: visitors' real rentals are signed by their own agent key; while the site is public nobody adopts or destroys by plan and region; the journal records which agent wallet paid and recovery uses that wallet. |
+| M1 | `--real` fell back to the owner's mainnet key when no key for visitors was set. | Fixed, fail closed: no fallback (`secretFor`), `publicReal()` is false without a distinct `PUBLIC_MAINNET_SOLANA_SECRET_KEY`, and the launcher refuses `--real` without it. |
+| L1 | "Wallet-funded and own SSH key" for a public real run was checked only in the route. | Fixed: `newMarketRun` refuses it too. |
+| L2 | The owner key failed open when set but too short, and on a hand-set public host with no key. | Fixed: a public site with no valid key has no owner at all. |
+| L3 | The owner link put the key in a URL (process list, scrollback, browser history) and was opened even if the app had not started. | Fixed: the link carries a one-time code that is exchanged for the key once; it is opened only after this app answers. Left as is: the cookie is sent to other servers on 127.0.0.1 (cookies ignore ports); they are the owner's own, and they cannot use it from another machine. |
+| L4 | The price comparison read the real seller's price list on every request. | Fixed: it uses the one-minute cache. |
+| L5 | The SSH key's free-text comment went to the seller verbatim. | Fixed: only the key type and the key are sent. |
+| L6 | `market:sweep` could not see machines on the visitors' agent wallet. | Fixed: `--audience public` lists them (never destroys them). |
+
+**What no code change removes.** With `--real`, strangers get root on real machines rented under an agent identity this app controls. The separate key keeps that away from the owner's own wallet and machines, but abuse still lands on that identity at the seller. It stays the owner's decision each time the site is started.
