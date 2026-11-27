@@ -41,6 +41,9 @@ const NUMBER = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance
 /** The filter rail: one filter per row, top to bottom, label on the left and its field on the right, all fields one width. */
 const ROWS = "grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5";
 
+/** Around a checkbox: padding that takes the click too, pulled back by the same margin so nothing moves. */
+const CHECK_TARGET = "-m-1.5 inline-flex p-1.5";
+
 const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 const MARKET_OPTIONS = [
@@ -359,7 +362,10 @@ export function NeedForm(props: {
           onChange={(e) => setRegions(e.target.value)}
         />
         <span className="col-span-2 flex items-center gap-2 pt-0.5">
-          <input id="spot-input" type="checkbox" aria-labelledby="spot-label" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
+          {/* The label is only a larger place to click or tap (25px); the box takes its name from the text beside it. */}
+          <label className={CHECK_TARGET}>
+            <input id="spot-input" type="checkbox" aria-labelledby="spot-label" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
+          </label>
           <Help id="help-spot" text={RENT_HELP.spot} forId="spot-input">
             <span id="spot-label">Interruptible is OK</span>
           </Help>
@@ -373,7 +379,7 @@ export function NeedForm(props: {
         {/* Whose money pays. Your own wallet approves each payment itself, so that choice always asks first.
             The public demo pays from its shared devnet wallet only. */}
         {!publicDemo && (
-          <div className="col-span-2 space-y-1.5 pt-1">
+          <div className="col-span-2 space-y-2 pt-1">
             <Label help="payFrom" forId="pay-from-choice">
               Pay from
             </Label>
@@ -391,15 +397,17 @@ export function NeedForm(props: {
           </div>
         )}
         <span className="col-span-2 flex items-center gap-2 pt-0.5">
-          <input
-            id="ask-input"
-            type="checkbox"
-            aria-labelledby="ask-label"
-            aria-describedby="help-ask"
-            checked={asks}
-            disabled={disabled || market === "real" || ownWallet}
-            onChange={(e) => setAsk(e.target.checked)}
-          />
+          <label className={CHECK_TARGET}>
+            <input
+              id="ask-input"
+              type="checkbox"
+              aria-labelledby="ask-label"
+              aria-describedby="help-ask"
+              checked={asks}
+              disabled={disabled || market === "real" || ownWallet}
+              onChange={(e) => setAsk(e.target.checked)}
+            />
+          </label>
           <Help id="help-ask" text={RENT_HELP.ask} forId="ask-input">
             <span id="ask-label">Ask me before paying</span>
           </Help>

@@ -197,7 +197,7 @@ export default function Page() {
       <Nav current="/" burning={running}>
         <button
           ref={logButton}
-          className="underline decoration-1 underline-offset-[3px] hover:decoration-2"
+          className="py-0.5 underline decoration-1 underline-offset-[3px] hover:decoration-2"
           aria-haspopup="dialog"
           aria-expanded={drawer}
           onClick={() => setDrawer(true)}
@@ -206,7 +206,7 @@ export default function Page() {
         </button>
         {/* Reset is destructive: set apart from the rest by a rule, quiet until pointed at. */}
         <button
-          className="border-l border-rule pl-6 text-muted hover:text-foreground hover:underline hover:decoration-1 hover:underline-offset-[3px]"
+          className="border-l border-rule py-0.5 pl-6 text-muted hover:text-foreground hover:underline hover:decoration-1 hover:underline-offset-[3px]"
           title="Forget this session: cancels a run waiting for approval, destroys a test-market machine, clears the log"
           onClick={async () => {
             setResetError(null);
