@@ -5,12 +5,16 @@ import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
 import { WalletError, approvalMemo, buildApproval, buildRevoke, checkSignedApproval, checkSignedRevoke, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
 import { usdExact } from "../market/money";
 import type { Payer } from "../market/pay";
-import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { publicHosts } from "../market/access";
+import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, payerOwning, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { DemoLog } from "./log";
 import type { Actor, Runtime } from "./runtime";
 
 export const MARKET_ENDED: ReadonlySet<MarketPhase> = new Set(["released", "failed", "refused"]);
+
+/** True while the site answers on a public address: visitors then rent through agent wallets that more than one renter shares. */
+const sharedWallets = (): boolean => publicHosts().size > 0;
 /** Phases in which a run is talking to the seller right now (not waiting for a person, not holding a machine). */
 const MARKET_WORKING: ReadonlySet<MarketPhase> = new Set(["scanning", "choosing", "quoting", "paying", "provisioning", "releasing"]);
 
@@ -110,7 +114,8 @@ export class DemoSession {
     const mandate = admitted.mandate.hash;
 
     // from a connected wallet, the agent's key still signs: it spends that wallet's USDC under the wallet's own approval
-    const payer = input.wallet ? await delegatePayerFor(input.market, input.wallet) : await payerFor(input.market);
+    // a public visitor's rental is signed by the public agent key, where one is set, never by the owner's
+    const payer = input.wallet ? await delegatePayerFor(input.market, input.wallet, this.kind) : await payerFor(input.market, this.kind);
     const run = new MarketRun({
       id,
       market: input.market,
@@ -125,8 +130,9 @@ export class DemoSession {
       agent,
       keyDir: sshKeyDir(rt.config.root),
       sshPublicKey: input.sshPublicKey ?? undefined,
-      // every public visitor's machine belongs to the one agent wallet: never adopt one by plan and region alone
-      adopt: this.kind === "owner",
+      // While the site is public, agent wallets are shared (visitors with each other, and on the test market with
+      // the owner): a machine is then never adopted by plan and region alone, for anyone. It could be someone else's.
+      adopt: !sharedWallets(),
       findPayment: findPaymentFor(input.market),
       onRecord: (record) => {
         void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti, cluster: clusterForMarket(input.market) }), {
@@ -280,13 +286,18 @@ export class DemoSession {
     // with no machine id the search goes by plan and region through everything the wallet owns; every public
     // visitor shares that wallet, so the search could land on someone else's machine
     if (this.kind === "public" && !open.instance) return { ok: false, error: "This purchase has no machine on record. Dismiss it instead." };
+    // the same holds for the owner while the site is public: the match could land on a visitor's machine
+    if (!open.instance && sharedWallets()) {
+      return { ok: false, error: "This purchase has no machine on record, and while the site is public a machine is never picked by plan and region alone (it could be a visitor's). Check the seller's list with npm run market:sweep, then dismiss this." };
+    }
     // machines known to belong to other runs are never picked by the plan-and-region match
     const exclude = new Set(journal.all().filter((e) => e.run !== runId && e.instance).map((e) => e.instance!));
     const live = this.market?.view().machine?.id;
     if (live) exclude.add(live);
     let result: RecoverResult;
     try {
-      result = await destroyOpenPurchase(open, sellerFor(open.market, await payerFor(open.market)), journal, { exclude });
+      // the machine answers only to the agent wallet that paid for it, which the journal recorded
+      result = await destroyOpenPurchase(open, sellerFor(open.market, await payerOwning(open.market, open.agent)), journal, { exclude });
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }

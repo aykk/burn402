@@ -334,6 +334,16 @@ describe("MarketRun approval", () => {
     expect(run.view().wallet).toBeNull();
   });
 
+  it("the journal records which agent wallet paid, so the machine can be managed by that wallet later", async () => {
+    const { run, journal, payer } = setup();
+    void run.start();
+    await waitPhase(run, "ready");
+    const entries = journal.all();
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) expect(e.agent).toBe(payer.address);
+    expect(journal.open()[0].agent).toBe(payer.address);
+  });
+
   it("cancel at approval ends refused CANCELLED, no payment, no journal line", async () => {
     const { run, payer, events, records } = setup({ ask: true });
     expect(run.cancel()).toMatchObject({ ok: false }); // before start

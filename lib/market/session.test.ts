@@ -146,3 +146,22 @@ describe("findPaymentFor", () => {
     expect(seen[1]).toMatchObject({ url: "https://api.mainnet-beta.solana.com", params: ["P", { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }, { encoding: "jsonParsed" }] });
   });
 });
+
+describe("which agent key signs", () => {
+  const env = { AGENT_SOLANA_SECRET_KEY: "agent", MAINNET_SOLANA_SECRET_KEY: "owner-real", PUBLIC_MAINNET_SOLANA_SECRET_KEY: "public-real" };
+  it("the owner's real rentals and visitors' real rentals are signed by different keys", () => {
+    expect(secretFor("real", env)).toBe("owner-real");
+    expect(secretFor("real", env, "owner")).toBe("owner-real");
+    expect(secretFor("real", env, "public")).toBe("public-real");
+  });
+  it("without a key for visitors, they fall back to the owner's real key, then to the agent key", () => {
+    expect(secretFor("real", { ...env, PUBLIC_MAINNET_SOLANA_SECRET_KEY: "" }, "public")).toBe("owner-real");
+    expect(secretFor("real", { AGENT_SOLANA_SECRET_KEY: "agent" }, "public")).toBe("agent");
+    expect(secretFor("real", {}, "public")).toBeNull();
+  });
+  it("the test market has one agent key for everyone, and the public key is never used there", () => {
+    expect(secretFor("test", env, "owner")).toBe("agent");
+    expect(secretFor("test", env, "public")).toBe("agent");
+    expect(secretFor("test", {})).toBeNull();
+  });
+});
