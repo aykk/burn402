@@ -217,6 +217,9 @@ export function MarketPanel({
         </div>
       </div>
 
+      {/* Why this plan, when the lowest quote was shared. */}
+      {run.choice && <p className="max-w-[64ch] text-foreground">{run.choice}</p>}
+
       {(run.fallbacks ?? []).length > 0 && (
         <div className="space-y-0.5">
           {run.fallbacks.map((f, i) => (

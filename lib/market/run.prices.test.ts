@@ -191,8 +191,9 @@ describe("MarketRun with market prices", () => {
   });
 
   it("after quoting an interruptible plan, the last on-demand estimate stays and the sentence says its rate is not compared", async () => {
-    // the seller sells vc2-1c-1gb; offered here as an interruptible plan ranked first
-    const spot: Offer = { seller: "testseller", id: "vc2-1c-1gb", provider: "vultr", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.001, listHourlyUsd: null, inStock: true, spot: true, rentable: true };
+    // the seller sells vc2-1c-1gb; offered here as an interruptible plan ranked first. It is listed as the larger
+    // machine, so when its firm quote equals the on-demand plan's, it is still the one put forward.
+    const spot: Offer = { seller: "testseller", id: "vc2-1c-1gb", provider: "vultr", kind: "cpu", vcpus: 2, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.001, listHourlyUsd: null, inStock: true, spot: true, rentable: true };
     const { run } = setup(async () => MARKET, undefined, { need: { allowSpot: true }, spotFeed: async () => [spot] });
     await run.start();
     await vi.waitFor(() => expect(run.view().prices).not.toBeNull());

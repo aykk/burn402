@@ -33,6 +33,24 @@ export function estimateUsd(offer: Offer, hours: number, rules: HourlyRules): nu
   return offer.hourlyUsd * hours * surcharge;
 }
 
+/**
+ * Which of two machines is the better one to get for the same money. Negative when `a` is: more vCPUs,
+ * then more memory, then more GPU memory, then on-demand over interruptible, then the higher list price
+ * (the provider charges more for it, so the same price buys a stronger class), then the plan name so the
+ * order never depends on how the seller listed them.
+ */
+export function betterMachine(a: Offer, b: Offer): number {
+  const list = (o: Offer) => o.listHourlyUsd ?? o.hourlyUsd;
+  return (
+    b.vcpus - a.vcpus ||
+    b.ramGb - a.ramGb ||
+    b.vramGb - a.vramGb ||
+    Number(a.spot) - Number(b.spot) ||
+    (Math.abs(list(a) - list(b)) > EPS ? list(b) - list(a) : 0) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+}
+
 function fits(offer: Offer, need: Need): boolean {
   // 0 means the seller did not say: do not compare that dimension.
   if (offer.vcpus > 0 && offer.vcpus < need.vcpus) return false;
@@ -70,14 +88,8 @@ export function choose(
     if (!(est <= limits.budgetUsd + EPS)) { reject("OVER_BUDGET"); continue; }
     ranked.push({ offer, regions, hours, estimateUsd: est });
   }
-  ranked.sort((a, b) => {
-    if (Math.abs(a.estimateUsd - b.estimateUsd) > EPS) return a.estimateUsd - b.estimateUsd;
-    return (
-      a.offer.vcpus - b.offer.vcpus ||
-      a.offer.ramGb - b.offer.ramGb ||
-      (a.offer.id < b.offer.id ? -1 : a.offer.id > b.offer.id ? 1 : 0)
-    );
-  });
+  // cheapest first; at the same price, the better machine first
+  ranked.sort((a, b) => (Math.abs(a.estimateUsd - b.estimateUsd) > EPS ? a.estimateUsd - b.estimateUsd : betterMachine(a.offer, b.offer)));
   return { ranked, rejected };
 }
 
