@@ -104,6 +104,7 @@ export function MarketPanel({
   post,
   send,
   compare,
+  preview,
 }: {
   run: MarketRunView | null;
   nowMs: number;
@@ -120,6 +121,8 @@ export function MarketPanel({
    * run"); under the body of an ended run that still does (a machine, a payment). Never over a run in flight.
    */
   compare?: ReactNode;
+  /** While there is no run: the plans that fit the form's filters, kept current by the page. */
+  preview?: ReactNode;
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -155,10 +158,13 @@ export function MarketPanel({
     return (
       <div className="space-y-6">
         <StageRow run={null} />
-        <p className="max-w-[56ch] text-muted">
-          Your agent reads the seller&apos;s price list, keeps the plans that fit your machine and your limits, asks for firm quotes on the cheapest
-          few, and stops to show you the exact payment. After you pay, it shows the machine and destroys it when the time is up.
-        </p>
+        {/* The list of plans carries its own line on what happens next; the longer explanation stands in only while there is no list. */}
+        {preview ?? (
+          <p className="max-w-[56ch] text-muted">
+            Your agent reads the seller&apos;s price list, keeps the plans that fit your machine and your limits, asks for firm quotes on the cheapest
+            few, and stops to show you the exact payment. After you pay, it shows the machine and destroys it when the time is up.
+          </p>
+        )}
       </div>
     );
   }

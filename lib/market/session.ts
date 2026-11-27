@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { parseNuzaFeed } from "./catalog";
-import { choose } from "./choose";
+import { choose, summarize, type RejectReason } from "./choose";
 import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
@@ -214,6 +214,79 @@ export function parsePricesInput(body: unknown): { ok: true; value: PricesInput 
   const limits = parseLimits(budgetUsd, rateUsdHr);
   if (!limits.ok) return limits;
   return { ok: true, value: { market, need: need.value, limits: limits.value } };
+}
+
+/** The plans that fit a need, as the page lists them while the filters are being set: no run, no quote, nothing paid. */
+export type PlanPreview = {
+  market: MarketId;
+  seller: string;
+  /** when the seller's price list was read (ms) */
+  asOf: number;
+  /** plans on the price list, and how many of them fit the need and the limits */
+  total: number;
+  fits: number;
+  /** the cheapest that fit, cheapest first and at the same price the better machine first: the order the agent would ask them in */
+  plans: { id: string; provider: string; kind: "cpu" | "gpu"; vcpus: number; ramGb: number; vramGb: number; gpu: string | null; regions: number; spot: boolean; hourlyUsd: number; listHourlyUsd: number | null; hours: number; estimateUsd: number }[];
+  leftOut: { reason: RejectReason; count: number }[];
+};
+
+const PREVIEW_ROWS = 8;
+/** The price list is read from the seller at most this often, however fast the filters change. */
+const CATALOG_TTL_MS = 60_000;
+
+type Catalog = Awaited<ReturnType<SellerClient["catalog"]>>;
+type CatalogCache = Map<MarketId, { at: number; value: Promise<Catalog> }>;
+const catalogs: CatalogCache = ((globalThis as unknown as { __burn402Catalogs?: CatalogCache }).__burn402Catalogs ??= new Map());
+
+/** The seller's price list, read once a minute at most and shared by every visitor. A failed read is not kept. */
+export function cachedCatalog(market: MarketId, deps: { seller?: SellerClient; now?: () => number; cache?: CatalogCache } = {}): Promise<{ catalog: Catalog; asOf: number }> {
+  const now = (deps.now ?? Date.now)();
+  const cache = deps.cache ?? catalogs;
+  let entry = cache.get(market);
+  if (!entry || now - entry.at >= CATALOG_TTL_MS) {
+    const seller = deps.seller ?? new SellerClient(SELLERS[market], { signer: null, timeouts: { read: COMPARE_SELLER_TIMEOUT_MS, paid: COMPARE_SELLER_TIMEOUT_MS } });
+    const made = { at: now, value: Promise.resolve().then(() => seller.catalog()) };
+    made.value.catch(() => {
+      if (cache.get(market) === made) cache.delete(market);
+    });
+    cache.set(market, made);
+    entry = made;
+  }
+  const at = entry.at;
+  return entry.value.then((catalog) => ({ catalog, asOf: at }));
+}
+
+/**
+ * What the agent would look at for this need, from the price list alone: the plans that fit inside the
+ * limits in the order it would ask them for a firm quote, and what was left out and why. Estimates, never
+ * quotes. Reads the (cached) price list only; never quotes, pays or touches a run.
+ */
+export async function planPreview(input: PricesInput & { limits: Limits }, deps: Parameters<typeof cachedCatalog>[1] = {}): Promise<PlanPreview> {
+  const { catalog, asOf } = await cachedCatalog(input.market, deps);
+  const { ranked, rejected } = choose(catalog.offers, input.need, input.limits, catalog.rules);
+  return {
+    market: input.market,
+    seller: (deps.seller ?? { config: SELLERS[input.market] }).config.label,
+    asOf,
+    total: catalog.offers.length,
+    fits: ranked.length,
+    plans: ranked.slice(0, PREVIEW_ROWS).map((c) => ({
+      id: c.offer.id,
+      provider: c.offer.provider,
+      kind: c.offer.kind,
+      vcpus: c.offer.vcpus,
+      ramGb: c.offer.ramGb,
+      vramGb: c.offer.vramGb,
+      gpu: c.offer.gpu,
+      regions: c.regions.length,
+      spot: c.offer.spot,
+      hourlyUsd: c.offer.hourlyUsd,
+      listHourlyUsd: c.offer.listHourlyUsd,
+      hours: c.hours,
+      estimateUsd: c.estimateUsd,
+    })),
+    leftOut: summarize(rejected),
+  };
 }
 
 /** Live prices from other providers for a run (cached for 60 s, never throws). */

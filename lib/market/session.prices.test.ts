@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MarketPrices } from "./prices/fetch";
 import { SELLERS, SellerClient } from "./seller";
-import { parseNeed, parsePricesInput, parseRunInput, priceComparison } from "./session";
+import { parseNeed, parsePricesInput, parseRunInput, planPreview, priceComparison } from "./session";
 import { FakeProcessor, inProcess } from "./testing";
 import { TestSeller } from "./testseller";
 import type { Need } from "./types";
@@ -158,5 +158,85 @@ describe("priceComparison", () => {
     expect(c.sellerUnreadable).toBe(true);
     expect(c.buyable).toBeNull();
     expect(c.sentence).not.toMatch(/no seller/);
+  });
+});
+
+describe("planPreview", () => {
+  const LIMITS = { budgetUsd: 1, rateUsdHr: 0.05 };
+  function fake() {
+    const config = SELLERS.test;
+    const seller = new TestSeller({ processor: new FakeProcessor(), resourceUrl: `${config.baseUrl}/compute/provision` });
+    let reads = 0;
+    const base = inProcess(seller);
+    const client = new SellerClient(config, {
+      signer: null,
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/compute/plans")) reads++;
+        return base(input, init);
+      }) as typeof fetch,
+    });
+    return { client, reads: () => reads };
+  }
+
+  it("lists the plans that fit, cheapest first, with what was left out; nothing is quoted or paid", async () => {
+    const { client } = fake();
+    const p = await planPreview({ market: "test", need: NEED, limits: LIMITS }, { seller: client, cache: new Map(), now: () => 1000 });
+    expect(p.market).toBe("test");
+    expect(p.seller).toBe(SELLERS.test.label);
+    expect(p.asOf).toBe(1000);
+    expect(p.fits).toBe(p.plans.length);
+    expect(p.fits + p.leftOut.reduce((n, l) => n + l.count, 0)).toBe(p.total);
+    expect(p.plans.length).toBeGreaterThan(1);
+    // the order the agent asks them in: never dearer than the one after
+    for (let i = 1; i < p.plans.length; i++) expect(p.plans[i].estimateUsd).toBeGreaterThanOrEqual(p.plans[i - 1].estimateUsd - 1e-9);
+    for (const r of p.plans) {
+      expect(r.kind).toBe("cpu");
+      expect(r.estimateUsd / r.hours).toBeLessThanOrEqual(LIMITS.rateUsdHr + 1e-9);
+    }
+    // the same plan the price comparison says a run would rank first
+    const cmp = await priceComparison({ market: "test", need: NEED, limits: LIMITS }, { seller: client, prices: async () => ({ prices: [], sources: [], asOf: 0 }) });
+    expect(cmp.buyable?.plan).toBe(p.plans[0].id);
+  });
+
+  it("follows the filters: a bigger machine or a tighter limit leaves fewer plans", async () => {
+    const { client } = fake();
+    const cache = new Map();
+    const small = await planPreview({ market: "test", need: NEED, limits: LIMITS }, { seller: client, cache });
+    const big = await planPreview({ market: "test", need: { ...NEED, vcpus: 2, ramGb: 4 }, limits: LIMITS }, { seller: client, cache });
+    const tight = await planPreview({ market: "test", need: NEED, limits: { budgetUsd: 1, rateUsdHr: 0.001 } }, { seller: client, cache });
+    expect(big.fits).toBeLessThan(small.fits);
+    expect(big.plans.every((r) => r.vcpus >= 2 && r.ramGb >= 4)).toBe(true);
+    expect(tight.fits).toBe(0);
+    expect(tight.plans).toEqual([]);
+    expect(tight.leftOut.some((l) => l.reason === "OVER_RATE")).toBe(true);
+  });
+
+  it("reads the seller's price list once a minute at most, however often the filters change", async () => {
+    const { client, reads } = fake();
+    const cache = new Map();
+    let t = 0;
+    const deps = { seller: client, cache, now: () => t };
+    for (let i = 0; i < 5; i++) await planPreview({ market: "test", need: { ...NEED, vcpus: 1 + (i % 2) }, limits: LIMITS }, deps);
+    expect(reads()).toBe(1);
+    t = 59_000;
+    await planPreview({ market: "test", need: NEED, limits: LIMITS }, deps);
+    expect(reads()).toBe(1);
+    t = 61_000;
+    const later = await planPreview({ market: "test", need: NEED, limits: LIMITS }, deps);
+    expect(reads()).toBe(2);
+    expect(later.asOf).toBe(61_000);
+  });
+
+  it("a failed read is not kept: the next ask reads again", async () => {
+    let fail = true;
+    let reads = 0;
+    const { client } = fake();
+    const flaky = { config: client.config, catalog: async () => { reads++; if (fail) throw new Error("seller down"); return client.catalog(); } } as unknown as SellerClient;
+    const cache = new Map();
+    await expect(planPreview({ market: "test", need: NEED, limits: LIMITS }, { seller: flaky, cache, now: () => 0 })).rejects.toThrow("seller down");
+    fail = false;
+    const ok = await planPreview({ market: "test", need: NEED, limits: LIMITS }, { seller: flaky, cache, now: () => 0 });
+    expect(reads).toBe(2);
+    expect(ok.fits).toBeGreaterThan(0);
   });
 });
