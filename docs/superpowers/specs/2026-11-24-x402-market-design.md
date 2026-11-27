@@ -240,4 +240,6 @@ Rules:
 
 **Non-goals for now.** Public visitors paying from their own wallet (refused in `POST /api/market/run`); sponsoring the approval's network fee; revoking a leftover approval from the page (the next approval overwrites it, and the wallet can revoke it).
 
-**Unproven.** A delegated payment settling through the hosted facilitator. It needs devnet SOL in a visitor wallet, which the faucet no longer gives to scripts; the owner tests it with Phantom on devnet. Mainnet needs about one cent of real USDC.
+**Proven 2026-11-27 on devnet** (`scripts/wallet-test.ts`, against the running app): a stand-in wallet signed the approval as a browser wallet would; the delegated payment settled through the hosted facilitator (transaction `xo9fezymvgNYB1mVUQkNc3ez3NEUWxBes7SomQiJ52SQcmnxRicGAiQAZ6GJM8HeWEYpGtw6xUZzF3jyAQzPHAY`), signed by the facilitator's fee payer and the agent only; the stand-in wallet's USDC fell by exactly the quote, the approval was left at zero, and the machine came up owned by the agent and was destroyed.
+
+**Still unproven.** Phantom itself signing the approval (it may add its own instructions; the server allows those from other programs). The real seller's facilitator accepting a delegated payment on mainnet, which costs about one cent of real USDC to find out.
