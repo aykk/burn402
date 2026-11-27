@@ -54,11 +54,16 @@ export function solscanUrlForCluster(tx: string | null | undefined, cluster: "de
   return `https://solscan.io/tx/${tx}${cluster === "devnet" ? "?cluster=devnet" : ""}`;
 }
 
-export const MARKET_NAME: Record<MarketId, string> = { test: "Test market (devnet)", real: "Real market (mainnet)" };
+export const MARKET_NAME: Record<MarketId, string> = { test: "Test market", real: "Real market" };
 
 /** The exact amount being approved ("$0.010382"), never rounded: the owner approves a specific payment. */
 export function approvalSentence(a: NonNullable<MarketRunView["approval"]>): string {
-  return `Pay ${a.exact} ${a.token} to ${shortAddress(a.payTo)} on ${a.network} for ${a.plan} in ${a.region}, ${hoursText(a.hours)}.`;
+  return `Pay ${a.exact} for ${hoursText(a.hours)} of ${a.plan} in ${a.region}.`;
+}
+
+/** Where the money goes, under the approval sentence: the token, the network and the seller's wallet. */
+export function approvalDetail(a: NonNullable<MarketRunView["approval"]>): string {
+  return `Paid in ${a.token} on ${a.network}, to the seller's wallet ${shortAddress(a.payTo)}.`;
 }
 
 /**
@@ -85,7 +90,7 @@ type PaymentFacts = Pick<NonNullable<MarketRunView["payment"]>, "atomic" | "stat
 export function paymentLine(p: PaymentFacts, market: MarketId, opts: { amount?: boolean } = {}): string {
   // Without the amount when the meter's big figure already is that amount.
   const amount = opts.amount === false ? "" : ` ${usdExact(p.atomic)}`;
-  return p.status === "confirmed" ? `Paid${amount} over x402, settled on ${NETWORK[market]}.` : `Sent${amount} over x402 on ${NETWORK[market]}, not confirmed yet.`;
+  return p.status === "confirmed" ? `Paid${amount} over x402, confirmed on ${NETWORK[market]}.` : `Sent${amount} over x402 on ${NETWORK[market]}, not confirmed yet.`;
 }
 
 /**
@@ -206,9 +211,9 @@ export function fallbackLine(text: string): string {
 export const PHASE_HEADING: Record<MarketRunView["phase"], string> = {
   scanning: "Reading the price list",
   choosing: "Comparing plans",
-  quoting: "Asking for firm quotes",
+  quoting: "Getting exact prices",
   approval: "Waiting for your approval",
-  paying: "Paying over x402",
+  paying: "Paying",
   provisioning: "Starting the machine",
   ready: "Machine ready",
   releasing: "Destroying the machine",

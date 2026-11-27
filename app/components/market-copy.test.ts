@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MarketRunView } from "@/lib/market/run";
 import type { PriceComparison } from "@/lib/market/prices/compare";
 import type { MarketPrice } from "@/lib/market/prices/types";
-import { approvalSentence, billedHoursLine, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidFacts, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
+import { approvalDetail, approvalSentence, billedHoursLine, buyableMachine, buyableWord, cheapestMarks, panelBody, priceRows, endState, listJoin, priceMachine, priceSourceLines, pricesAllFailed, pricesLead, safeLink, fallbackLine, machineSize, hoursText, leftOutPhrase, leftOutSummary, paymentLine, prepaidFacts, quoteNote, shortAddress, solscanUrl, solscanUrlForCluster, sourceLines, surchargeLine, timeLeft } from "./market-copy";
 import { marketStage } from "./stages";
 
 const need = { kind: "cpu" as const, vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
@@ -41,8 +41,9 @@ describe("wording", () => {
     expect(shortAddress(approval.payTo)).toBe("ELT2…d5Ux");
     expect(shortAddress("abc")).toBe("abc");
   });
-  it("the approval line names amount, token, recipient, network, plan, region and hours", () => {
-    expect(approvalSentence(approval)).toBe("Pay $0.010382 USDC to ELT2…d5Ux on Solana mainnet for vc2-1c-1gb in ewr, 1 hour.");
+  it("the approval says the amount, the time and the machine first; the token, network and recipient on the line under it", () => {
+    expect(approvalSentence(approval)).toBe("Pay $0.010382 for 1 hour of vc2-1c-1gb in ewr.");
+    expect(approvalDetail(approval)).toBe("Paid in USDC on Solana mainnet, to the seller's wallet ELT2…d5Ux.");
   });
   it("the seller's surcharge is one plain line, from the field's numbers", () => {
     expect(surchargeLine({ pct: 15, underHours: 24 })).toBe("Includes the seller's 15% surcharge for rentals under 24 hours.");
@@ -69,8 +70,8 @@ describe("wording", () => {
     expect(quoteNote("SOMETHING_NEW")).toBe("quote failed");
     expect(quoteNote(null)).toBe("quote failed");
   });
-  it("the payment line says settled only for a confirmed payment, with the exact amount", () => {
-    expect(paymentLine({ atomic: "10382", status: "confirmed" }, "test")).toBe("Paid $0.010382 over x402, settled on Solana devnet.");
+  it("the payment line says confirmed only for a confirmed payment, with the exact amount", () => {
+    expect(paymentLine({ atomic: "10382", status: "confirmed" }, "test")).toBe("Paid $0.010382 over x402, confirmed on Solana devnet.");
     expect(paymentLine({ atomic: "10382", status: "unconfirmed" }, "real")).toBe("Sent $0.010382 over x402 on Solana mainnet, not confirmed yet.");
   });
   it("after an early destroy, short facts: what was paid for, how long it ran, and that unused time is not refunded", () => {

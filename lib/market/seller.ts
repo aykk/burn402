@@ -15,7 +15,7 @@ export type SellerConfig = { id: "x402layer" | "testseller"; label: string; base
 
 export const SELLERS: { real: SellerConfig; test: SellerConfig } = {
   real: { id: "x402layer", label: "x402layer", baseUrl: "https://compute.x402layer.cc", market: "real" },
-  test: { id: "testseller", label: "Test seller (devnet, simulated machines)", baseUrl: "http://127.0.0.1:3000/api/testseller", market: "test" },
+  test: { id: "testseller", label: "Test seller (simulated machines)", baseUrl: "http://127.0.0.1:3000/api/testseller", market: "test" },
 };
 
 export type Instance = { id: string; status: string; ip: string | null; expiresAt: number | null; plan: string; region: string };

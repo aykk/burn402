@@ -1,17 +1,15 @@
 // The rent page's help labels. Long explanations live here so they can be reworded in one place.
 export const RENT_HELP = {
   market:
-    "Test pays real devnet USDC to a test seller that runs simulated machines, so nothing costs real money. Real pays USDC on Solana mainnet to x402layer for a real machine, and always waits for you before paying.",
-  kind: "CPU for general work. GPU when you need graphics memory, for example to run or train a model.",
-  size: "The smallest machine your agent may rent. Bigger plans are fine if they are the cheapest that fit.",
-  hours: "How long you need the machine. The seller may bill a minimum, often one hour. The machine is destroyed when the time is up.",
-  regions: "Seller region codes such as ewr or fra, separated by commas. Leave empty for any region.",
-  budget: "The most your agent may pay for this rental in total. The payment check refuses anything above it.",
-  rate: "The most your agent may pay per hour of machine time. Plans that cost more per hour are left out.",
-  spot: "Interruptible machines are cheaper but can be taken back by the provider at any time.",
-  ask: "Your agent stops with the exact payment and waits for you to press Pay and rent. The real market always asks.",
-  sshKey:
-    "The public half of an SSH key pair, one line starting with ssh-ed25519 or ssh-rsa (the contents of a .pub file). The machine is set up with it, so you log in with the private half that never leaves your computer. Never paste a private key.",
+    "Test uses play money and pretend machines, so nothing costs real money. Real money spends real USDC (digital dollars on Solana) on a real machine, and always waits for your OK before paying.",
+  kind: "CPU for general work. GPU for graphics-heavy work, such as running an AI model.",
+  size: "The smallest machine you would accept. A bigger one is fine when it is the cheapest that fits.",
+  hours: "How long you need the machine. Sellers often bill at least one hour. It is destroyed when the time is up.",
+  regions: "Where the machine should be, as the seller's region codes (ewr is New Jersey), separated by commas. Leave empty for anywhere.",
+  budget: "The most your agent may spend on this rental in total. It refuses to pay anything above this.",
+  rate: "The most your agent may pay per hour. Plans that cost more are left out.",
+  ask: "Your agent shows you the exact payment and waits for you to approve it. Real money always asks.",
+  sshKey: "A public SSH key: one line starting with ssh-ed25519 or ssh-rsa (the contents of a .pub file). The machine is set up with it, so only you can log in. Never paste a private key.",
   payFrom:
-    "The agent wallet is the one this app runs with. My wallet is your own Solana wallet in this browser: at each payment it asks you to approve exactly the quoted amount for your agent, which then pays the seller. The site never holds your key or your money.",
+    "Agent wallet is the wallet this app runs with. My wallet is your own Solana wallet in this browser: for each payment it asks you to approve the exact amount. The site never holds your key or your money.",
 } as const;

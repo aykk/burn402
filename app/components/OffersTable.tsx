@@ -15,11 +15,11 @@ const ORDER: Record<OfferRow["state"], number> = { chosen: 0, quoted: 1, "quote 
 /**
  * The comparison: sources, then the chosen and quoted plans, then other candidates (at most 8 rows), and
  * one line counting what was left out and why. "Show all" opens every plan, left-out ones included, in
- * the same table. Columns follow the width the table actually has (a container query), so the firm quote
+ * the same table. Columns follow the width the table actually has (a container query), so the exact price
  * and the status are always in view without scrolling: under 30rem the status sits under the plan name,
- * Provider and Size join from 37rem, the list price from 46rem. The list price here is the seller's figure
- * (the provider's monthly price ÷ 720 hours), so it can differ by a few hundredths of a cent from the hourly
- * price the provider publishes, which Market prices shows; a visible line under the table says so.
+ * Provider and Size join from 37rem. One price per hour is shown, the seller's: the provider's own list
+ * price was a second, slightly different figure that needed a footnote to explain, and what the machine
+ * costs elsewhere is the job of "Prices elsewhere".
  */
 export function OffersTable({ run }: { run: MarketRunView }) {
   const [all, setAll] = useState(false);
@@ -71,14 +71,10 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                 <th className={`${PAD} pl-[13px] font-medium`}>Plan</th>
                 <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Provider</th>
                 <th className={`hidden ${PAD} font-medium @min-[37rem]:table-cell`}>Size</th>
-                <th
-                  className={`hidden ${PAD} text-right font-medium @min-[46rem]:table-cell`}
-                  title="The seller's figure: the provider's monthly price divided by 720 hours. Market prices shows the hourly price the provider publishes."
-                >
-                  List price/h
+                <th className={`${PAD} text-right font-medium`}>Price per hour</th>
+                <th className={`${PAD} text-right font-medium`} title="The exact amount the seller confirmed for this rental">
+                  Exact price
                 </th>
-                <th className={`${PAD} text-right font-medium`}>Seller price/h</th>
-                <th className={`${PAD} text-right font-medium`}>Firm quote</th>
                 <th className="hidden py-2 font-medium @min-[30rem]:table-cell">
                   <span className="sr-only">Status</span>
                 </th>
@@ -102,7 +98,6 @@ export function OffersTable({ run }: { run: MarketRunView }) {
                     </td>
                     <td className={`hidden ${PAD} @min-[37rem]:table-cell`}>{r.provider}</td>
                     <td className={`hidden ${PAD} whitespace-nowrap @min-[37rem]:table-cell`}>{machineSize(r)}</td>
-                    <td className={`hidden ${PAD} text-right @min-[46rem]:table-cell`}>{r.listHourlyUsd !== null ? usd4(r.listHourlyUsd) : "-"}</td>
                     <td className={`${PAD} text-right`}>{usd4(r.hourlyUsd)}</td>
                     <td className={`${PAD} text-right`}>
                       {r.quoteUsd === null ? (
@@ -123,10 +118,6 @@ export function OffersTable({ run }: { run: MarketRunView }) {
               })}
             </tbody>
           </table>
-          {/* Only where the List price/h column shows (the same container width). */}
-          <p className="mt-2 hidden max-w-[64ch] text-[12px] leading-4 text-muted @min-[46rem]:block">
-            List price here is the provider&apos;s monthly price spread over a 30-day month; the provider&apos;s own hourly price is in Market prices.
-          </p>
         </div>
       )}
 
