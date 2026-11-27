@@ -5,6 +5,7 @@ import { findPayment } from "./chain";
 import { NETWORKS } from "./guard";
 import { defaultJournal, type Journal } from "./journal";
 import { accessVerdict, headersOf, visitorOf } from "./access";
+import { isWalletAddress, makeDelegatePayer } from "./delegate";
 import { makePayer, type Payer } from "./pay";
 import { buyableFor, comparePrices, type PriceComparison } from "./prices/compare";
 import { fetchMarketPrices, type MarketPrices } from "./prices/fetch";
@@ -68,6 +69,16 @@ export async function payerFor(market: MarketId): Promise<Payer | null> {
   return p;
 }
 
+/**
+ * A payer for one run that spends a connected wallet's USDC under that wallet's approval. The agent's
+ * key for the market signs; null when none is set. Not cached: it belongs to one visitor's run.
+ */
+export async function delegatePayerFor(market: MarketId, wallet: string): Promise<Payer | null> {
+  const secret = secretFor(market);
+  if (!secret) return null;
+  return makeDelegatePayer(secret, { market, owner: wallet });
+}
+
 export function sellerFor(market: MarketId, payer: Payer | null): SellerClient {
   return new SellerClient(SELLERS[market], { signer: payer?.signer ?? null });
 }
@@ -117,7 +128,7 @@ export function checkRequest(request: Request): Response | null {
   return null;
 }
 
-export type RunInput = { market: MarketId; need: Need; limits: Limits; askBeforePaying: boolean };
+export type RunInput = { market: MarketId; need: Need; limits: Limits; askBeforePaying: boolean; /** the connected wallet to pay from, or null for the agent's own */ wallet: string | null };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -167,20 +178,23 @@ export function parseLimits(budgetUsd: unknown, rateUsdHr: unknown): { ok: true;
 
 export function parseRunInput(body: unknown): { ok: true; value: RunInput } | { ok: false; error: string } {
   if (!isObj(body)) return { ok: false, error: "send the run as a JSON object" };
-  const { market, budgetUsd, rateUsdHr, askBeforePaying } = body;
+  const { market, budgetUsd, rateUsdHr, askBeforePaying, wallet } = body;
   if (market !== "test" && market !== "real") return { ok: false, error: "pick the test market or the real market" };
   const need = parseNeed(body.need);
   if (!need.ok) return need;
   const limits = parseLimits(budgetUsd, rateUsdHr);
   if (!limits.ok) return limits;
   if (typeof askBeforePaying !== "boolean") return { ok: false, error: "say whether to ask before paying" };
+  if (wallet !== undefined && wallet !== null && !isWalletAddress(wallet)) return { ok: false, error: "that is not a Solana wallet address" };
   return {
     ok: true,
     value: {
       market,
       need: need.value,
       limits: limits.value,
-      askBeforePaying,
+      // a connected wallet approves each payment itself
+      askBeforePaying: wallet ? true : askBeforePaying,
+      wallet: typeof wallet === "string" ? wallet : null,
     },
   };
 }

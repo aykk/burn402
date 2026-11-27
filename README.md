@@ -30,6 +30,20 @@ It never pays twice: a purchase journal is written before signing, a failed paid
 - **Test (devnet).** A local test seller with the same protocol as the real one. It settles real payments in devnet USDC and runs simulated machines, so nothing costs real money.
 - **Real (mainnet).** [compute.x402layer.cc](https://compute.x402layer.cc), which resells Vultr and DigitalOcean machines for USDC on Solana mainnet. The real market always stops for your approval.
 
+## Paying from your own wallet
+
+On the owner's page, **Pay from** can be switched from the agent's wallet to **My wallet**: a Solana wallet in the browser (Phantom, Solflare, Backpack, MetaMask). The site never holds its key or its money.
+
+1. **Connect.** The wallet shares its address. Nothing is signed.
+2. **Approve.** At each payment the wallet is asked to sign one transaction: let the agent move exactly the quoted amount of USDC out of your account (an SPL token approval), with a note tying it to this run. The wallet pays that transaction's network fee, well under a cent of SOL.
+3. **Pay.** The server checks what the wallet signed (your signature, this run's note, exactly the quoted amount to this run's agent, no other token instruction), puts it on chain, waits until the chain shows the approval, and only then lets the agent pay the seller over x402 out of your account. The money goes from your account straight to the seller.
+
+The agent's wallet, not yours, signs the payment and so owns the machine. That is on purpose: the seller asks the paying wallet for a fresh signature on every status check and on destroy, which a browser wallet could only answer with a popup each time.
+
+A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run.
+
+**Proven so far:** the approval, its checks and the payment built from it are covered by unit tests, and the flow runs in the browser up to the wallet's signature. **Not proven yet:** a payment made this way settling through the hosted facilitator, on devnet or mainnet. To try it for free: turn on Testnet Mode in Phantom, get devnet SOL from [faucet.solana.com](https://faucet.solana.com) and devnet USDC from [faucet.circle.com](https://faucet.circle.com), and rent on the test market with **My wallet**.
+
 ## Records
 
 Every purchase, refusal and failure is signed by your agent's ANS identity and written to Arweave (testnet by default, mainnet if you choose). `/records` reads them back and checks every signature in the browser, including the older verdict and negotiation records from the hackathon version. Those older records can also be checked from the command line:
@@ -74,7 +88,7 @@ The tunnel is started once and reused, so running `npm run public` again (to pic
 
 | Path | What lives there |
 | --- | --- |
-| `lib/market` | The renting agent: catalog, chooser, spending guard, payer, seller client, journal, test seller, chain lookup |
+| `lib/market` | The renting agent: catalog, chooser, spending guard, payer, connected-wallet approvals (`delegate.ts`), seller client, journal, test seller, chain lookup |
 | `lib/market/prices` | Read-only live prices from Vultr, Vast.ai, RunPod and Akash |
 | `lib/mandate` | Mandate signing, verification and the attenuation rules |
 | `lib/ans` | ANS resolution backed by transparency log proofs |

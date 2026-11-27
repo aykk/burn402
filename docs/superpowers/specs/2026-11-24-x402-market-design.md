@@ -216,3 +216,28 @@ Rules:
 **Known limits.** (1) After an unclear payment outcome a run adopts a new machine of the same plan and region from the wallet's list; with a shared wallet that could be another visitor's. On the test market this path only occurs under the overspend test's faults, which run alone. (2) The devnet wallet is finite (about $0.0104 a rental); when it runs dry, rentals fail before paying until it is refilled. (3) A quick tunnel's address changes when it restarts, and the site is only up while the owner's computer is.
 
 **Going live.** `npm run public` builds, opens a Cloudflare quick tunnel, and starts the production server with `BURN402_PUBLIC_HOSTS` set to the tunnel's host and `BURN402_TEST_SELLER=1`.
+
+## Addendum 2026-11-26: paying from a connected wallet
+
+**Why.** The owner wants visitors to rent with their own money on mainnet. This addendum is the first step: the owner's page can pay from a wallet in the browser. The public site still pays from its shared devnet wallet only.
+
+**The constraint that shapes it.** The seller ties a machine to the wallet that paid and asks that wallet for a fresh signature (address, method, path, time, nonce) on every status check, list and destroy. A browser wallet as the x402 payer would need a popup for each status check while the machine boots.
+
+**Approaches.**
+1. *The wallet is the x402 payer.* One popup to pay and no SOL needed, but the machine then belongs to the visitor's wallet and every management call needs another popup. Rejected.
+2. *Deposit to the agent's wallet, which pays.* Works with any facilitator, but the server holds visitors' money, needs refunds when a purchase fails, and mixes it with the owner's funds. Kept as the fallback if (3) is refused on mainnet.
+3. *Token approval (chosen).* The visitor's wallet signs one SPL `ApproveChecked` for exactly the quoted amount to the agent's wallet. The agent signs the x402 `TransferChecked` out of the visitor's account as its delegate. No custody, an on-chain cap equal to the quote, and the agent owns and manages the machine. The x402 reference facilitator names the transfer authority as the payer and does not require the source account to be the authority's own, and it tolerates Phantom's Lighthouse instructions; whether the real seller's facilitator does the same is not known.
+
+**Flow** (`lib/market/delegate.ts`, `DemoSession.walletApproval` and `approveMarket`, `POST /api/market/wallet`, `POST /api/market/approve`):
+1. `POST /api/market/run` takes `wallet` (a 32-byte base58 address). The run's payer signs as the agent and carries `funds`, the visitor's address. Such a run always stops for approval.
+2. At the approval stop the page asks `POST /api/market/wallet` for the approval transaction: legacy format, fee payer the visitor, `ApproveChecked(source = the visitor's USDC account, delegate = the agent, amount = the quote)` and a memo `burn402 <digest of run id and one-time code>`. It is refused in plain words when the wallet holds no USDC, too little, or no SOL for the fee.
+3. The wallet signs (Wallet Standard `solana:signTransaction`, hand-rolled discovery in `app/components/wallet.ts`; no key ever reaches the page or the server). The signed bytes go to `POST /api/market/approve` with the code.
+4. The server checks the signed transaction: signed by the visitor's wallet, which pays its fee; exactly one token instruction, the approval above; this run's memo. A wallet's own extra instructions from other programs are allowed. Then it sends it and the run goes on to pay.
+5. Before the agent signs the payment it waits (up to 60 s) until the chain shows delegate = the agent and at least the amount; the chain, not the browser, is what lets it pay.
+6. The payment is the exact scheme's transaction (compute limit, compute price, `TransferChecked`, memo) with the visitor's account as the source and the agent as authority. The record names the visitor's wallet as the payer; the chain lookup finds the transfer by the agent's signature and the visitor's balance change.
+
+**Why the memo.** A wallet may be left with an unused approval to the agent (a payment refused after the approval landed). Without the memo, another session could name that wallet and spend it. The server only proceeds on a transaction that wallet signed carrying this run's digest, which nobody else can produce.
+
+**Non-goals for now.** Public visitors paying from their own wallet (refused in `POST /api/market/run`); sponsoring the approval's network fee; revoking a leftover approval from the page (the next approval overwrites it, and the wallet can revoke it).
+
+**Unproven.** A delegated payment settling through the hosted facilitator. It needs devnet SOL in a visitor wallet, which the faucet no longer gives to scripts; the owner tests it with Phantom on devnet. Mainnet needs about one cent of real USDC.

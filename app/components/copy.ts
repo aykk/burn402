@@ -10,4 +10,6 @@ export const RENT_HELP = {
   rate: "The most your agent may pay per hour of machine time. Plans that cost more per hour are left out.",
   spot: "Interruptible machines are cheaper but can be taken back by the provider at any time.",
   ask: "Your agent stops with the exact payment and waits for you to press Pay and rent. The real market always asks.",
+  payFrom:
+    "The agent wallet is the one this app runs with. My wallet is your own Solana wallet in this browser: at each payment it asks you to approve exactly the quoted amount for your agent, which then pays the seller. The site never holds your key or your money.",
 } as const;

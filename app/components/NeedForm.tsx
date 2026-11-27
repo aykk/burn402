@@ -8,10 +8,12 @@ import { ActionError } from "./ActionError";
 import { RENT_HELP } from "./copy";
 import { usd2 } from "./format";
 import { Help } from "./Help";
-import { MARKET_NAME, hoursText } from "./market-copy";
+import { MARKET_NAME, hoursText, shortAddress } from "./market-copy";
 import { draftLimits } from "./meter-model";
 import { Segmented } from "./Segmented";
 import { BTN, INPUT } from "./ui";
+import { useWallet } from "./wallet";
+import { WalletConnect } from "./WalletConnect";
 
 /** The last valid budget and limit; `valid` is false while a field holds a value the form would refuse. */
 export type NeedDraft = { budgetUsd: number; rateUsdHr: number; valid: boolean };
@@ -22,6 +24,8 @@ export type RunBody = {
   budgetUsd: number;
   rateUsdHr: number;
   askBeforePaying: boolean;
+  /** the connected wallet to pay from; null for the wallet the app runs with */
+  wallet: string | null;
 };
 
 /** What "Compare prices" sends: the same market and need a run would use. */
@@ -44,6 +48,10 @@ const MARKET_OPTIONS = [
   { value: "real" as const, label: "Real (mainnet)", danger: true, spends: true },
 ];
 
+const PAY_FROM_OWNER = [
+  { value: "agent" as const, label: "Agent wallet" },
+  { value: "wallet" as const, label: "My wallet" },
+];
 const KIND_OPTIONS = [
   { value: "cpu" as const, label: "CPU" },
   { value: "gpu" as const, label: "GPU" },
@@ -160,6 +168,9 @@ export function NeedForm(props: {
   const [rate, setRate] = useState(0.05);
   const [allowSpot, setAllowSpot] = useState(false);
   const [ask, setAsk] = useState(true);
+  // Whose money pays: the wallet the app runs with, or the visitor's own wallet in this browser.
+  const [payFrom, setPayFrom] = useState<"agent" | "wallet">("agent");
+  const wallet = useWallet();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
@@ -205,13 +216,14 @@ export function NeedForm(props: {
     const m = run?.market ?? market;
     const b = run?.limits.budgetUsd ?? budget;
     const r = run?.limits.rateUsdHr ?? rate;
-    const asks = m === "real" || (run?.askBeforePaying ?? ask);
+    const from = run ? run.wallet : payFrom === "wallet" ? (wallet.connected?.address ?? null) : null;
+    const asks = m === "real" || from !== null || (run?.askBeforePaying ?? ask);
     const rows: [string, string][] = [
       ["Market", MARKET_NAME[m]],
       ["Machine", `${needText(n)}${n.allowSpot ? ", interruptible is OK" : ""}`],
       ["Time", `${hoursText(n.hours)}, ${n.regions.length > 0 ? n.regions.join(", ") : "any region"}`],
       ["Budget", `${usd2(b)}, limit ${usd2(r)} an hour`],
-      ["Paying", asks ? "Asks you first" : "Pays without asking"],
+      ["Paying", from ? `From your wallet ${shortAddress(from)}, asks you first` : asks ? "Asks you first" : "Pays without asking"],
     ];
     return (
       <div className="space-y-3">
@@ -248,7 +260,10 @@ export function NeedForm(props: {
                   : null;
 
   const blocked = running || starting || invalid !== null;
-  const asks = market === "real" || ask;
+  const ownWallet = payFrom === "wallet" && !publicDemo;
+  // Paying from your own wallet needs it connected; comparing prices does not.
+  const needsWallet = ownWallet && !wallet.connected;
+  const asks = market === "real" || ownWallet || ask;
   const need: Need = { kind, vcpus, ramGb, vramGb: kind === "gpu" ? vramGb : 0, hours, regions: regionList, allowSpot };
 
   // Shown beside the buttons. A missing wallet does not block the scan, the quotes or a price comparison, only the payment.
@@ -256,6 +271,8 @@ export function NeedForm(props: {
     invalid
   ) : running || starting ? (
     "A run is in progress"
+  ) : needsWallet ? (
+    "Connect a wallet to pay from it."
   ) : market === "real" && snap && !snap.walletReady.real ? (
     "Fund a mainnet wallet to pay on the real market."
   ) : market === "test" && snap && !snap.walletReady.test ? (
@@ -271,6 +288,7 @@ export function NeedForm(props: {
       budgetUsd: budget,
       rateUsdHr: rate,
       askBeforePaying: asks,
+      wallet: ownWallet ? (wallet.connected?.address ?? null) : null,
     });
     setStartError(failed);
     setStarting(false);
@@ -352,6 +370,26 @@ export function NeedForm(props: {
       <div className={`${ROWS} border-t border-rule pt-4`}>
         <NumberField id="budget-input" label="Budget" help="budget" value={budget} onChange={(n) => setBudget(n)} min={0.01} max={20} step={0.25} dollar disabled={disabled} />
         <NumberField id="rate-input" label="Hourly limit" help="rate" value={rate} onChange={setRate} min={0.001} max={Number.isFinite(budget) ? budget : 20} step={0.01} dollar unit={{ shown: "/h", spoken: "an hour" }} disabled={disabled} />
+        {/* Whose money pays. Your own wallet approves each payment itself, so that choice always asks first.
+            The public demo pays from its shared devnet wallet only. */}
+        {!publicDemo && (
+          <div className="col-span-2 space-y-1.5 pt-1">
+            <Label help="payFrom" forId="pay-from-choice">
+              Pay from
+            </Label>
+            <Segmented
+              id="pay-from-choice"
+              describedBy={ownWallet ? "help-payFrom pay-from-wallet" : "help-payFrom"}
+              label="Pay from"
+              options={PAY_FROM_OWNER}
+              value={payFrom}
+              onChange={setPayFrom}
+              disabled={disabled}
+              fill
+            />
+            {ownWallet && <WalletConnect id="pay-from-wallet" disabled={disabled} />}
+          </div>
+        )}
         <span className="col-span-2 flex items-center gap-2 pt-0.5">
           <input
             id="ask-input"
@@ -359,7 +397,7 @@ export function NeedForm(props: {
             aria-labelledby="ask-label"
             aria-describedby="help-ask"
             checked={asks}
-            disabled={disabled || market === "real"}
+            disabled={disabled || market === "real" || ownWallet}
             onChange={(e) => setAsk(e.target.checked)}
           />
           <Help id="help-ask" text={RENT_HELP.ask} forId="ask-input">
@@ -371,7 +409,7 @@ export function NeedForm(props: {
       <div className="space-y-2 pt-1">
         {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right under them. */}
         <span className="flex flex-col gap-2">
-          <button className={`${START} w-full justify-center`} disabled={blocked} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
+          <button className={`${START} w-full justify-center`} disabled={blocked || needsWallet} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
             {starting ? "Starting…" : "Find and rent"}
           </button>
           {/* Reads prices only: starts no run and spends nothing. */}

@@ -9,7 +9,14 @@ import { base58Encode, signerFromSecret, type Signer } from "./auth";
 import { MAX_PAYMENT_USD } from "./guard";
 
 export type PaymentRequired = X402PaymentRequired;
-export type Payer = { address: string; signer: Signer; payHeaders(required: PaymentRequired): Promise<Record<string, string>> };
+export type Payer = {
+  /** the wallet that signs the payment and the seller's management calls: it owns the machine */
+  address: string;
+  signer: Signer;
+  /** set when the money is not the signer's own: the connected wallet whose USDC it moves under that wallet's approval */
+  funds?: string;
+  payHeaders(required: PaymentRequired): Promise<Record<string, string>>;
+};
 
 /**
  * Signs a payment for exactly the requirement it is given. The caller decodes the 402

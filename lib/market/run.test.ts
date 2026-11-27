@@ -232,6 +232,33 @@ describe("MarketRun approval", () => {
     expect(payer.calls).toBe(0);
   });
 
+  it("a run paid from a connected wallet always stops for approval, names that wallet, and records it as the payer", async () => {
+    const payer = Object.assign(fakePayer(), { funds: "Visitor1111111111111111111111111111111111111" });
+    const { run } = setup({ ask: false, payer });
+    void run.start();
+    await waitPhase(run, "approval");
+    expect(run.view().wallet).toBe(payer.funds);
+    expect(payer.calls).toBe(0);
+    // the code is checked without being used up, so the wallet's approval can be sent first
+    const code = run.view().approval!.code;
+    expect(run.awaiting("wrong")).toBeNull();
+    expect(run.awaiting(code)?.atomic).toBe(run.view().approval!.atomic);
+    expect(run.view().phase).toBe("approval");
+    expect(run.approve(code)).toEqual({ ok: true });
+    await waitPhase(run, "ready");
+    // the money is the visitor's, the machine the agent's
+    expect(run.view().payment?.payer).toBe(payer.funds);
+    expect(payer.calls).toBe(1);
+    expect(run.awaiting(code)).toBeNull();
+  });
+
+  it("a run paid by the agent's own wallet names no connected wallet", async () => {
+    const { run } = setup();
+    void run.start();
+    await waitPhase(run, "ready");
+    expect(run.view().wallet).toBeNull();
+  });
+
   it("cancel at approval ends refused CANCELLED, no payment, no journal line", async () => {
     const { run, payer, events, records } = setup({ ask: true });
     expect(run.cancel()).toMatchObject({ ok: false }); // before start

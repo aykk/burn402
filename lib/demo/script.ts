@@ -2,7 +2,9 @@ import { signMandate, toCompact, type Mandate } from "../mandate";
 import { clusterForMarket, toTransactionRecord } from "../market/record";
 import { destroyOpenPurchase, type RecoverResult } from "../market/recover";
 import { MarketRun, type MarketPhase, type MarketRunView } from "../market/run";
-import { findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
+import { WalletError, approvalMemo, buildApproval, checkSignedApproval, rpcFor, sendSigned, usdcAccount, type ApprovalAsk } from "../market/delegate";
+import type { Payer } from "../market/pay";
+import { delegatePayerFor, findPaymentFor, marketJournal, marketPricesFeed, nuzaFeed, payerFor, sellerFor, sshKeyDir, type RunInput } from "../market/session";
 import { OVERSPEND_BUSY, overspendRunning } from "../market/overspend-lock";
 import { DemoLog } from "./log";
 import type { Actor, Runtime } from "./runtime";
@@ -24,6 +26,10 @@ export class DemoSession {
   readonly runIds = new Set<string>();
   market: MarketRun | null = null;
   private marketStarting: Promise<MarketRunView> | null = null;
+  /** The current run's payer: it says whether a connected wallet funds the run, and which agent wallet that wallet approves. */
+  private marketPayer: Payer | null = null;
+  /** True while a wallet's approval is being checked and sent, so two clicks cannot send it twice. */
+  private approving = false;
 
   constructor(rt: Runtime, kind: "owner" | "public" = "owner") {
     this.rt = rt;
@@ -102,7 +108,8 @@ export class DemoSession {
     if (!admitted.ok) throw new Error("your budget was refused before the run started");
     const mandate = admitted.mandate.hash;
 
-    const payer = await payerFor(input.market);
+    // from a connected wallet, the agent's key still signs: it spends that wallet's USDC under the wallet's own approval
+    const payer = input.wallet ? await delegatePayerFor(input.market, input.wallet) : await payerFor(input.market);
     const run = new MarketRun({
       id,
       market: input.market,
@@ -127,22 +134,77 @@ export class DemoSession {
       log: (line) => this.log.push("info", "MARKET", line),
     });
     this.market = run;
+    this.marketPayer = payer;
     this.log.push(
       "step",
       "MARKET",
-      `${agent.name} starts a ${input.market === "real" ? "real (mainnet)" : "test (devnet)"} run ${id}: budget $${input.limits.budgetUsd}, up to $${input.limits.rateUsdHr}/hour, ${payer ? `paying from ${payer.address}` : "no wallet set up"}`,
+      `${agent.name} starts a ${input.market === "real" ? "real (mainnet)" : "test (devnet)"} run ${id}: budget $${input.limits.budgetUsd}, up to $${input.limits.rateUsdHr}/hour, ${payer ? (payer.funds ? `paying from the connected wallet ${payer.funds}, approved to ${payer.address}` : `paying from ${payer.address}`) : "no wallet set up"}`,
     );
     void run.start();
     return run.view();
   }
 
-  approveMarket(runId: string, code: string): { ok: true; run: MarketRunView } | { ok: false; error: string } {
+  /** What a wallet-funded run asks the visitor's wallet to approve at this approval stop; null when the agent's own wallet pays. */
+  private approvalAsk(runId: string, code: string): { ok: true; ask: ApprovalAsk | null } | { ok: false; error: string } {
     const run = this.market;
     if (!run || run.view().id !== runId) return { ok: false, error: "that run is not the current run" };
+    const approval = run.awaiting(code);
+    if (!approval) return { ok: false, error: "the run is not waiting for this approval" };
+    const payer = this.marketPayer;
+    if (!payer?.funds) return { ok: true, ask: null };
+    return { ok: true, ask: { market: run.view().market, owner: payer.funds, delegate: payer.address, atomic: BigInt(approval.atomic), memo: approvalMemo(runId, code) } };
+  }
+
+  /**
+   * The transaction the visitor's wallet signs at the approval stop of a wallet-funded run: permission
+   * for the agent to move exactly the quoted amount. Unsigned; nothing is sent or paid here.
+   */
+  async walletApproval(runId: string, code: string): Promise<{ ok: true; transaction: string; chain: "solana:devnet" | "solana:mainnet"; wallet: string } | { ok: false; error: string }> {
+    const found = this.approvalAsk(runId, code);
+    if (!found.ok) return found;
+    if (!found.ask) return { ok: false, error: "this run is paid from the agent's wallet, not a connected one" };
+    try {
+      const transaction = await buildApproval(rpcFor(found.ask.market), found.ask);
+      return { ok: true, transaction, chain: found.ask.market === "real" ? "solana:mainnet" : "solana:devnet", wallet: found.ask.owner };
+    } catch (error) {
+      return { ok: false, error: error instanceof WalletError ? error.message : `The approval could not be prepared: ${(error as Error).message}` };
+    }
+  }
+
+  /**
+   * Pays for the quote at the approval stop. A wallet-funded run needs the approval the wallet signed:
+   * it is checked (the wallet's signature, this run's note, exactly the quoted amount to this run's
+   * agent), put on chain, and only then does the run go on to pay.
+   */
+  async approveMarket(runId: string, code: string, signedTransaction?: string): Promise<{ ok: true; run: MarketRunView } | { ok: false; error: string }> {
+    const found = this.approvalAsk(runId, code);
+    if (!found.ok) return found;
+    const run = this.market!;
     // the overspend test sets the test seller's faults; a payment must not start while it runs
     if (overspendRunning()) return { ok: false, error: OVERSPEND_BUSY };
+    if (found.ask) {
+      if (typeof signedTransaction !== "string" || !signedTransaction) return { ok: false, error: "approve the payment in your wallet first" };
+      if (this.approving) return { ok: false, error: "the approval is already being sent" };
+      this.approving = true;
+      try {
+        const checked = checkSignedApproval(signedTransaction, { ...found.ask, account: await usdcAccount(found.ask.market, found.ask.owner) });
+        if (!checked.ok) return { ok: false, error: `The approval was not accepted: ${checked.error}.` };
+        let tx: string;
+        try {
+          tx = await sendSigned(rpcFor(found.ask.market), checked.wire);
+        } catch (error) {
+          return { ok: false, error: `The approval could not be sent, so nothing was paid: ${(error as Error).message}. Try again.` };
+        }
+        this.log.push("info", "MARKET", `run ${runId}: the connected wallet approved ${run.awaiting(code)?.exact ?? "the quoted amount"} for the agent (transaction ${tx})`);
+      } finally {
+        this.approving = false;
+      }
+    }
     const result = run.approve(code);
-    return result.ok ? { ok: true, run: run.view() } : result;
+    if (result.ok) return { ok: true, run: run.view() };
+    // the run stopped waiting while the wallet's approval was being sent (cancelled, or reset): say what is left behind
+    if (found.ask) return { ok: false, error: "Your wallet's approval was sent, but the run was no longer waiting, so nothing was paid. The approval covers this amount only; your next approval replaces it, or revoke it in your wallet." };
+    return result;
   }
 
   /** Destroys the current run's machine, cancels it at the approval stop, or destroys a machine recovered from the journal. */
