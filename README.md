@@ -42,7 +42,7 @@ The agent's wallet, not yours, signs the payment and so owns the machine. That i
 
 A run paid this way always stops for your approval. The spending limits are checked before your wallet is asked, as on every run.
 
-**Proven:** on devnet, end to end, with a stand-in wallet signing as a browser wallet would (`npm run wallet:test`). The payment settled through the hosted facilitator, signed by the agent and the facilitator's fee payer only; the stand-in wallet's balance fell by exactly the quote, the seller's rose by the same, the approval was used up, and the machine came up and was destroyed. **Not proven yet:** Phantom itself signing the approval, and the real seller accepting a payment made this way on mainnet (about one cent of real USDC). To try Phantom for free: turn on Testnet Mode, get devnet SOL from [faucet.solana.com](https://faucet.solana.com) and devnet USDC from [faucet.circle.com](https://faucet.circle.com), and rent on the test market with **My wallet**.
+**Proven on mainnet (2026-11-27):** a real rental paid from Phantom. Phantom signed the approval for exactly $0.01 USDC, the agent paid x402layer out of that wallet (transaction `2M8ScMfZcfGdZA8sULU7A6qXFZ7BvWrfCfWKGTZMpbKCD7ezi2PoBzJf1NTvnuZpetGGaPh5ZFKygLp1H7rhaiLs`, signed by the agent and the seller's fee payer only), the approval was used up, and a real Vultr machine came up with SSH open, managed by the agent. The same flow passes on devnet with a stand-in wallet (`npm run wallet:test`).
 
 ## Records
 
