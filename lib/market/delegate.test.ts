@@ -181,9 +181,55 @@ describe("checkSignedApproval", () => {
     expect(r).toEqual({ ok: true, wire: signed });
   });
 
-  it("accepts a wallet's own extra instructions that are not token instructions", async () => {
+  it("accepts what a wallet adds of its own: a priority fee and Phantom's safety checks", async () => {
     const guard = { programAddress: address("L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"), accounts: [], data: new Uint8Array([1, 2, 3]) };
+    const fee = (n: number) => ({ programAddress: address("ComputeBudget111111111111111111111111111111"), accounts: [], data: new Uint8Array([n, 1, 0, 0, 0]) });
+    // the shape Phantom really sent on mainnet: two compute-budget instructions, the approval, the memo
+    expect(checkSignedApproval(await custom([fee(2), fee(3), await approveIx(), memoIx(ask.memo)]), await expected()).ok).toBe(true);
     expect(checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), guard]), await expected()).ok).toBe(true);
+  });
+
+  it("refuses any other program beside the approval: it could move the wallet's funds another way", async () => {
+    const SYSTEM = "11111111111111111111111111111111";
+    const stranger = wallet().address;
+    // a SOL transfer to a third party (System program, instruction 2)
+    const solTransfer: Instruction = {
+      programAddress: address(SYSTEM),
+      accounts: [
+        { address: address(visitor.address), role: 3 },
+        { address: address(stranger), role: 1 },
+      ],
+      data: new Uint8Array([2, 0, 0, 0, 0, 0xf2, 0x05, 0x2a, 1, 0, 0, 0]),
+    };
+    // an arbitrary program handed the wallet's USDC account and the wallet as signer
+    const unknown: Instruction = {
+      programAddress: address(stranger),
+      accounts: [
+        { address: address(await usdcAccount("test", visitor.address)), role: 1 },
+        { address: address(visitor.address), role: 3 },
+      ],
+      data: new Uint8Array([9]),
+    };
+    // the newer token program
+    const token2022: Instruction = { programAddress: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), accounts: [], data: new Uint8Array([5]) };
+    for (const extra of [solTransfer, unknown, token2022]) {
+      const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), extra]), await expected());
+      expect(r).toEqual({ ok: false, error: "the transaction does something besides the approval" });
+    }
+  });
+
+  it("refuses a second required signer", async () => {
+    // a memo that names another account as a signer makes the transaction need two signatures
+    const cosigned: Instruction = { programAddress: address(MEMO_PROGRAM), accounts: [{ address: address(agent.address), role: 2 }], data: new TextEncoder().encode("x") };
+    const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), cosigned]), await expected());
+    expect(r).toEqual({ ok: false, error: "the approval must be signed by your wallet alone" });
+  });
+
+  it("refuses more instructions than an approval needs", async () => {
+    const pad = Array.from({ length: 8 }, (_, i) => memoIx(`pad ${i}`));
+    const r = checkSignedApproval(await custom([await approveIx(), memoIx(ask.memo), ...pad]), await expected());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("more instructions than an approval needs");
   });
 
   it("refuses an unsigned transaction, one signed by someone else, and a changed one", async () => {

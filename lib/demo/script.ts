@@ -193,7 +193,8 @@ export class DemoSession {
         try {
           tx = await sendSigned(rpcFor(found.ask.market), checked.wire);
         } catch (error) {
-          return { ok: false, error: `The approval could not be sent, so nothing was paid: ${(error as Error).message}. Try again.` };
+          // a node that timed out may still have passed the transaction on: say so rather than "not sent"
+          return { ok: false, error: `The approval was not confirmed as sent (${(error as Error).message}), so nothing was paid. If it still lands, it covers this one amount only and your next approval replaces it. Try again.` };
         }
         this.log.push("info", "MARKET", `run ${runId}: the connected wallet approved ${run.awaiting(code)?.exact ?? "the quoted amount"} for the agent (transaction ${tx})`);
       } finally {

@@ -31,3 +31,6 @@ yarn-error.log*
 next-env.d.ts
 
 .burn402/
+
+# design-review notes kept on this computer
+.impeccable/

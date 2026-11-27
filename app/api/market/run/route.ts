@@ -1,5 +1,5 @@
 import { publicLimit } from "@/lib/demo/limits";
-import { visit } from "@/lib/demo/visit";
+import { errorFor, visit } from "@/lib/demo/visit";
 import { PUBLIC_MAX_BUDGET_USD, PUBLIC_NO_WALLET, PUBLIC_TEST_ONLY } from "@/lib/market/access";
 import { OVERSPEND_BUSY, overspendRunning } from "@/lib/market/overspend-lock";
 import { checkRequest, parseRunInput } from "@/lib/market/session";
@@ -30,7 +30,6 @@ export async function POST(request: Request) {
   try {
     return Response.json({ run: await who.session!.startMarketRun(input.value) });
   } catch (error) {
-    const message = (error as Error).message;
-    return Response.json({ error: message }, { status: message === OVERSPEND_BUSY ? 409 : 400 });
+    return Response.json({ error: errorFor(who.v, error) }, { status: (error as Error).message === OVERSPEND_BUSY ? 409 : 400 });
   }
 }

@@ -1,4 +1,4 @@
-import { visit } from "@/lib/demo/visit";
+import { errorFor, visit } from "@/lib/demo/visit";
 import { checkRequest } from "@/lib/market/session";
 
 /**
@@ -19,6 +19,6 @@ export async function POST(request: Request) {
     if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
     return Response.json({ transaction: result.transaction, chain: result.chain, wallet: result.wallet });
   } catch (error) {
-    return Response.json({ error: (error as Error).message }, { status: 400 });
+    return Response.json({ error: errorFor(who.v, error) }, { status: 400 });
   }
 }
