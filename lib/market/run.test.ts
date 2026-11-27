@@ -6,8 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./guard";
 import { Journal } from "./journal";
-import { MarketRun, probeable, type MarketRunDeps, type PurchaseRecord } from "./run";
-import { SELLERS, SellerClient, type SellerConfig } from "./seller";
+import { MarketRun, cheapestThenBest, probeable, tieNote, type MarketRunDeps, type PurchaseRecord } from "./run";
+import { SELLERS, SellerClient, type Quote, type SellerConfig } from "./seller";
 import { newSshKey } from "./sshkey";
 import { base58Encode } from "./auth";
 import { FAKE_PAY_TO, FakeProcessor, fakePayer, inProcess } from "./testing";
@@ -188,6 +188,54 @@ describe("MarketRun happy path", () => {
     await Promise.all([run.start(), run.start()]);
     expect(run.view().phase).toBe("ready");
     expect(payer.calls).toBe(1);
+  });
+});
+
+describe("which quote the agent takes", () => {
+  const offerOf = (over: Partial<Offer>): Offer => ({ seller: "s", id: "p", provider: "vultr", kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, gpu: null, regions: ["ewr"], hourlyUsd: 0.009, listHourlyUsd: 0.0069, inStock: true, spot: false, rentable: true, ...over });
+  const quoteOf = (atomic: string, over: Partial<Offer>): Quote => ({
+    seller: "s",
+    market: "test",
+    candidate: { offer: offerOf(over), regions: ["ewr"], hours: 1, estimateUsd: 0.01 },
+    region: "ewr",
+    hours: 1,
+    amountUsd: Number(atomic) / 1e6,
+    atomic,
+    accepts: { scheme: "exact", network: "solana:x", asset: "a", amount: atomic, payTo: "p" },
+    body: "{}",
+  });
+  const order = (qs: Quote[]) => [...qs].sort(cheapestThenBest).map((q) => q.candidate.offer.id);
+
+  it("the lowest firm quote wins, to the last millionth of a dollar, whatever the machine", () => {
+    const big = quoteOf("10001", { id: "big", vcpus: 8, ramGb: 32 });
+    const small = quoteOf("10000", { id: "small" });
+    expect(order([big, small])).toEqual(["small", "big"]);
+    expect(tieNote([small, big])).toBeNull();
+  });
+
+  it("at the same quote the better machine wins: the real seller's three plans at one cent", () => {
+    // what x402layer really quoted on mainnet: all three $0.0100, the first on a cheaper provider list price
+    const vc2 = quoteOf("10000", { id: "vc2-1c-1gb", listHourlyUsd: 0.0069 });
+    const vhf = quoteOf("10000", { id: "vhf-1c-1gb", listHourlyUsd: 0.0083 });
+    const amd = quoteOf("10000", { id: "vhp-1c-1gb-amd", listHourlyUsd: 0.0083 });
+    expect(order([vc2, vhf, amd])).toEqual(["vhf-1c-1gb", "vhp-1c-1gb-amd", "vc2-1c-1gb"]);
+    // more memory at the same price beats a stronger class
+    const roomy = quoteOf("10000", { id: "roomy", ramGb: 2, listHourlyUsd: 0.005 });
+    expect(order([vc2, vhf, roomy])[0]).toBe("roomy");
+    // on-demand beats interruptible at the same price and size
+    const spot = quoteOf("10000", { id: "spot", spot: true, listHourlyUsd: 0.02 });
+    expect(order([spot, vc2])).toEqual(["vc2-1c-1gb", "spot"]);
+  });
+
+  it("says so when the lowest quote was shared, and does not call equal machines stronger", () => {
+    const vc2 = quoteOf("10000", { id: "vc2-1c-1gb", listHourlyUsd: 0.0069 });
+    const vhf = quoteOf("10000", { id: "vhf-1c-1gb", listHourlyUsd: 0.0083 });
+    const dear = quoteOf("12000", { id: "dear" });
+    expect(tieNote([vhf, vc2, dear].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vhf-1c-1gb, the strongest machine at that price.");
+    const twin = quoteOf("10000", { id: "vc2-1c-1gb-b", listHourlyUsd: 0.0069 });
+    expect(tieNote([vc2, twin].sort(cheapestThenBest))).toBe("Two plans quoted the same $0.0100. The agent took vc2-1c-1gb; on paper they are the same machine.");
+    expect(tieNote([])).toBeNull();
+    expect(tieNote([vc2])).toBeNull();
   });
 });
 

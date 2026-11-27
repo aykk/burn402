@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 import { DEFAULT_RULES } from "./types";
-import { choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
+import { betterMachine, choose, summarize, type Candidate, type RejectReason, type Rejection } from "./choose";
 import { checkPayment, NETWORKS, type Accepts } from "./guard";
 import { usdExact } from "./money";
 import type { Journal, JournalEntry } from "./journal";
@@ -79,6 +79,8 @@ export type MarketRunView = {
   spent: "nothing" | "paid" | "maybe";
   /** plain notes when the agent used another region or plan than its first choice */
   fallbacks: string[];
+  /** when several plans gave the same lowest quote: which one the agent took and why; else null */
+  choice: string | null;
   /** true for the runs the overspend test makes; the owner's runs are false */
   overspendTest: boolean;
   machine: {
@@ -162,6 +164,27 @@ const DESTROY_RETRIES = 10;
 const STOPPED = "You stopped the run before anything was paid.";
 const CANCELLED = "You cancelled before paying. Nothing was spent.";
 const ALREADY_PAID = "This run already made a payment, so the agent will not pay again.";
+
+/** Firm quotes in the order the agent would take them: the lowest exact amount, and at the same amount the better machine. */
+export function cheapestThenBest(a: Quote, b: Quote): number {
+  const pa = BigInt(a.atomic);
+  const pb = BigInt(b.atomic);
+  return pa < pb ? -1 : pa > pb ? 1 : betterMachine(a.candidate.offer, b.candidate.offer);
+}
+
+/** Said when the lowest quote was shared: the agent did not pick at random, it took the strongest machine at that price. */
+export function tieNote(sorted: Quote[]): string | null {
+  const first = sorted[0];
+  if (!first) return null;
+  const tied = sorted.filter((q) => q.atomic === first.atomic);
+  if (tied.length < 2) return null;
+  const count = tied.length === 2 ? "Two plans" : tied.length === 3 ? "Three plans" : `${tied.length} plans`;
+  const a = first.candidate.offer;
+  const b = tied[1].candidate.offer;
+  // only the plan name told them apart: say so instead of calling one stronger
+  const equal = betterMachine({ ...a, id: "" }, { ...b, id: "" }) === 0;
+  return `${count} quoted the same ${usdExact(first.atomic)}. The agent took ${a.id}${equal ? "; on paper they are the same machine" : ", the strongest machine at that price"}.`;
+}
 
 /** Why a chooser left a plan out, in words. */
 export function leftOutWords(reason: RejectReason | string, need: Pick<Need, "kind">): string {
@@ -360,6 +383,7 @@ export class MarketRun {
   private lastQuoteError = "";
   private fallbackCount = 0;
   private fallbackNotes: string[] = [];
+  private choiceNote: string | null = null;
   /** plan key -> the regions that failed for it, with the code */
   private readonly failures = new Map<string, { region: string; code: string }[]>();
   private ranked: Candidate[] = [];
@@ -456,6 +480,7 @@ export class MarketRun {
       payment: this.payment,
       spent: !this.alreadyPaid ? "nothing" : this.payment?.status === "confirmed" ? "paid" : "maybe",
       fallbacks: this.fallbackNotes,
+      choice: this.choiceNote,
       overspendTest: this.d.overspendTest === true,
       machine: this.machine,
       attempts: this.attempts,
@@ -591,7 +616,8 @@ export class MarketRun {
     }
     if (this.stopped) return;
     if (this.quotes.length === 0) return this.fail(`No seller gave a usable quote. The last problem: ${this.lastQuoteError || "no seller answered."}`);
-    this.quotes.sort((a, b) => a.amountUsd - b.amountUsd); // stable: ties keep the chooser's order
+    this.quotes.sort(cheapestThenBest);
+    this.choiceNote = tieNote(this.quotes);
     return this.offer(this.quotes[0]);
   }
 
@@ -790,6 +816,8 @@ export class MarketRun {
         if (next) {
           this.fallbackCount++;
           this.approval = null;
+          // the first choice could not be bought; the notes about that take over from the note about the tie
+          this.choiceNote = null;
           return this.offer(next);
         }
       }
@@ -891,7 +919,7 @@ export class MarketRun {
         return q;
       }
     }
-    return this.quotes.filter((q) => !this.used.has(q)).sort((a, b) => a.amountUsd - b.amountUsd)[0] ?? null;
+    return this.quotes.filter((q) => !this.used.has(q)).sort(cheapestThenBest)[0] ?? null;
   }
 
   private async findMachine(q: Quote, intentAt: number, before: Set<string> | null): Promise<Instance | null> {
