@@ -275,12 +275,11 @@ export default function Page() {
         </div>
       )}
 
-      {/* One column template in every phase, so nothing jumps when a run starts, pays or ends. The form column
-          is 26rem: its container is 25rem after the padding, wide enough for three number fields in a row
-          (NeedForm switches at 24rem), and the run column keeps room for the plan table. Below lg the columns
-          stack, with the run first while there is one. */}
-      <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-10">
-        <div id="need" className={`form-col lg:pr-4 lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
+      {/* One column template in every phase, so nothing jumps when a run starts, pays or ends: a 17rem filter
+          rail on the left (one filter per row, top to bottom) and the results on the right, which get the rest
+          of the width for the plan table. Below lg the columns stack, with the run first while there is one. */}
+      <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-10">
+        <div id="need" className={`form-col lg:pb-6 ${run ? "border-t border-rule pt-8 lg:border-t-0 lg:pt-0" : ""}`}>
           <NeedForm
             snap={snap}
             run={run}
