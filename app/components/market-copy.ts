@@ -89,13 +89,15 @@ export function paymentLine(p: PaymentFacts, market: MarketId, opts: { amount?: 
 }
 
 /**
- * After the machine is destroyed: what the payment bought, how long it ran, and that unused time stays paid.
+ * After the machine is destroyed: what the payment bought, how long it ran, and that unused time stays paid,
+ * as short labelled facts (one sentence holding all three was too long to scan).
  * The amount itself is the meter's big figure right above, so it is not repeated here.
  */
-export function prepaidLine(p: PaymentFacts, hours: number, ranSeconds: number | null): string {
-  const paid = p.status === "confirmed" ? `Paid for ${hoursText(hours)}.` : `Sent for ${hoursText(hours)}, not confirmed yet.`;
-  const ran = ranSeconds !== null ? ` Destroyed after ${timeLeft(ranSeconds)}.` : "";
-  return `${paid}${ran} Unused time is not refunded by this app. Whether the seller refunds it depends on the seller.`;
+export function prepaidFacts(p: PaymentFacts, hours: number, ranSeconds: number | null): { label: string; value: string }[] {
+  const facts = [p.status === "confirmed" ? { label: "Paid for", value: hoursText(hours) } : { label: "Sent for", value: `${hoursText(hours)}, not confirmed yet` }];
+  if (ranSeconds !== null) facts.push({ label: "Ran for", value: timeLeft(ranSeconds) });
+  facts.push({ label: "Unused time", value: "Not refunded by this app. The seller decides." });
+  return facts;
 }
 
 /**

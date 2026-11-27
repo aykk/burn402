@@ -13,6 +13,7 @@ export function Segmented<T extends string | number>({
   className = "",
   id,
   describedBy,
+  fill,
 }: {
   label: string;
   options: readonly { value: T; label: string; danger?: boolean; spends?: boolean }[];
@@ -23,9 +24,11 @@ export function Segmented<T extends string | number>({
   className?: string;
   id?: string;
   describedBy?: string;
+  /** Fills the width it is given, the options sharing it equally (the filter rail). */
+  fill?: boolean;
 }) {
   return (
-    <div id={id} role="group" aria-label={label} aria-describedby={describedBy} className={`flex ${className}`}>
+    <div id={id} role="group" aria-label={label} aria-describedby={describedBy} className={`flex ${fill ? "w-full" : ""} ${className}`}>
       {options.map((o, i) => {
         const on = o.value === value;
         // The real-money option turns red when chosen, so the mode that spends real money is never quiet.
@@ -42,7 +45,7 @@ export function Segmented<T extends string | number>({
             aria-pressed={on}
             disabled={disabled}
             onClick={() => onChange(o.value)}
-            className={`relative inline-flex h-9 shrink-0 items-center gap-2 border px-4 text-[14px] leading-5 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${tone} ${danger} ${
+            className={`relative inline-flex h-9 items-center gap-2 border text-[14px] leading-5 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${fill ? "min-w-0 flex-1 justify-center px-2" : "shrink-0 px-4"} ${tone} ${danger} ${
               i === 0 ? "rounded-l-[3px] rounded-r-none" : "-ml-px rounded-none"
             } ${i === options.length - 1 ? "rounded-r-[3px]" : ""}`}
           >

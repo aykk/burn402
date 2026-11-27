@@ -34,6 +34,9 @@ const START =
 /** Number fields with the unit inside: no spinner arrows to collide with the suffix (arrow keys still step). */
 const NUMBER = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
+/** The filter rail: one filter per row, top to bottom, label on the left and its field on the right, all fields one width. */
+const ROWS = "grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5";
+
 const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 const MARKET_OPTIONS = [
@@ -65,7 +68,7 @@ function Label({ children, help, id = help, htmlFor, forId = htmlFor }: { childr
   );
 }
 
-/** A number field with its unit inside, on the right (or a "$" on the left). */
+/** A number field with its unit inside, on the right (or a "$" on the left). Two cells of a ROWS grid: its label, then the field. */
 function NumberField(props: {
   id: string;
   label: string;
@@ -81,7 +84,7 @@ function NumberField(props: {
 }) {
   const unitId = `${props.id}-unit`;
   return (
-    <div className="min-w-0 space-y-1.5">
+    <>
       <Label help={props.help} id={props.id} htmlFor={props.id}>
         {props.label}
       </Label>
@@ -111,7 +114,7 @@ function NumberField(props: {
           </span>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -283,78 +286,73 @@ export function NeedForm(props: {
   const disabled = running;
 
   return (
-    <div className="@container space-y-5">
+    <div className="max-w-[24rem] space-y-4 lg:max-w-none">
       <h2 ref={formHeading} tabIndex={-1} className="text-[16px] leading-[22px] font-semibold text-foreground focus:outline-none">
         What you need
       </h2>
 
-      <div className="grid grid-cols-1 gap-x-6 gap-y-5 @min-[30rem]:grid-cols-[auto_auto] @min-[30rem]:justify-start">
-        <div className="space-y-1.5">
-          <Label help="market" forId="market-choice">
-            Market
-          </Label>
-{/* The public demo has one market; the real one spends the owner's wallet and is not offered there. */}
-          {publicDemo ? (
-            <p id="market-choice" className="text-foreground">
-              <span className="font-medium">Test (devnet)</span>
-              <span className="text-muted">: test money and simulated machines. Nothing here costs real money.</span>
-            </p>
-          ) : (
-            <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} />
-          )}
-          {/* Under the Market choice it belongs to. */}
-          {market === "real" && (
-            <p id="real-line" className="max-w-[28ch] text-foreground">
-              Real money: USDC on Solana mainnet. You approve every payment.
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <Label help="kind" forId="kind-choice">
-            Machine
-          </Label>
-          <Segmented id="kind-choice" describedBy="help-kind" label="Machine" options={KIND_OPTIONS} value={kind} onChange={setKind} disabled={disabled} />
-        </div>
+      <div className="space-y-1.5">
+        <Label help="market" forId="market-choice">
+          Market
+        </Label>
+        {/* The public demo has one market; the real one spends the owner's wallet and is not offered there. */}
+        {publicDemo ? (
+          <p id="market-choice" className="text-foreground">
+            <span className="font-medium">Test (devnet)</span>
+            <span className="text-muted">: test money and simulated machines. Nothing here costs real money.</span>
+          </p>
+        ) : (
+          <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} fill />
+        )}
+        {/* Under the Market choice it belongs to. */}
+        {market === "real" && (
+          <p id="real-line" className="text-foreground">
+            Real money: USDC on Solana mainnet. You approve every payment.
+          </p>
+        )}
       </div>
 
-      {/* Units sit inside the fields. Two columns on a narrow form, up to four on a wide one. */}
-      <div className={`grid grid-cols-2 gap-4 ${kind === "gpu" ? "@min-[30rem]:grid-cols-4" : "@min-[24rem]:grid-cols-3"}`}>
+      <div className="space-y-1.5">
+        <Label help="kind" forId="kind-choice">
+          Machine
+        </Label>
+        <Segmented id="kind-choice" describedBy="help-kind" label="Machine" options={KIND_OPTIONS} value={kind} onChange={setKind} disabled={disabled} fill />
+      </div>
+
+      {/* The machine: one filter per row. Units sit inside the fields. */}
+      <div className={ROWS}>
         <NumberField id="vcpus-input" label="vCPUs" help="size" value={vcpus} onChange={setVcpus} min={1} max={64} step={1} disabled={disabled} />
         <NumberField id="ram-input" label="RAM" help="size" value={ramGb} onChange={setRamGb} min={0.5} max={512} step={0.5} unit={{ shown: "GB", spoken: "gigabytes" }} disabled={disabled} />
         {kind === "gpu" && (
           <NumberField id="vram-input" label="GPU memory" help="size" value={vramGb} onChange={setVramGb} min={0} max={200} step={1} unit={{ shown: "GB", spoken: "gigabytes" }} disabled={disabled} />
         )}
         <NumberField id="hours-input" label="Hours" help="hours" value={hours} onChange={setHours} min={0.25} max={72} step={0.25} unit={{ shown: "h", spoken: "hours" }} disabled={disabled} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 @min-[24rem]:grid-cols-3">
-        <NumberField id="budget-input" label="Budget" help="budget" value={budget} onChange={(n) => setBudget(n)} min={0.01} max={20} step={0.25} dollar disabled={disabled} />
-        <NumberField id="rate-input" label="Hourly limit" help="rate" value={rate} onChange={setRate} min={0.001} max={Number.isFinite(budget) ? budget : 20} step={0.01} dollar unit={{ shown: "/h", spoken: "an hour" }} disabled={disabled} />
-        <div className="col-span-2 min-w-0 space-y-1.5 @min-[24rem]:col-span-1">
-          <Label help="regions" htmlFor="regions-input">
-            Regions
-          </Label>
-          <input
-            id="regions-input"
-            type="text"
-            aria-describedby="help-regions"
-            className={`${INPUT} w-full`}
-            placeholder="Any"
-            value={regions}
-            disabled={disabled}
-            onChange={(e) => setRegions(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <span className="flex items-center gap-2">
+        <Label help="regions" htmlFor="regions-input">
+          Regions
+        </Label>
+        <input
+          id="regions-input"
+          type="text"
+          aria-describedby="help-regions"
+          className={`${INPUT} w-full`}
+          placeholder="Any"
+          value={regions}
+          disabled={disabled}
+          onChange={(e) => setRegions(e.target.value)}
+        />
+        <span className="col-span-2 flex items-center gap-2 pt-0.5">
           <input id="spot-input" type="checkbox" aria-labelledby="spot-label" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
           <Help id="help-spot" text={RENT_HELP.spot} forId="spot-input">
             <span id="spot-label">Interruptible is OK</span>
           </Help>
         </span>
-        <span className="flex items-center gap-2">
+      </div>
+
+      {/* The spending limits, set apart from the machine by a rule. */}
+      <div className={`${ROWS} border-t border-rule pt-4`}>
+        <NumberField id="budget-input" label="Budget" help="budget" value={budget} onChange={(n) => setBudget(n)} min={0.01} max={20} step={0.25} dollar disabled={disabled} />
+        <NumberField id="rate-input" label="Hourly limit" help="rate" value={rate} onChange={setRate} min={0.001} max={Number.isFinite(budget) ? budget : 20} step={0.01} dollar unit={{ shown: "/h", spoken: "an hour" }} disabled={disabled} />
+        <span className="col-span-2 flex items-center gap-2 pt-0.5">
           <input
             id="ask-input"
             type="checkbox"
@@ -370,14 +368,14 @@ export function NeedForm(props: {
         </span>
       </div>
 
-      <div className="space-y-2">
-        {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right beside them. */}
-        <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <button className={START} disabled={blocked} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
+      <div className="space-y-2 pt-1">
+        {/* Why Find and rent or Compare prices is off, or what will not work yet, sits right under them. */}
+        <span className="flex flex-col gap-2">
+          <button className={`${START} w-full justify-center`} disabled={blocked} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void start()}>
             {starting ? "Starting…" : "Find and rent"}
           </button>
           {/* Reads prices only: starts no run and spends nothing. */}
-          <button ref={compareButton} id="compare-button" type="button" className={BTN} disabled={blocked || comparing} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void compare()}>
+          <button ref={compareButton} id="compare-button" type="button" className={`${BTN} w-full`} disabled={blocked || comparing} aria-describedby={reason ? "start-reason" : undefined} onClick={() => void compare()}>
             {comparing ? "Comparing…" : "Compare prices"}
           </button>
           {reason && (
