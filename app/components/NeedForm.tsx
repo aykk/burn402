@@ -49,8 +49,8 @@ const CHECK_TARGET = "-m-1.5 inline-flex p-1.5";
 const REGION_RE = /^[a-z0-9:-]{2,20}$/;
 
 const MARKET_OPTIONS = [
-  { value: "test" as const, label: "Test (devnet)" },
-  { value: "real" as const, label: "Real (mainnet)", danger: true, spends: true },
+  { value: "test" as const, label: "Test" },
+  { value: "real" as const, label: "Real money", danger: true, spends: true },
 ];
 
 const PAY_FROM_OWNER = [
@@ -181,7 +181,8 @@ export function NeedForm(props: {
   const [regions, setRegions] = useState("");
   const [budget, setBudget] = useState(1);
   const [rate, setRate] = useState(0.05);
-  const [allowSpot, setAllowSpot] = useState(false);
+  // Interruptible (spot) machines are not offered in the form: no seller here has any, and the choice only confused.
+  const allowSpot = false;
   const [ask, setAsk] = useState(true);
   // Whose money pays: the wallet the app runs with, or the visitor's own wallet in this browser.
   const [payFrom, setPayFrom] = useState<"agent" | "wallet">("agent");
@@ -292,7 +293,10 @@ export function NeedForm(props: {
   const ownWallet = payFrom === "wallet" || publicReal;
   // Paying from your own wallet needs it connected; comparing prices does not.
   const needsWallet = ownWallet && !wallet.connected;
-  const key = sshKey.trim();
+  // The key is for logging in to a real machine. The test market's machines are simulated, so the box is
+  // not shown there and nothing typed earlier is sent.
+  const wantsKey = ownWallet && market === "real";
+  const key = wantsKey ? sshKey.trim() : "";
   const keyBad = key !== "" && !SSH_KEY_RE.test(key);
   // A visitor's real machine is set up with their key and nobody else's: without one they could not log in.
   const needsKey = publicReal && key === "";
@@ -326,7 +330,7 @@ export function NeedForm(props: {
       rateUsdHr: rate,
       askBeforePaying: asks,
       wallet: ownWallet ? (wallet.connected?.address ?? null) : null,
-      sshPublicKey: ownWallet && key !== "" ? key : null,
+      sshPublicKey: key !== "" ? key : null,
     });
     setStartError(failed);
     setStarting(false);
@@ -354,8 +358,8 @@ export function NeedForm(props: {
         {/* The public demo has one market unless the owner opened the real one, which a visitor pays for from their own wallet. */}
         {publicDemo && !snap?.publicReal ? (
           <p id="market-choice" className="text-foreground">
-            <span className="font-medium">Test (devnet)</span>
-            <span className="text-muted">: test money and simulated machines. Nothing here costs real money.</span>
+            <span className="font-medium">Test</span>
+            <span className="text-muted">: play money and pretend machines. Nothing here costs real money.</span>
           </p>
         ) : (
           <Segmented id="market-choice" describedBy={market === "real" ? "help-market real-line" : "help-market"} label="Market" options={MARKET_OPTIONS} value={market} onChange={setMarket} disabled={disabled} fill />
@@ -363,7 +367,7 @@ export function NeedForm(props: {
         {/* Under the Market choice it belongs to. */}
         {market === "real" && (
           <p id="real-line" className="text-foreground">
-            Real money: USDC on Solana mainnet. You approve every payment.
+            Real USDC (digital dollars on Solana) and a real machine. You approve every payment.
           </p>
         )}
       </div>
@@ -396,15 +400,6 @@ export function NeedForm(props: {
           disabled={disabled}
           onChange={(e) => setRegions(e.target.value)}
         />
-        <span className="col-span-2 flex items-center gap-2 pt-0.5">
-          {/* The label is only a larger place to click or tap (25px); the box takes its name from the text beside it. */}
-          <label className={CHECK_TARGET}>
-            <input id="spot-input" type="checkbox" aria-labelledby="spot-label" aria-describedby="help-spot" checked={allowSpot} disabled={disabled} onChange={(e) => setAllowSpot(e.target.checked)} />
-          </label>
-          <Help id="help-spot" text={RENT_HELP.spot} forId="spot-input">
-            <span id="spot-label">Interruptible is OK</span>
-          </Help>
-        </span>
       </div>
 
       {/* The spending limits, set apart from the machine by a rule. */}
@@ -426,9 +421,9 @@ export function NeedForm(props: {
             disabled={disabled || publicReal}
             fill
           />
-          {publicReal && <p className="text-foreground">On the real market you pay from your own wallet.</p>}
+          {publicReal && <p className="text-foreground">With real money you pay from your own wallet.</p>}
           {ownWallet && <WalletConnect id="pay-from-wallet" disabled={disabled} />}
-          {ownWallet && (
+          {wantsKey && (
             <div className="space-y-1.5 pt-1">
               <Label help="sshKey" htmlFor="ssh-key-input">
                 Your SSH public key
@@ -448,11 +443,7 @@ export function NeedForm(props: {
                 onChange={(e) => setSshKey(e.target.value)}
               />
               <p id="ssh-key-note" className="text-[12px] leading-4 text-muted">
-                {publicDemo
-                  ? market === "real"
-                    ? "Needed: the machine is set up with this key, so only you can log in."
-                    : "Optional here: test machines are simulated and cannot be logged in to."
-                  : "Optional. Leave it empty and the app makes a key on this computer."}
+                {publicDemo ? "Needed: the machine is set up with this key, so only you can log in." : "Optional. Leave it empty and the app makes a key on this computer."}
               </p>
             </div>
           )}

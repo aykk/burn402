@@ -27,7 +27,7 @@ describe("record headlines", () => {
     const w = words({
       outcome: "failed",
       plan: "vc2-1c-1gb",
-      reason: 'Test seller (devnet, simulated machines) rejected the payment: {"error":"payment rejected, pay again","quote_usd":0.010382}',
+      reason: 'Test seller (simulated machines) rejected the payment: {"error":"payment rejected, pay again","quote_usd":0.010382}',
     });
     expect(w.headline).toBe("sent a payment for a vc2-1c-1gb server and the seller rejected it");
     expect(w.label).toBe("payment rejected by the seller");

@@ -186,7 +186,7 @@ describe("NB1: the headline amount is what was paid, never a drained figure", ()
   });
   it("while the machine runs the headline is time left, never dollars", () => {
     const { h } = headlineOf({ ...paidRun, phase: "ready", machine: { ...gone, status: "active" } }, T0 + HOUR / 2);
-    expect(h).toMatchObject({ label: "Prepaid time left", amount: null, time: "30m 00s", suffix: "of 1 hour" });
+    expect(h).toMatchObject({ label: "Time left", amount: null, time: "30m 00s", suffix: "of 1 hour" });
   });
 });
 

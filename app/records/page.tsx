@@ -243,8 +243,8 @@ export default function RecordsPage() {
           )}
         </div>
         <p className="mt-2 max-w-[64ch] text-muted">
-          Every payment, refusal and failure your agent makes is written to Arweave. Testnet is for trying things out; mainnet is permanent and public.
-          Reload the page to read them again.
+          Every payment, refusal and failure is signed by your agent and stored on Arweave, a public archive, so anyone can check what it did. Testnet is for
+          trying things out; mainnet is permanent.
         </p>
       </div>
 

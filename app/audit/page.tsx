@@ -52,9 +52,9 @@ export default function OverspendPage() {
       <div className="pt-2">
         <h1 className="text-[20px] leading-[26px] font-semibold">Overspend test</h1>
         <p className="mt-3 max-w-[64ch] text-muted">
-          The agent is given a limit of {usd2(LIMITS.rateUsdHr)} an hour and {usd2(LIMITS.budgetUsd)} in total, then five ways to spend more are tried against the test seller: a plan over the
-          hourly limit, a rental over the budget, a seller that raises its price after quoting, a seller that asks for the wrong token, and a seller that takes the payment, then claims it was rejected, to get paid again.
-          It runs on Solana devnet with simulated machines. In the last attempt the dishonest seller really keeps one payment of about one cent of test USDC.
+          Can the agent be tricked into overspending? It gets a limit of {usd2(LIMITS.rateUsdHr)} an hour and {usd2(LIMITS.budgetUsd)} in total, then a dishonest test seller tries five
+          tricks: a plan over the hourly limit, a rental over the budget, a price raised after quoting, the wrong currency, and taking the payment while claiming it failed, to get paid twice.
+          It uses play money and pretend machines. The last trick really keeps one payment of about one cent of play money.
         </p>
       </div>
 

@@ -207,7 +207,7 @@ export function meterHeadline(v: MeterView, j: JobGauge, spanHours: number): Met
     case "sent":
       return { label: "Payment sent", amount: paid, time: null, suffix: "sent, not confirmed yet" };
     case "draining":
-      if (j.secondsLeft !== null) return { label: "Prepaid time left", amount: null, time: timeLeft(j.secondsLeft), suffix: `of ${hoursText(spanHours)}` };
+      if (j.secondsLeft !== null) return { label: "Time left", amount: null, time: timeLeft(j.secondsLeft), suffix: `of ${hoursText(spanHours)}` };
       return { label: v.spent === "paid" ? "Paid for machine time" : "Sent for machine time, not confirmed", amount: paid, time: null, suffix: "" };
     case "held":
       return { label: spentLabel, amount: paid, time: null, suffix: "" };

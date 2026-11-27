@@ -5,7 +5,7 @@ import type { MarketPrice, SourceStatus } from "./types";
 
 const NEED: Need = { kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false };
 const GPU_NEED: Need = { kind: "gpu", vcpus: 1, ramGb: 1, vramGb: 16, hours: 2, regions: [], allowSpot: false };
-const SELLER = "Test seller (devnet, simulated machines)";
+const SELLER = "Test seller (simulated machines)";
 const SOURCES: SourceStatus[] = [
   { source: "vultr", label: "Vultr (direct)", ok: true, count: 3, note: null },
   { source: "vast", label: "Vast.ai marketplace", ok: false, count: 0, note: "did not answer in time" },

@@ -90,7 +90,7 @@ export function MarketPrices({
             tabIndex={focusOnShow ? -1 : undefined}
             className={`${H === "h2" ? "text-[16px] leading-[22px] font-semibold text-foreground" : "text-[14px] leading-5 font-semibold text-foreground"} focus:outline-none`}
           >
-            Market prices
+            Prices elsewhere
           </H>
           {onClose && (
             <button type="button" className={`text-[12px] leading-4 ${TEXT_BTN}`} onClick={onClose}>
@@ -127,7 +127,7 @@ export function MarketPrices({
             </div>
           )}
 
-          {hasRows && foldable && <Fold label="the market prices table" open={open} onToggle={() => setOpen(!open)} />}
+          {hasRows && foldable && <Fold label="the price table" open={open} onToggle={() => setOpen(!open)} />}
 
           {showTable && (
             // relative: the visually hidden caption is positioned against this wrapper, so it cannot widen the page.
@@ -228,7 +228,7 @@ export function MarketPrices({
                             {r.spotHourlyUsd !== null ? usd4(r.spotHourlyUsd) : <span className="sr-only">not published</span>}
                           </td>
                         )}
-                        <td className="py-2 text-muted">Not yet: no x402 payment</td>
+                        <td className="py-2 text-muted">No: it does not take x402 payments</td>
                       </tr>
                     );
                   })}
@@ -239,7 +239,7 @@ export function MarketPrices({
 
           {showTable && (
             <p className="max-w-[64ch] text-[12px] leading-4 text-muted">
-              Prices from other providers are list prices read from their public pages. Only a firm quote from a seller your agent can pay is ever approved or paid.
+              Other providers&apos; prices come from their public price lists. Your agent only ever pays a price a seller has confirmed.
             </p>
           )}
         </>

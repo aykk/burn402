@@ -34,12 +34,7 @@ function StageRow({ run }: { run: MarketRunView | null }) {
   const state = (i: number): StageState => (i < at ? "done" : i > at ? "next" : (end ?? "now"));
   return (
     <div>
-      {!run && (
-        <h2 id="stages-label" className="mb-4 text-[16px] leading-[22px] font-semibold text-foreground">
-          What happens when you start
-        </h2>
-      )}
-      <ol aria-label={run ? "Run stages" : undefined} aria-labelledby={run ? undefined : "stages-label"} className="grid grid-cols-4 gap-[3px]">
+      <ol aria-label="Run stages" className="grid grid-cols-4 gap-[3px]">
         {MARKET_STAGES.map((label, i) => {
           const s = state(i);
           return (
@@ -157,12 +152,10 @@ export function MarketPanel({
   if (!run) {
     return (
       <div className="space-y-6">
-        <StageRow run={null} />
-        {/* The list of plans carries its own line on what happens next; the longer explanation stands in only while there is no list. */}
+        {/* Before a run the column is the list of plans that fit. The step row appears once a run starts: before that it described nothing. */}
         {preview ?? (
           <p className="max-w-[56ch] text-muted">
-            Your agent reads the seller&apos;s price list, keeps the plans that fit your machine and your limits, asks for firm quotes on the cheapest
-            few, and stops to show you the exact payment. After you pay, it shows the machine and destroys it when the time is up.
+            Fill in what you need on the left. Your agent finds the cheapest machine that fits, shows you the exact payment, and destroys the machine when the time is up.
           </p>
         )}
       </div>

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { MarketRunView } from "@/lib/market/run";
 import { ActionError, type Post } from "./ActionError";
-import { approvalSentence, billedHoursLine, shortAddress, surchargeLine } from "./market-copy";
+import { approvalDetail, approvalSentence, billedHoursLine, shortAddress, surchargeLine } from "./market-copy";
 import type { FocusNext } from "./MarketPanel";
 import { BTN } from "./ui";
 import { signWithWallet, useWallet, type WalletChain } from "./wallet";
@@ -109,16 +109,17 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
           Your approval
         </h3>
         <p className="mt-1 max-w-[60ch] text-[16px] leading-[22px] font-semibold text-foreground tabular-nums [overflow-wrap:anywhere]">{approvalSentence(a)}</p>
+        <p className="mt-1 max-w-[64ch] text-foreground tabular-nums">{approvalDetail(a)}</p>
         {billed && <p className="mt-1 max-w-[64ch] text-foreground">{billed}</p>}
         {surcharge && <p className="mt-1 max-w-[64ch] text-foreground">{surcharge}</p>}
         {own && (
           <p className="mt-1 max-w-[64ch] text-foreground">
-            Paid from your wallet {shortAddress(own)}. It will ask you to approve exactly {a.exact} USDC for your agent, which then pays the seller. Your wallet pays the
-            approval&apos;s network fee, well under a cent of SOL.
+            Your wallet {shortAddress(own)} will ask you to approve exactly {a.exact}. Your agent then pays the seller from it. Your wallet also pays a network fee of well
+            under a cent.
           </p>
         )}
         <p className="mt-1 max-w-[64ch] text-[12px] leading-4 text-muted">
-          A firm quote from the seller. Your agent checks the seller&apos;s payment request against this amount and your limits before it signs.
+          This price is fixed. Your agent refuses to pay if the seller asks for more, or for more than your limits.
         </p>
       </div>
       <div className="space-y-2">
@@ -126,8 +127,8 @@ export function ApprovalBar({ run, walletReady, post, onFocusNext }: { run: Mark
         {/* Paid from the visitor's own wallet: the money never passes through this site, so it cannot give any back. */}
         {real && own && (
           <p className="max-w-[64ch] text-foreground">
-            The payment goes straight from your wallet to the seller. If the seller takes it and no machine comes up, this site cannot refund it; it shows you the payment so
-            you can take it up with the seller.
+            The money goes straight from your wallet to the seller. If no machine comes up, this site cannot refund it, but it shows you the payment so you can ask the
+            seller.
           </p>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

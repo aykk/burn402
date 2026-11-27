@@ -165,7 +165,7 @@ describe("MarketRun happy path", () => {
     expect(chosen[0]).toMatchObject({ id: "vc2-1c-1gb", quoteUsd: CHEAPEST_USD, region: "ewr" });
     expect(payer.calls).toBe(1);
     expect(processor.settled).toBe(1);
-    expect(v.sources).toEqual([{ name: "Test seller (devnet, simulated machines)", ok: true, count: expect.any(Number), note: null }]);
+    expect(v.sources).toEqual([{ name: "Test seller (simulated machines)", ok: true, count: expect.any(Number), note: null }]);
     expect(v.machine).toMatchObject({ status: "active", port22: "not checked", plan: "vc2-1c-1gb", region: "ewr" });
     expect(v.machine?.ip).toMatch(/^203\.0\.113\./);
     expect(seller.machines.get(v.machine!.id)?.destroyed).toBe(false);

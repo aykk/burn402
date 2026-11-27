@@ -161,21 +161,25 @@ export function MachinePanel({
             <span className={`text-foreground ${MONO}`}>{m.ip}</span>
           </Row>
         )}
-        {!gone && m?.ssh && (
-          <Row k="SSH">
-            <SshLine command={m.ssh} />
-          </Row>
-        )}
+        {/* One row for logging in: on the test market there is no real machine, so no command is shown; on the
+            real one, the command and whether the machine is ready for it yet. */}
         {!gone && m?.ip && (
-          <Row k="Port 22">
-            {m.port22 === "open" ? (
-              <span className="text-ok">Open</span>
-            ) : m.port22 === "closed" ? (
-              <span className="text-foreground">Closed. The machine may still be booting; try SSH in a minute.</span>
-            ) : run.market === "test" ? (
-              <span className="text-muted">Not checked: test machines have no real address.</span>
+          <Row k="Log in">
+            {run.market === "test" ? (
+              <span className="text-muted">A test machine is pretend, so there is nothing to log in to.</span>
             ) : (
-              <span className="text-muted">Checking</span>
+              <span className="block space-y-1">
+                {m.ssh && <SshLine command={m.ssh} />}
+                <span className="block">
+                  {m.port22 === "open" ? (
+                    <span className="text-ok">Ready: you can log in now.</span>
+                  ) : m.port22 === "closed" ? (
+                    <span className="text-foreground">Not ready yet. The machine may still be starting; try in a minute.</span>
+                  ) : (
+                    <span className="text-muted">Checking whether it is ready…</span>
+                  )}
+                </span>
+              </span>
             )}
           </Row>
         )}
@@ -198,7 +202,7 @@ export function MachinePanel({
               {!confirmed && <span className="text-foreground">not confirmed yet</span>}
               {solscan ? (
                 <a href={solscan} target="_blank" rel="noreferrer" className="text-[12px] leading-4 whitespace-nowrap">
-                  Payment on Solscan
+                  View the payment
                 </a>
               ) : (
                 <span className="text-[12px] leading-4 text-muted">{confirmed ? "The seller did not report a transaction id." : "No transaction id yet."}</span>
@@ -218,7 +222,7 @@ export function MachinePanel({
             </button>
             {!armed && (
               <span id="destroy-wait" className="sr-only">
-                Available in two seconds, so a second click meant for Pay and rent cannot destroy the machine.
+                Ready in two seconds, so a double click on Pay cannot destroy the machine by accident.
               </span>
             )}
           </div>

@@ -83,7 +83,7 @@ function JobGaugeBar({ j, v, className }: { j: JobGauge; v: MeterView; className
 function gaugeLabel(j: JobGauge, v: MeterView): string {
   if (j.state === "quoted") return `This rental will use ${v.quotedExact ?? usd4(j.scaleUsd)}`;
   if (j.state === "sent") return `A payment of ${v.paidExact ?? usd4(j.scaleUsd)} was sent and is not confirmed yet`;
-  if (j.state === "draining" && j.secondsLeft !== null && v.spanSeconds !== null) return `Prepaid time left: ${timeLeft(j.secondsLeft)} of ${hoursText(v.spanSeconds / 3600)}`;
+  if (j.state === "draining" && j.secondsLeft !== null && v.spanSeconds !== null) return `Time left: ${timeLeft(j.secondsLeft)} of ${hoursText(v.spanSeconds / 3600)}`;
   if (j.state === "shut") return "The machine is destroyed; no prepaid time is left";
   return `Prepaid machine time, ${v.paidExact ?? usd4(j.scaleUsd)}`;
 }
@@ -102,7 +102,7 @@ function PaymentLine({ payment, solscan, market, fresh, amount = true }: { payme
         <>
           {" "}
           <a href={solscan} target="_blank" rel="noreferrer" className="whitespace-nowrap">
-            See it on Solscan
+            View the payment
           </a>
         </>
       )}
