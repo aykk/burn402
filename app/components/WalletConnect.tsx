@@ -30,7 +30,8 @@ export function WalletConnect({ disabled = false, id }: { disabled?: boolean; id
   if (wallet.wallets.length === 0) {
     return (
       <p id={id} className="text-foreground">
-        No Solana wallet found in this browser. Install one, such as Phantom, then reload this page.
+        No Solana wallet found in this browser. Install one (Phantom, MetaMask, Solflare, Backpack and Coinbase Wallet all work), then reload this page. On a phone, open
+        this page in your wallet app&apos;s built-in browser.
       </p>
     );
   }

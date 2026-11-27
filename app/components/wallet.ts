@@ -3,8 +3,10 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * The visitor's own Solana wallet (Phantom, Solflare, Backpack), found through the Wallet Standard that
- * browser wallets announce themselves with. This page never sees a key: it asks the wallet to connect
+ * The visitor's own Solana wallet, found through the Wallet Standard that browser wallets announce themselves
+ * with: Phantom, MetaMask (its Solana accounts), Solflare, Backpack, Coinbase Wallet, Trust, OKX and any other
+ * that follows it show up without this app naming them. Payments here are in USDC on Solana, so an
+ * Ethereum-only connector (RainbowKit, wagmi) does not apply: it cannot sign a Solana transaction. This page never sees a key: it asks the wallet to connect
  * (which gives an address) and, at the approval stop, to sign one transaction the server prepared.
  */
 
@@ -166,10 +168,12 @@ export function useWallet(): WalletState {
   );
 }
 
+const DECLINED = "You declined the request in your wallet.";
+
 /** What a wallet says when the visitor closes its window or presses Reject, in this app's words. */
 function reasonOf(e: unknown): string {
   const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-  if (/reject|denied|declin|cancel|closed/i.test(text)) return "You declined the request in your wallet.";
+  if (/reject|denied|declin|cancel|closed/i.test(text)) return DECLINED;
   return text ? `Your wallet said: ${text.slice(0, 200)}` : "Your wallet did not answer.";
 }
 
@@ -182,11 +186,16 @@ export async function connectWallet(name: string): Promise<string | null> {
   try {
     const { accounts } = await connect.connect();
     adopt(w, accounts);
-    if (!account) return "The wallet shared no Solana account.";
+    // MetaMask and Coinbase Wallet hold Ethereum accounts first; a Solana account has to exist in the wallet to pay here
+    if (!account) return `${name} shared no Solana account. Add or select a Solana account in the wallet, then connect again.`;
     remember(name);
     return null;
   } catch (e) {
-    return reasonOf(e);
+    const said = reasonOf(e);
+    // Declined is the visitor's own choice. Anything else came from inside the wallet (a wallet that is locked,
+    // not set up, or has no Solana account can fail with an error of its own): say what to check, and keep its words.
+    if (said === DECLINED) return said;
+    return `${name} could not connect. Open ${name}, unlock it and check that it has a Solana account, then try again. (${said})`;
   } finally {
     set({ connecting: null });
   }
