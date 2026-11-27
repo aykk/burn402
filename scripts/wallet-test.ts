@@ -8,7 +8,8 @@ import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getCreateAssociatedToken
 import { address, appendTransactionMessageInstructions, createKeyPairSignerFromBytes, createTransactionMessage, getBase64EncodedWireTransaction, getTransactionDecoder, pipe, setTransactionMessageFeePayerSigner, setTransactionMessageLifetimeUsingBlockhash, signTransactionMessageWithSigners, type Blockhash } from "@solana/kit";
 import { base58Decode } from "../lib/x402/client";
 
-const APP = "http://127.0.0.1:3000";
+/** The running app; APP_URL points the test at another local copy (a dev server on another port). */
+const APP = /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}$/.test(process.env.APP_URL ?? "") ? process.env.APP_URL! : "http://127.0.0.1:3000";
 const RPC = "https://api.devnet.solana.com";
 const MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 

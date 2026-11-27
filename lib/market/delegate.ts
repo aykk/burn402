@@ -42,6 +42,13 @@ import type { MarketId } from "./types";
  */
 
 const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+/** What a wallet adds of its own before it signs: a priority fee (compute budget) and Phantom's safety checks (Lighthouse). */
+const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
+const LIGHTHOUSE_PROGRAM = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
+/** The only programs an approval may call. Anything else could move the wallet's funds some other way. */
+const APPROVAL_PROGRAMS = new Set<string>([TOKEN_PROGRAM_ADDRESS, MEMO_PROGRAM, COMPUTE_BUDGET_PROGRAM, LIGHTHOUSE_PROGRAM]);
+/** The approval, its note, and room for a wallet's own few. */
+const MAX_APPROVAL_INSTRUCTIONS = 8;
 const USDC_DECIMALS = 6;
 /** The x402 exact scheme's own numbers for a token transfer (the facilitator checks them). */
 const COMPUTE_UNIT_LIMIT = 20_000;
@@ -183,10 +190,13 @@ export async function buildApproval(rpc: Rpc, ask: ApprovalAsk): Promise<string>
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 /**
- * Checks what the wallet sent back before it is put on chain: it is signed by the visitor's wallet, which
- * also pays its fee; it carries this run's note; and the only thing it does with tokens is approve exactly
- * `atomic` of the market's USDC, from the wallet's own account, to `delegate`. A wallet may add its own
- * instructions (a priority fee, its safety checks); a second token instruction is refused.
+ * Checks what the wallet sent back before it is put on chain. The server relays this transaction, so it
+ * must be exactly an approval and nothing else:
+ *  - signed by the visitor's wallet, the only signer, which also pays the fee;
+ *  - it calls only the token program (once: approve exactly `atomic` of the market's USDC, from the
+ *    wallet's own account, to `delegate`), the memo program (this run's note), and what a wallet adds of
+ *    its own, a priority fee and Phantom's safety checks. Any other program is refused: it could move
+ *    the wallet's funds by another route.
  */
 export function checkSignedApproval(signedBase64: string, ask: ApprovalAsk & { account: string }): { ok: true; wire: string } | { ok: false; error: string } {
   const bad = (error: string) => ({ ok: false as const, error });
@@ -204,6 +214,9 @@ export function checkSignedApproval(signedBase64: string, ask: ApprovalAsk & { a
     if ("addressTableLookups" in message && Array.isArray(message.addressTableLookups) && message.addressTableLookups.length > 0) return bad("the transaction uses lookup tables, which this app does not read");
     const keys = message.staticAccounts.map(String);
     if (keys[0] !== ask.owner) return bad("your wallet must pay the approval's network fee");
+    if (message.header.numSignerAccounts !== 1) return bad("the approval must be signed by your wallet alone");
+    if (message.instructions.length > MAX_APPROVAL_INSTRUCTIONS) return bad("the transaction holds more instructions than an approval needs");
+    if (!message.instructions.every((i) => APPROVAL_PROGRAMS.has(keys[i.programAddressIndex]))) return bad("the transaction does something besides the approval");
 
     const token = message.instructions.filter((ix) => keys[ix.programAddressIndex] === TOKEN_PROGRAM_ADDRESS);
     if (token.length !== 1) return bad("the transaction must hold exactly one token instruction, the approval");

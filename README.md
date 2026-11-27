@@ -84,6 +84,15 @@ The real market and the test seller's own API stay owner-only: they answer on `h
 
 The tunnel is started once and reused, so running `npm run public` again (to pick up a change) keeps the same address. A watchdog closes the tunnel three minutes after the app is gone, so the address never reaches anything else that starts on port 3000; the launcher also refuses to start while another program holds that port. `npm run public:stop` takes the app and the tunnel down at once; the next start gets a new address. Cloudflare limits how often a free tunnel can be created, so the launcher waits and retries when it is refused. To use a host name of your own instead, put it in `BURN402_PUBLIC_HOSTS` (comma separated) and set `BURN402_TEST_SELLER=1` for a production build.
 
+### How the public site is kept apart
+
+- **Owner or public.** A request is the owner's only when it is addressed to the local name and shows no sign of having been forwarded: no Cloudflare header, no `Forwarded`, `Via` or `X-Real-IP`, and no address in `X-Forwarded-For` that is not this computer. **Never put a reverse proxy that rewrites the Host header to the local name in front of this app** (nginx's default `proxy_pass` does): its visitors would look like the owner. The Cloudflare launcher does not do this.
+- **Sessions.** A public visitor's session cookie carries the server's signature, so an id a visitor made up is not a session. The launcher makes a fresh signing key (`BURN402_SESSION_SECRET`) on every start; set one yourself if you run it another way.
+- **Other websites.** Writes must come from the app's own page: a foreign Origin, or a request the browser marks as cross-site, is refused, by the proxy and again by each route.
+- **What a page may load.** A content security policy lets pages load from and talk to this site only, and nothing may frame it.
+- **Errors.** Error text sent to a public visitor never names a folder on this computer.
+- **The tunnel.** A watchdog closes it at once if anything but this app is listening on port 3000, and three minutes after the app is gone.
+
 ## Layout
 
 | Path | What lives there |

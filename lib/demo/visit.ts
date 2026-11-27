@@ -2,8 +2,18 @@ import { headersOf, visitorOf, type Visitor } from "../market/access";
 import type { Runtime } from "./runtime";
 import type { DemoSession } from "./script";
 import { getRuntime, getSession, NoSessionError, peekSession, SessionLimitError } from "./session";
+import { withoutPaths } from "./snapshot";
 
 export type Visit = { v: Visitor; rt: Runtime; session: DemoSession | null };
+
+/**
+ * An error's text as the asking visitor may see it. The owner gets it whole. Anyone else never learns a
+ * folder on this computer: an error raised deep in the app (a missing file, a failed start) can name one.
+ */
+export function errorFor(v: Visitor | null, error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return v?.kind === "owner" ? text : withoutPaths(text);
+}
 
 /**
  * Who is asking and their session, for a route. `create: false` never makes a session for a public
@@ -19,6 +29,6 @@ export async function visit(request: Request, opts: { create: boolean }): Promis
   } catch (error) {
     if (error instanceof SessionLimitError) return Response.json({ error: error.message }, { status: 503 });
     if (error instanceof NoSessionError) return Response.json({ error: error.message }, { status: 400 });
-    return Response.json({ error: (error as Error).message }, { status: 503 });
+    return Response.json({ error: errorFor(v, error) }, { status: 503 });
   }
 }

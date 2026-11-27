@@ -1,4 +1,4 @@
-import { visit } from "@/lib/demo/visit";
+import { errorFor, visit } from "@/lib/demo/visit";
 import { dismissOpenPurchase, visibleOpenPurchases } from "@/lib/market/recover";
 import { checkRequest, marketJournal } from "@/lib/market/session";
 
@@ -34,6 +34,6 @@ export async function POST(request: Request) {
     if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
     return Response.json(result.message ? { ok: true, message: result.message } : { ok: true });
   } catch (error) {
-    return Response.json({ error: (error as Error).message }, { status: 400 });
+    return Response.json({ error: errorFor(who.v, error) }, { status: 400 });
   }
 }

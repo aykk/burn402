@@ -122,4 +122,5 @@ if ! { [ -s "$WATCHFILE" ] && kill -0 "$(cat "$WATCHFILE")" 2>/dev/null; }; then
 fi
 
 # caffeinate keeps the Mac awake while the site is up
-BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1
+# session cookies are signed with a key made fresh for this launch (sessions live in memory, so nothing is lost)
+BURN402_SESSION_SECRET="$(openssl rand -hex 32)" BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1

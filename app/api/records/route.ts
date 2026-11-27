@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { parseRootKeys } from "@/lib/ans";
 import { APP_NAME, CONVERSATION_SCHEMA, SCHEMA, TRANSACTION_SCHEMA, TRANSACTION_TYP, TurboGateway, type Network } from "@/lib/anchor";
 import { getRuntime } from "@/lib/demo/session";
+import { withoutPaths } from "@/lib/demo/snapshot";
+import { accessVerdict, headersOf } from "@/lib/market/access";
 import { isOwner } from "@/lib/market/session";
 import { clusterOf } from "@/lib/market/record";
 import { recordWords } from "@/app/components/record-words";
@@ -113,6 +115,9 @@ function toDisk(network: Network, at: number, body: unknown): void {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  // the proxy applies this rule too; the route keeps its own check
+  const refused = accessVerdict(request.method, url.pathname, headersOf(request.headers));
+  if (refused) return Response.json({ error: refused }, { status: 403 });
   const network = (url.searchParams.get("network") === "testnet" ? "testnet" : "production") as Network;
   const asked = url.searchParams.get("fqdn");
   // only the owner may ask for one agent's records: each distinct name is a fresh search on Arweave
@@ -226,7 +231,7 @@ async function load(network: Network, fqdn: string | null): Promise<{ status: nu
             steps.push({ name: "signature", ok: true, detail: `signed by ${checkedJws.iss}, key sealed in the ANS transparency log` });
           }
         } catch (error) {
-          steps.push({ name: "signature", ok: false, detail: (error as Error).message });
+          steps.push({ name: "signature", ok: false, detail: withoutPaths((error as Error).message) });
         }
         return {
           id: item.id,
@@ -276,6 +281,7 @@ async function load(network: Network, fqdn: string | null): Promise<{ status: nu
     const shown = checked.filter((r) => !(network === "testnet" && r.kind === "verdict" && r.outcome.tone === "good" && TEST_FIXTURE.test(r.subject ?? "")));
     return { status: 200, body: { network, fqdn, gatewayUrl: gateway.gatewayUrl, query, readAt: Date.now(), records: shown } };
   } catch (error) {
-    return { status: 502, body: { network, fqdn, error: (error as Error).message } };
+    // this answer is cached and shared by every visitor, so it never names a folder on this computer
+    return { status: 502, body: { network, fqdn, error: withoutPaths((error as Error).message) } };
   }
 }
