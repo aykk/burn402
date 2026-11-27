@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { marketJournal, payerFor, sellerFor } from "../lib/market/session";
 import type { MarketId } from "../lib/market/types";
@@ -9,6 +9,13 @@ import type { MarketId } from "../lib/market/types";
  * them: always on the test market, on the real market only with --yes-destroy. Prints ids,
  * plans, regions and statuses; never keys.
  */
+
+// While the public launcher is running, the test seller's API answers the owner only: use the key the launcher wrote.
+try {
+  process.env.BURN402_OWNER_TOKEN ??= readFileSync(join(process.cwd(), ".burn402", "owner-token"), "utf8").trim();
+} catch {
+  // no launcher is running: the local name is the owner
+}
 
 const say = (line: string) => process.stdout.write(`${line}\n`);
 

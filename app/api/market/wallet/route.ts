@@ -1,3 +1,4 @@
+import { publicLimit } from "@/lib/demo/limits";
 import { errorFor, visit } from "@/lib/demo/visit";
 import { checkRequest } from "@/lib/market/session";
 
@@ -18,6 +19,9 @@ export async function POST(request: Request) {
   const who = await visit(request, { create: false });
   if (who instanceof Response) return who;
   if (!who.session) return Response.json({ error: "that run is not the current run" }, { status: 400 });
+  // each of these asks the Solana node: a public visitor gets a fair number an hour
+  const limited = publicLimit("wallet", who.v);
+  if (limited) return Response.json({ error: limited }, { status: 429 });
   try {
     if (body.revoke === true) {
       if (typeof body.signedTransaction === "string") {

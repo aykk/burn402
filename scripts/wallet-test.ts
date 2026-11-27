@@ -3,6 +3,7 @@
 // The stand-in wallet (.burn402/keys/standin-wallet.json, a throwaway devnet keypair) needs 0.005 devnet SOL from
 // https://faucet.solana.com. Usage, with the app running: npm run wallet:test [-- minutes to wait for the SOL]
 // Add `revoke` to test taking back an approval left unused: npm run wallet:test -- 0 revoke
+// Add `visitor` to run it as a public visitor through the public address: npm run wallet:test -- 0 visitor
 import { readFileSync } from "node:fs";
 import { createPrivateKey, sign } from "node:crypto";
 import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync, getTransferCheckedInstruction } from "@solana-program/token";
@@ -40,8 +41,34 @@ async function confirmed(signature: string) {
   }
   throw new Error("transaction was not confirmed in a minute");
 }
+/** While the public launcher is running, acting as the owner takes the key it wrote to .burn402/owner-token. */
+const ownerKey = (() => {
+  try {
+    return readFileSync(".burn402/owner-token", "utf8").trim();
+  } catch {
+    return "";
+  }
+})();
+const asOwner: Record<string, string> = ownerKey ? { "x-b402-owner": ownerKey } : {};
+
+/**
+ * `visitor` on the command line: act as a PUBLIC visitor instead, through the public address the launcher
+ * wrote to .burn402/public-host. No owner key; the session cookie the site hands out is kept and sent back,
+ * and writes carry the site's own Origin, as a browser's would.
+ */
+const VISITOR = process.argv.includes("visitor");
+const PUBLIC = VISITOR ? `https://${readFileSync(".burn402/public-host", "utf8").trim()}` : null;
+let cookie = "";
+
 async function app(path: string, body?: unknown): Promise<any> {
-  const r = await fetch(`${APP}${path}`, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (PUBLIC) {
+    const headers: Record<string, string> = { ...(cookie ? { Cookie: cookie } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json", Origin: PUBLIC }) };
+    const r = await fetch(`${PUBLIC}${path}`, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
+    const set = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-b402_sid="));
+    if (set) cookie = set;
+    return { status: r.status, ...(await r.json().catch(() => ({}))) };
+  }
+  const r = await fetch(`${APP}${path}`, body === undefined ? { headers: asOwner } : { method: "POST", headers: { "Content-Type": "application/json", ...asOwner }, body: JSON.stringify(body) });
   return { status: r.status, ...(await r.json().catch(() => ({}))) };
 }
 /** What a browser wallet does: sign the transaction's message with its key and fill its own slot. */
@@ -94,6 +121,10 @@ async function main() {
   say("USDC", Number(funds!.atomic) / 1e6, "approved to", funds!.delegate ?? "nobody");
 
   // 2. the app's own flow, as the page drives it
+  if (PUBLIC) {
+    say("acting as a public visitor through", PUBLIC);
+    await app("/api/demo/state"); // the first visit is given a session
+  }
   await app("/api/demo/reset", {});
   const started = await app("/api/market/run", { market: "test", need: { kind: "cpu", vcpus: 1, ramGb: 1, vramGb: 0, hours: 1, regions: [], allowSpot: false }, budgetUsd: 1, rateUsdHr: 0.05, askBeforePaying: false, wallet: visitor.address });
   if (!started.run) throw new Error(`the run did not start: ${started.error}`);

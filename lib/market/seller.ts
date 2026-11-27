@@ -1,6 +1,7 @@
 import { decodePaymentResponseHeader } from "@x402/core/http";
 import type { PaymentRequirements } from "@x402/core/types";
 import type { Signer } from "./auth";
+import { OWNER_HEADER, ownerToken } from "./access";
 import { authHeaders } from "./auth";
 import { parsePlansFeed } from "./catalog";
 import type { Candidate } from "./choose";
@@ -141,7 +142,18 @@ export class SellerClient {
     readonly config: SellerConfig,
     deps: { fetch?: typeof fetch; signer?: Signer | null; now?: () => number; sleep?: (ms: number) => Promise<void>; timeouts?: { read: number; paid: number } } = {},
   ) {
-    this.fetch = deps.fetch ?? ((input, init) => fetch(input, init));
+    // The test seller is this app's own API, open to the owner only: the app's calls to it carry the owner key.
+    // The key is never sent to another host.
+    const own = config.id === "testseller" && /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(`${config.baseUrl}/`);
+    this.fetch =
+      deps.fetch ??
+      ((input, init) => {
+        const key = own ? ownerToken() : null;
+        if (key === null) return fetch(input, init);
+        const headers = new Headers(init?.headers);
+        headers.set(OWNER_HEADER, key);
+        return fetch(input, { ...init, headers });
+      });
     this.signer = deps.signer ?? null;
     this.now = deps.now ?? Date.now;
     this.timeouts = deps.timeouts ?? { read: READ_TIMEOUT_MS, paid: PAID_TIMEOUT_MS };

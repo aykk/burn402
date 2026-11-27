@@ -1,4 +1,5 @@
 import { withoutPaths } from "@/lib/demo/snapshot";
+import { publicReal } from "@/lib/market/access";
 import { checkRequest, isOwner, parsePricesInput, planPreview } from "@/lib/market/session";
 
 /**
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   if (!input.ok) return Response.json({ error: input.error }, { status: 400 });
   const { limits } = input.value;
   if (!limits) return Response.json({ error: "send the budget and the hourly limit" }, { status: 400 });
-  if (input.value.market !== "test" && !isOwner(request)) return Response.json({ error: "The public demo lists plans on the test market only." }, { status: 403 });
+  if (input.value.market !== "test" && !isOwner(request) && !publicReal()) return Response.json({ error: "The public demo lists plans on the test market only." }, { status: 403 });
   try {
     return Response.json({ preview: await planPreview({ ...input.value, limits }) });
   } catch (error) {

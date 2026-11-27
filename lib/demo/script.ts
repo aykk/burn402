@@ -124,6 +124,9 @@ export class DemoSession {
       askBeforePaying: input.askBeforePaying,
       agent,
       keyDir: sshKeyDir(rt.config.root),
+      sshPublicKey: input.sshPublicKey ?? undefined,
+      // every public visitor's machine belongs to the one agent wallet: never adopt one by plan and region alone
+      adopt: this.kind === "owner",
       findPayment: findPaymentFor(input.market),
       onRecord: (record) => {
         void rt.storeTransaction(toTransactionRecord(record, { subject: agent.ansName, mandate, mandateJti: jti, cluster: clusterForMarket(input.market) }), {

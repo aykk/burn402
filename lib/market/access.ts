@@ -32,6 +32,8 @@ export type AccessHeaders = {
   proxied: boolean;
   /** `Sec-Fetch-Site`, which browsers set and page scripts cannot change. */
   fetchSite: string | null;
+  /** The owner key sent as a header (scripts and the app's own calls to itself); a browser sends it as a cookie. */
+  ownerKey: string | null;
 };
 
 export function headersOf(h: { get(name: string): string | null }): AccessHeaders {
@@ -44,7 +46,61 @@ export function headersOf(h: { get(name: string): string | null }): AccessHeader
     forwardedFor: h.get("x-forwarded-for"),
     proxied: h.get("forwarded") !== null || h.get("via") !== null || h.get("x-real-ip") !== null,
     fetchSite: h.get("sec-fetch-site"),
+    ownerKey: h.get(OWNER_HEADER),
   };
+}
+
+/**
+ * The owner key. When BURN402_OWNER_TOKEN is set (the public launcher makes one per start), a request is
+ * the owner's only if it also carries that key, as the `b402_owner` cookie the launcher's link sets or as
+ * the `x-b402-owner` header. Looking local is then not enough: a reverse proxy that rewrites the Host
+ * header makes every visitor look local, and none of them has the key. Without the variable (plain
+ * `npm run dev`, where nothing is public) the local name alone is the owner, as before.
+ */
+export const OWNER_COOKIE = "b402_owner";
+export const OWNER_HEADER = "x-b402-owner";
+
+export function ownerToken(env: Env = process.env): string | null {
+  const t = env.BURN402_OWNER_TOKEN;
+  return typeof t === "string" && t.length >= 32 ? t : null;
+}
+
+const cookieValue = (cookie: string | null, name: string): string | null => {
+  for (const part of (cookie ?? "").split(";")) {
+    const at = part.indexOf("=");
+    if (at > 0 && part.slice(0, at).trim() === name) return part.slice(at + 1).trim();
+  }
+  return null;
+};
+
+const sameText = (a: string, b: string): boolean => {
+  const x = Buffer.from(a, "utf8");
+  const y = Buffer.from(b, "utf8");
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
+/** True when no owner key is configured, or the request carries it. */
+export function hasOwnerKey(h: Pick<AccessHeaders, "cookie" | "ownerKey">, env: Env = process.env): boolean {
+  const token = ownerToken(env);
+  if (token === null) return true;
+  const given = h.ownerKey ?? cookieValue(h.cookie, OWNER_COOKIE);
+  return given !== null && sameText(given, token);
+}
+
+/** True when `candidate` is the configured owner key (the launcher's link hands it over once). */
+export function isOwnerToken(candidate: string | null, env: Env = process.env): boolean {
+  const token = ownerToken(env);
+  return token !== null && candidate !== null && sameText(candidate, token);
+}
+
+/** True when the request was addressed to the app's local name and nothing forwarded it. */
+export function isLocalDirect(h: AccessHeaders, env: Env = process.env): boolean {
+  return localHosts(env).has((h.host ?? "").toLowerCase()) && !forwarded(h);
+}
+
+/** True when the owner has opened the real market to public visitors, who then pay from their own wallets. */
+export function publicReal(env: Env = process.env): boolean {
+  return env.BURN402_PUBLIC_REAL === "1";
 }
 
 /** The public host names this app answers on, from BURN402_PUBLIC_HOSTS (comma separated, no scheme or port). */
@@ -125,8 +181,9 @@ export const OWNER: Visitor = { kind: "owner" };
 /** Null when the request is neither the owner's nor addressed to a listed public host. */
 export function visitorOf(h: AccessHeaders, env: Env = process.env): Visitor | null {
   const host = (h.host ?? "").toLowerCase();
-  // the local name through a tunnel is never the owner: only a request made on this computer is
-  if (localHosts(env).has(host)) return forwarded(h) ? null : OWNER;
+  // the local name through a tunnel is never the owner: only a request made on this computer is, and when an
+  // owner key is configured, only one that carries it
+  if (localHosts(env).has(host)) return forwarded(h) || !hasOwnerKey(h, env) ? null : OWNER;
   if (publicHosts(env).has(host)) {
     const ip = h.cfIp ?? firstHop(h.forwardedFor);
     return { kind: "public", host, ip: ip !== null && IP_RE.test(ip) ? ip : null, sid: sessionIdFrom(h.cookie, env) };
@@ -137,13 +194,17 @@ export function visitorOf(h: AccessHeaders, env: Env = process.env): Visitor | n
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /** What only the owner may reach: the test seller's own API (this app calls it from this computer; visitors never do). */
-const OWNER_ONLY = ["/api/testseller"];
+const OWNER_ONLY = ["/api/testseller", "/api/owner"];
+/** Where the launcher's link hands the owner key to the browser: reachable on this computer before the key is held. */
+export const OWNER_ENTRY = "/api/owner";
+export const NEEDS_OWNER_KEY = "open this page from the link the launcher printed: it carries this computer's owner key";
 
 export const NOT_PUBLIC = "This is not available on the public demo.";
 /** The most a public visitor may set as a budget: they all spend one devnet wallet. */
 export const PUBLIC_MAX_BUDGET_USD = 1;
-/** A connected wallet is owner-only until a payment made that way has been proven against the hosted facilitator. */
-export const PUBLIC_NO_WALLET = "Paying from your own wallet is not open on the public demo yet.";
+/** On the real market a public visitor always pays from their own wallet and logs in with their own key. */
+export const PUBLIC_REAL_NEEDS_WALLET = "On the real market you pay from your own wallet. Choose My wallet and connect it.";
+export const PUBLIC_REAL_NEEDS_KEY = "Add your SSH public key: it is how you log in to the machine you pay for.";
 
 export const PUBLIC_TEST_ONLY = "The public demo runs on the test market only: test money and simulated machines.";
 
@@ -153,8 +214,10 @@ export const PUBLIC_TEST_ONLY = "The public demo runs on the test market only: t
  * Public: a listed host, nothing owner-only, and every write must carry this site's own https Origin.
  */
 export function accessVerdict(method: string, pathname: string, h: AccessHeaders, env: Env = process.env): string | null {
+  // the one address that must answer before the owner key is held: it is how the browser gets it
+  if (pathname === OWNER_ENTRY && method.toUpperCase() === "GET" && isLocalDirect(h, env)) return null;
   const v = visitorOf(h, env);
-  if (!v) return `this app only answers on ${[...localHosts(env), ...publicHosts(env)].join(" or ")}`;
+  if (!v) return isLocalDirect(h, env) ? NEEDS_OWNER_KEY : `this app only answers on ${[...localHosts(env), ...publicHosts(env)].join(" or ")}`;
   const write = !READS.has(method.toUpperCase());
   if (v.kind === "owner") {
     if (write && h.origin !== null && !localOrigins(env).has(h.origin)) return "requests from other websites are not allowed";

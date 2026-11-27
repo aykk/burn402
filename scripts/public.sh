@@ -2,6 +2,7 @@
 # Puts the app on the internet through a Cloudflare quick tunnel.
 #
 #   npm run public        start (or restart) the site
+#   npm run public -- --real   the same, and visitors may rent real machines from their own wallets
 #   npm run public:stop   take the site and the tunnel down
 #
 # Public visitors get the test market only (test money, simulated machines), each in a private
@@ -14,6 +15,16 @@
 # Needs: cloudflared (brew install cloudflared) and .env.local set up. Starts the ANS services if they are not running.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# --real: visitors may also rent REAL machines, paying from their own wallets (never yours). Off unless asked for:
+# the machines are rented under this app's agent identity, and a visitor gets full control of theirs.
+PUBLIC_REAL=0
+for arg in "$@"; do
+  case "$arg" in
+    --real) PUBLIC_REAL=1 ;;
+    *) echo "unknown option: $arg (the only option is --real)"; exit 1 ;;
+  esac
+done
 
 command -v cloudflared >/dev/null || { echo "cloudflared is not installed: brew install cloudflared"; exit 1; }
 
@@ -107,6 +118,11 @@ fi
 echo
 echo "  public site:  https://$HOST"
 echo "  your own:     http://127.0.0.1:3000   (real market included)"
+if [ "$PUBLIC_REAL" = "1" ]; then
+  echo "  REAL MARKET OPEN TO VISITORS: they rent real machines, paid from their own wallets."
+else
+  echo "  visitors:     test market only (start with: npm run public -- --real to let them rent real machines from their own wallets)"
+fi
 echo
 echo "  Closing this window stops the app. The tunnel closes by itself $((GRACE / 60)) minutes later;"
 echo "  start again within that time (npm run public) to keep the same address."
@@ -122,5 +138,18 @@ if ! { [ -s "$WATCHFILE" ] && kill -0 "$(cat "$WATCHFILE")" 2>/dev/null; }; then
 fi
 
 # caffeinate keeps the Mac awake while the site is up
+# The owner key: while the site is public, a request counts as yours only if it carries this key. Looking
+# local is not enough (a proxy can make anyone look local). It is made fresh for every start, kept in a file
+# only you can read (scripts use it), and handed to your browser by the link below.
+OWNER_TOKEN="$(openssl rand -hex 32)"
+OWNER_FILE=.burn402/owner-token
+( umask 077; printf '%s\n' "$OWNER_TOKEN" > "$OWNER_FILE" )
+OWNER_LINK="http://127.0.0.1:3000/api/owner?token=$OWNER_TOKEN"
+echo "  Your own page opens by itself in a moment. If it does not, open this link (it carries your owner key):"
+echo "  $OWNER_LINK"
+echo
+# opens once the app answers; the app itself replaces this shell just below
+( for _ in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:3000/ && break; sleep 1; done; open "$OWNER_LINK" >/dev/null 2>&1 ) &
+
 # session cookies are signed with a key made fresh for this launch (sessions live in memory, so nothing is lost)
-BURN402_SESSION_SECRET="$(openssl rand -hex 32)" BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1
+BURN402_OWNER_TOKEN="$OWNER_TOKEN" BURN402_PUBLIC_REAL="$PUBLIC_REAL" BURN402_SESSION_SECRET="$(openssl rand -hex 32)" BURN402_PUBLIC_HOSTS="$HOST" BURN402_TEST_SELLER=1 exec caffeinate -i npx next start -H 127.0.0.1

@@ -269,3 +269,19 @@ Also added: a content security policy (`default-src 'self'`, same-origin connect
 The lowest firm quote wins, compared on the exact amount. The real seller quotes in whole cents for small machines, so the three cheapest 1 vCPU plans all came back at exactly $0.0100, and the agent kept the first in the chooser's order: the plan with the lowest provider list price, which is the weakest of the three. Now a tie goes to the better machine (`betterMachine` in `lib/market/choose.ts`): more vCPUs, then more memory, then more GPU memory, then on-demand over interruptible, then the higher provider list price, then the plan name. The chooser ranks equal estimates the same way, a fallback after a failed purchase uses the same order, and the run's view carries a `choice` sentence the page shows when the lowest quote was shared.
 
 Not changed: the agent still asks for at most three firm quotes (each takes the real seller 3 to 18 seconds). A fourth plan that would also have quoted the same cent is not asked.
+
+## Addendum 2026-11-27: the plan list, the owner key, and public wallet payments
+
+**Plan list.** While there is no run, the right column lists the plans that fit the form's filters and limits, in the order the agent would ask them, and refreshes as the filters change (350 ms after the last change). `POST /api/market/plans` answers from the seller's price list, read at most once a minute per market and shared by every visitor (`cachedCatalog`). Estimates only: the order endpoint is never called and nothing is paid.
+
+**Owner key (closes F1).** `BURN402_OWNER_TOKEN`, 64 hex characters made by the launcher on every start. When it is set, a local, not-forwarded request is the owner only if it carries the key: the `b402_owner` cookie (HttpOnly, SameSite=Strict) or the `x-b402-owner` header. `GET /api/owner?token=…` hands the key to the browser: it answers on this computer only, stores the cookie and redirects to `/`. The app's own calls to its test seller carry the header (`SellerClient`'s default fetch, for the local test seller only; never to another host). `scripts/wallet-test.ts` and `scripts/market-sweep.ts` read `.burn402/owner-token`. Without the variable (plain `npm run dev`) the local name alone is the owner.
+
+**Public wallet payments.**
+- *Test market:* a public visitor may pay from their own wallet on devnet (their own devnet USDC and SOL).
+- *Real market:* only when the owner starts with `npm run public -- --real` (`BURN402_PUBLIC_REAL=1`). Then a public run on the real market must be wallet-funded and must bring the visitor's SSH public key; the budget cap stays $1. A visitor never spends the agent's wallet.
+- *SSH key:* one OpenSSH public key line (`ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp*`), checked by `sshPublicKeyOf` on the server and the same pattern in the form. With it the run makes no key on this computer and the login line is `ssh root@<ip>`.
+- *Shared agent wallet:* every public machine belongs to the one agent wallet, so a public run never adopts a machine by plan and region after an unclear payment (`adopt: false`); it ends as an open purchase the visitor can see.
+- *Limits:* preparing, sending or revoking an approval is counted per session, per address and overall (`wallet` in `lib/demo/limits.ts`), since each asks the Solana node.
+- *Refunds:* none by this site. The money goes from the visitor's wallet to the seller; the approval stop says so before the visitor approves, and an unclear payment stays listed with its transaction.
+
+**Why `--real` is off by default.** The machines are rented under this app's agent identity at the seller, and a visitor has root on theirs. Opening that to strangers is the owner's decision each time the site is started. It also still runs from the owner's computer behind a quick tunnel, so a visitor's page goes away if the computer sleeps (the machine itself runs to the end of its paid time, and the visitor has its address and their own key).

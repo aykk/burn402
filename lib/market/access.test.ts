@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { accessVerdict, headersOf, newSessionId, publicHosts, sessionCookieValue, sessionIdFrom, visitorOf, type AccessHeaders } from "./access";
+import { accessVerdict, hasOwnerKey, headersOf, isLocalDirect, isOwnerToken, newSessionId, publicHosts, publicReal, sessionCookieValue, sessionIdFrom, visitorOf, type AccessHeaders } from "./access";
 
 const env = { BURN402_PUBLIC_HOSTS: "demo.example.com, Another.Example.org ,bad host,http://x.com", BURN402_SESSION_SECRET: "k".repeat(40) };
-const h = (over: Partial<AccessHeaders>): AccessHeaders => ({ host: null, origin: null, cookie: null, cfIp: null, cfRay: null, forwardedFor: null, proxied: false, fetchSite: null, ...over });
+const h = (over: Partial<AccessHeaders>): AccessHeaders => ({ host: null, origin: null, cookie: null, cfIp: null, cfRay: null, forwardedFor: null, proxied: false, fetchSite: null, ownerKey: null, ...over });
 const SID = "0123456789abcdef0123456789abcdef";
 
 describe("public hosts", () => {
@@ -119,5 +119,63 @@ describe("accessVerdict", () => {
   it("an unlisted host is refused whatever it sends", () => {
     expect(accessVerdict("GET", "/api/demo/state", h({ host: "evil.example" }), env)).toMatch(/only answers on/);
     expect(accessVerdict("GET", "/api/demo/state", h({ host: "127.0.0.1:3000", cfIp: "203.0.113.9" }), env)).toMatch(/only answers on/);
+  });
+});
+
+describe("the owner key", () => {
+  const KEY = "o".repeat(64);
+  const keyed = { ...env, BURN402_OWNER_TOKEN: KEY };
+
+  it("without a configured key the local name alone is the owner (plain development)", () => {
+    expect(visitorOf(h({ host: "127.0.0.1:3000" }), env)).toEqual({ kind: "owner" });
+    expect(hasOwnerKey(h({}), env)).toBe(true);
+    // too short to be a key: treated as not configured
+    expect(visitorOf(h({ host: "127.0.0.1:3000" }), { ...env, BURN402_OWNER_TOKEN: "short" })).toEqual({ kind: "owner" });
+  });
+
+  it("with a key, looking local is not enough: a proxy that rewrites the Host makes anyone look local", () => {
+    // exactly what nginx's default proxy_pass sends: the local Host and nothing else
+    expect(visitorOf(h({ host: "127.0.0.1:3000" }), keyed)).toBeNull();
+    expect(accessVerdict("GET", "/api/demo/state", h({ host: "127.0.0.1:3000" }), keyed)).toMatch(/owner key/);
+    expect(accessVerdict("POST", "/api/market/run", h({ host: "127.0.0.1:3000" }), keyed)).toMatch(/owner key/);
+    expect(accessVerdict("GET", "/api/testseller/compute/plans", h({ host: "127.0.0.1:3000" }), keyed)).toMatch(/owner key/);
+  });
+
+  it("the key as a cookie (the browser) or a header (scripts, the app's own calls) is the owner", () => {
+    expect(visitorOf(h({ host: "127.0.0.1:3000", cookie: `x=1; b402_owner=${KEY}` }), keyed)).toEqual({ kind: "owner" });
+    expect(visitorOf(h({ host: "127.0.0.1:3000", ownerKey: KEY }), keyed)).toEqual({ kind: "owner" });
+    expect(headersOf(new Headers({ host: "127.0.0.1:3000", "x-b402-owner": KEY })).ownerKey).toBe(KEY);
+    // a wrong key, a near miss, an empty one
+    for (const bad of ["z".repeat(64), KEY.slice(1), `${KEY}o`, ""]) {
+      expect(visitorOf(h({ host: "127.0.0.1:3000", cookie: `b402_owner=${bad}` }), keyed)).toBeNull();
+      expect(visitorOf(h({ host: "127.0.0.1:3000", ownerKey: bad }), keyed)).toBeNull();
+    }
+  });
+
+  it("the key never makes a forwarded request the owner, and a public visitor is still public", () => {
+    expect(visitorOf(h({ host: "127.0.0.1:3000", ownerKey: KEY, cfRay: "x" }), keyed)).toBeNull();
+    expect(visitorOf(h({ host: "127.0.0.1:3000", ownerKey: KEY, forwardedFor: "127.0.0.1, 203.0.113.9" }), keyed)).toBeNull();
+    expect(visitorOf(h({ host: "demo.example.com", ownerKey: KEY, cfIp: "203.0.113.9" }), keyed)?.kind).toBe("public");
+  });
+
+  it("the address that hands the key over answers on this computer before the key is held, and nowhere else", () => {
+    expect(accessVerdict("GET", "/api/owner", h({ host: "127.0.0.1:3000" }), keyed)).toBeNull();
+    expect(accessVerdict("POST", "/api/owner", h({ host: "127.0.0.1:3000" }), keyed)).toMatch(/owner key/);
+    expect(accessVerdict("GET", "/api/owner", h({ host: "127.0.0.1:3000", cfRay: "x" }), keyed)).not.toBeNull();
+    expect(accessVerdict("GET", "/api/owner", h({ host: "demo.example.com", cfIp: "203.0.113.9" }), keyed)).toBe("This is not available on the public demo.");
+    expect(isLocalDirect(h({ host: "127.0.0.1:3000" }), keyed)).toBe(true);
+    expect(isLocalDirect(h({ host: "127.0.0.1:3000", proxied: true }), keyed)).toBe(false);
+    expect(isLocalDirect(h({ host: "demo.example.com" }), keyed)).toBe(false);
+    expect(isOwnerToken(KEY, keyed)).toBe(true);
+    expect(isOwnerToken("nope", keyed)).toBe(false);
+    expect(isOwnerToken(null, keyed)).toBe(false);
+    expect(isOwnerToken(KEY, env)).toBe(false);
+  });
+
+  it("the real market is open to the public only when the owner said so", () => {
+    expect(publicReal({})).toBe(false);
+    expect(publicReal({ BURN402_PUBLIC_REAL: "0" })).toBe(false);
+    expect(publicReal({ BURN402_PUBLIC_REAL: "true" })).toBe(false);
+    expect(publicReal({ BURN402_PUBLIC_REAL: "1" })).toBe(true);
   });
 });
