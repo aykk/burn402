@@ -451,7 +451,7 @@ export function NeedForm(props: {
                 {publicDemo
                   ? market === "real"
                     ? "Needed: the machine is set up with this key, so only you can log in."
-                    : "Optional here: test machines are simulated and cannot be logged in to."
+                    : "You can skip this on the test market. There is no real machine to log in to."
                   : "Optional. Leave it empty and the app makes a key on this computer."}
               </p>
             </div>
